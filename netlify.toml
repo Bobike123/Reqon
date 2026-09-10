@@ -1,0 +1,8 @@
+# Netlify reads public/_redirects for the SPA fallback; this file only pins the
+# build so a fresh site does not have to be configured by hand.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"

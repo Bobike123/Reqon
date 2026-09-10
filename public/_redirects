@@ -1,0 +1,11 @@
+# SPA fallback for Cloudflare Pages and Netlify (both read this file).
+#
+# Paddock Control is a single-page app: React Router handles /register,
+# /board and the rest in the browser. The host only ever has one real file,
+# index.html, so without this rule a direct visit to
+# https://<site>/register — a refresh, a bookmark, a pasted link — asks the
+# host for a /register file that does not exist and gets a 404.
+#
+# 200 (not 301/302) means "serve index.html but keep the URL", so React Router
+# still sees /register and renders the right screen.
+/*    /index.html   200

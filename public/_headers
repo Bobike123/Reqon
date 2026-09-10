@@ -1,0 +1,33 @@
+# Response headers for Cloudflare Pages and Netlify (both read this file).
+# Vercel users: the equivalent goes in vercel.json under "headers".
+
+/*
+  # Paddock Control is an authenticated internal tool. It should never be
+  # embedded in someone else's page — that is how clickjacking works.
+  X-Frame-Options: DENY
+  # Do not let a browser guess a file is JavaScript when we said it is not.
+  X-Content-Type-Options: nosniff
+  # Do not leak the club's internal URLs to third-party sites.
+  Referrer-Policy: strict-origin-when-cross-origin
+  # The app needs none of these.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# index.html must never be cached: it names the hashed asset files, so a stale
+# copy points at chunks that no longer exist after a deploy.
+/index.html
+  Cache-Control: no-cache
+
+# Asset filenames contain a content hash, so a given URL's contents can never
+# change. Cache them hard.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# A Content-Security-Policy is worth adding once the club has picked a
+# Supabase project, because it must name that exact origin. Start from:
+#
+#   Content-Security-Policy: default-src 'self'; connect-src 'self'
+#     https://<project-ref>.supabase.co wss://<project-ref>.supabase.co;
+#     img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'
+#
+# Test it against every screen before enabling — a wrong connect-src breaks
+# sign-in and realtime silently.
