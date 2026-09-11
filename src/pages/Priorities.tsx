@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
@@ -59,7 +60,7 @@ export default function Priorities() {
 
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-4xl">
+      <main id="main-content" tabIndex={-1} className={pageMain('wide')}>
         <h1 className="text-xl font-semibold text-slate-900">Priorities</h1>
         <div className="mt-4">
           <ErrorState
@@ -81,7 +82,7 @@ export default function Priorities() {
   )
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-4xl">
+    <main id="main-content" tabIndex={-1} className={pageMain('wide')}>
       <PageHeader
         title="Priorities"
         description="Everything that bites first: blocked rules, score-killers, overdue tasks, penalties and starred items."
@@ -111,12 +112,16 @@ export default function Priorities() {
 
       {rows.length > 0 && (
       <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white" data-tutorial="priorities-list">
-        {rows.map((row) => (
+        {rows.map((row, index) => (
           <li
             key={`${row.kind}-${row.clause_key ?? row.ref}`}
-            className="px-3 py-2.5"
+            // On a wide screen the owner sits at the right-hand end of the row,
+            // so the list reads like a table: what, why, whose.
+            className="px-3 py-2.5 lg:flex lg:items-start lg:gap-6"
             data-testid={`priority-${row.clause_key ?? row.ref}`}
+            data-tutorial={index === 0 ? 'priority-row' : undefined}
           >
+            <div className="min-w-0 lg:flex-1">
             <div className="flex flex-wrap items-baseline gap-2">
               <span
                 className={`rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
@@ -149,8 +154,9 @@ export default function Priorities() {
             </div>
 
             <p className="mt-1 text-sm text-slate-800">{row.title}</p>
+            </div>
 
-            <div className="mt-1.5 flex items-center gap-2">
+            <div className="mt-1.5 flex items-center gap-2 lg:mt-0 lg:shrink-0">
               <label
                 className="text-xs text-slate-600"
                 htmlFor={`owner-${row.clause_key ?? row.ref}`}

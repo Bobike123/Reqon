@@ -18,7 +18,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo) {
     // Left in on purpose: when a student reports "it went blank", the console
     // is the only evidence anyone will have.
-    console.error('Paddock Control crashed while rendering:', error, info.componentStack)
+    console.error('Reqon crashed while rendering:', error, info.componentStack)
   }
 
   render() {
@@ -29,8 +29,8 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-6">
           <h1 className="text-lg font-semibold text-slate-900">Something broke on this screen</h1>
           <p className="mt-2 text-sm text-slate-700">
-            The rest of the app still works. Nothing you had saved is lost — Paddock
-            Control writes straight to the database as you go.
+            The rest of the app still works. Nothing you had saved is lost — Reqon
+            writes straight to the database as you go.
           </p>
           <p role="alert" className="mt-3 rounded border border-slate-200 bg-slate-50 p-2 font-mono text-xs text-slate-700">
             {this.state.error.message}

@@ -58,11 +58,12 @@ function ClauseRowInner({
 
   return (
     <li
-      className={`border-b border-slate-200 px-3 py-3 sm:px-4 ${parked ? 'bg-slate-50' : ''}`}
+      className={`border-b border-slate-200 px-3 py-3 sm:px-4 xl:grid xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-start xl:gap-x-8 ${parked ? 'bg-slate-50' : ''}`}
       data-clause-key={clause.clause_key}
       data-parked={parked ? 'true' : 'false'}
       data-tutorial={tutorialId}
     >
+      <div className="min-w-0">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="font-mono text-sm font-bold text-slate-900">
           {clause.printed_ref}
@@ -93,11 +94,17 @@ function ClauseRowInner({
         ))}
       </div>
 
-      <p className={`mt-1 text-sm ${parked ? 'text-slate-500' : 'text-slate-800'}`}>
+      <p className={`mt-1 max-w-[80ch] text-sm ${parked ? 'text-slate-500' : 'text-slate-800'}`}>
         {clause.body}
       </p>
+      </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      {/* On a wide screen the controls get a column of their own: the rule
+          reads on the left, what the team did about it lines up on the right. */}
+      <div
+        className="mt-2 flex flex-wrap items-center gap-2 xl:mt-0"
+        data-tutorial={tutorialId ? 'register-row-controls' : undefined}
+      >
         <label className="sr-only" htmlFor={`state-${clause.clause_key}`}>
           Status for {clause.printed_ref}
         </label>
@@ -145,7 +152,7 @@ function ClauseRowInner({
               onSetEvidence(clause.clause_key, evidence)
             }
           }}
-          className="min-h-11 w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 sm:w-auto sm:flex-1"
+          className="min-h-11 w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 sm:w-auto sm:flex-1 xl:order-last xl:basis-full"
         />
 
         <button

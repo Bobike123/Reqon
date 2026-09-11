@@ -1,5 +1,5 @@
 -- =============================================================================
---  Role and RLS checks for Paddock Control.
+--  Role and RLS checks for Reqon.
 --
 --  SAFE TO RUN AGAINST THE REAL PROJECT. Everything it creates (test users, a
 --  test season, a finance probe table) happens inside one block that always

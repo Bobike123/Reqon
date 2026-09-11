@@ -2,7 +2,11 @@
 // purpose: it is a per-device convenience, not club data, and does not belong
 // in the database. Every access is wrapped — private windows and locked-down
 // browsers throw on localStorage, and a tour must never break the app.
-const KEY = 'paddock-control.tutorial.v1'
+//
+// v2: the tour grew from a 12-step overview into one that covers every screen
+// in depth, with extra parts for each role. The new key offers it once more to
+// people who finished or dismissed the old one.
+const KEY = 'reqon.tutorial.v2'
 
 export type TutorialRecord = 'completed' | 'dismissed'
 

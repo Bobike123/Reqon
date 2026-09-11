@@ -6,6 +6,7 @@ import { usePermissions } from '../auth/usePermissions.ts'
 import { useCurrentSeason } from '../data/useCurrentSeason.ts'
 import { useTutorial } from '../tutorial/context.ts'
 import { buttonSecondary } from './buttons.ts'
+import { SHELL } from './layout.ts'
 import { NAV_ITEMS } from './navItems.ts'
 
 // Active screen: filled pill AND aria-current="page" — never colour alone.
@@ -62,24 +63,31 @@ export function AppHeader() {
   // Screens that would show this person nothing are left out of the menu.
   const items = NAV_ITEMS.filter((item) => !item.requires || can[item.requires])
   const signOut = () => void auth.signOut()
-  const startTour = () => {
-    setMenuOpenOn(null)
-    tutorial.start()
+  const openTour = () => {
+    // From the phone menu: close it and park focus on the Menu button, which
+    // stays on screen — the Tutorial button inside the menu is about to go, and
+    // the tour hands focus back to wherever it was opened from.
+    if (menuOpen) {
+      setMenuOpenOn(null)
+      menuButtonRef.current?.focus()
+    }
+    tutorial.openChooser()
   }
 
   return (
     <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center gap-2 px-3 py-2 sm:px-6">
+      <div className={`${SHELL} flex items-center gap-2 py-2`}>
         <Link
           to="/"
           className="rounded text-base font-semibold tracking-tight text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
         >
-          Paddock Control
+          Reqon
         </Link>
         {season.data?.label && (
           <span
             className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-xs font-medium text-slate-700"
             title="Everything on screen belongs to this season"
+            data-tutorial="season-badge"
           >
             <span className="sr-only">Current season: </span>
             {season.data.label}
@@ -88,12 +96,12 @@ export function AppHeader() {
 
         <div className="ml-auto hidden items-center gap-2 sm:flex">
           {name && (
-            <span className="text-xs text-slate-600">
+            <span className="text-xs text-slate-600" data-tutorial="account-roles">
               {name}
               {roleText && <span className="text-slate-500"> · {roleText}</span>}
             </span>
           )}
-          <button type="button" onClick={startTour} className={buttonSecondary} data-tutorial="help-button">
+          <button type="button" onClick={openTour} className={buttonSecondary} data-tutorial="help-button">
             Tutorial
           </button>
           <button type="button" onClick={signOut} className={buttonSecondary}>
@@ -110,13 +118,13 @@ export function AppHeader() {
           aria-controls={menuOpen ? 'phone-menu' : undefined}
           onClick={() => setMenuOpenOn(menuOpen ? null : location.pathname)}
           className={`ml-auto sm:hidden ${buttonSecondary}`}
-          data-tutorial="main-nav help-button"
+          data-tutorial="main-nav help-button account-roles"
         >
           {menuOpen ? 'Close' : 'Menu'}
         </button>
       </div>
 
-      <nav aria-label="Main" className="mx-auto hidden max-w-6xl px-3 pb-2 sm:block sm:px-6" data-tutorial="main-nav">
+      <nav aria-label="Main" className={`${SHELL} hidden pb-2 sm:block`} data-tutorial="main-nav">
         <ul className="flex flex-wrap gap-1">
           {items.map((item) => (
             <li key={item.to}>
@@ -156,7 +164,7 @@ export function AppHeader() {
               </span>
             )}
             <div className="flex gap-2">
-              <button type="button" onClick={startTour} className={buttonSecondary}>
+              <button type="button" onClick={openTour} className={buttonSecondary}>
                 Tutorial
               </button>
               <button type="button" onClick={signOut} className={buttonSecondary}>

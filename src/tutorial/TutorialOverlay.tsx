@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 import { buttonPrimary, buttonQuiet, buttonSecondary } from '../ui/buttons.ts'
 import { useTutorial } from './context.ts'
 import { clipToViewport, placeCard, SHEET_BREAKPOINT, type Rect } from './placement.ts'
-import type { TutorialStep } from './steps.ts'
+import { AUDIENCES, type TutorialStep } from './steps.ts'
+import { chapterLabel } from './tour.ts'
 
 const PAD = 6
 const DIM = 'rgba(15, 23, 42, 0.55)'
@@ -51,18 +52,27 @@ export function TutorialOverlay({
   // Tagged with its step, so moving to a new step reads as "searching" by
   // derivation instead of by resetting state inside an effect.
   const current = lookup?.stepId === step.id ? lookup : null
-  const status: 'searching' | 'found' | 'missing' = !current ? 'searching' : current.el ? 'found' : 'missing'
+  // 'untargeted' is a step about the app as a whole, with nothing to point at.
+  const status: 'untargeted' | 'searching' | 'found' | 'missing' = !step.target
+    ? 'untargeted'
+    : !current
+      ? 'searching'
+      : current.el
+        ? 'found'
+        : 'missing'
   const target = current?.el ?? null
 
   // 1. Find the real control. Screens load their data after navigating, so
   //    look again for a few seconds before giving up.
   useEffect(() => {
+    const id = step.target
+    if (!id) return
     let cancelled = false
     let timer = 0
     const startedAt = Date.now()
     const look = () => {
       if (cancelled) return
-      const el = findTarget(step.target)
+      const el = findTarget(id)
       if (el) {
         el.scrollIntoView?.({
           block: window.innerWidth < SHEET_BREAKPOINT ? 'start' : 'center',
@@ -221,23 +231,31 @@ export function TutorialOverlay({
         aria-describedby={bodyId}
         tabIndex={-1}
         onKeyDown={keepTabInCard}
-        className="pc-pop fixed z-[62] max-h-[calc(100vh-1rem)] w-[22rem] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-xl outline-none"
+        className="pc-pop fixed z-[62] max-h-[calc(100vh-1rem)] w-[24rem] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-xl outline-none"
         style={{ top: 0, left: 0 }}
         data-testid="tutorial-card"
       >
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs font-semibold tracking-wide text-slate-600">
+            {chapterLabel(step.chapter)}{' '}
             <span aria-hidden="true">
-              {number} / {tutorial.total}
+              · {number} / {tutorial.total}
             </span>
             <span className="sr-only">
               Step {number} of {tutorial.total}
             </span>
           </p>
-          <div className="h-1 w-24 overflow-hidden rounded bg-slate-200" aria-hidden="true">
+          <div className="h-1 w-20 shrink-0 overflow-hidden rounded bg-slate-200" aria-hidden="true">
             <div className="h-full bg-slate-900" style={{ width: `${(number / tutorial.total) * 100}%` }} />
           </div>
         </div>
+        {/* Role steps say so, so nobody wonders why a colleague's tour
+            showed them a button they do not have. */}
+        {step.audience && (
+          <p className="mt-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-900">
+            Only for: {AUDIENCES[step.audience].label}
+          </p>
+        )}
         <h2 id={titleId} className="mt-1.5 text-base font-semibold text-slate-900">
           {step.title}
         </h2>

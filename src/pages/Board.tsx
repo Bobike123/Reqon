@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useMembers } from '../data/useMembers.ts'
 import { useTasks, useUpdateTask, type Task, type TaskState } from '../data/useTasks.ts'
@@ -26,7 +27,10 @@ function TaskCard({
   onMove,
   onSetOwner,
   moving,
+  tutorial,
 }: {
+  // The one card the guided tour points at.
+  tutorial: boolean
   task: Task
   members: { id: string; full_name: string }[]
   sourceTopicTitle?: string
@@ -46,6 +50,7 @@ function TaskCard({
       data-testid={`task-${task.id}`}
       data-task-state={task.state}
       data-source-topic={task.source_topic ?? ''}
+      data-tutorial={tutorial ? 'board-card' : undefined}
     >
       <p className="text-sm font-medium text-slate-900">{task.title}</p>
       {task.detail && <p className="mt-0.5 text-xs text-slate-600">{task.detail}</p>}
@@ -109,11 +114,13 @@ export default function Board() {
   const updateTask = useUpdateTask()
 
   const topicTitles = new Map((topics.data ?? []).map((t) => [t.id, t.title]))
+  // The tour explains one real card: the first one, reading the lanes in order.
+  const tutorialTaskId = LANES.map((lane) => (tasks.data ?? []).find((t) => t.state === lane.state)).find(Boolean)?.id
 
   const error = tasks.error ?? members.error
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-6xl">
+      <main id="main-content" tabIndex={-1} className={pageMain()}>
         <h1 className="text-xl font-semibold text-slate-900">Board</h1>
         <div className="mt-4">
           <ErrorState
@@ -130,7 +137,7 @@ export default function Board() {
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-6xl">
+    <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Board"
         description="The team’s tasks. Move a task between lanes with the dropdown on its card."
@@ -151,7 +158,10 @@ export default function Board() {
 
       {/* Lanes render immediately and fill in; they are not swapped out for a
           spinner, so an open select is never yanked away mid-change. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" data-tutorial="board-lanes">
+      {/* All six lanes side by side once each can be at least ~13rem wide
+          (about 1440px of screen); three per row on a laptop, two on a tablet,
+          one on a phone. */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-[90rem]:grid-cols-6" data-tutorial="board-lanes">
           {LANES.map((lane) => {
             const laneTasks = (tasks.data ?? []).filter((t) => t.state === lane.state)
             return (
@@ -173,6 +183,7 @@ export default function Board() {
                       <TaskCard
                         key={task.id}
                         task={task}
+                        tutorial={task.id === tutorialTaskId}
                         members={members.data ?? []}
                         sourceTopicTitle={
                           task.source_topic ? topicTitles.get(task.source_topic) : undefined

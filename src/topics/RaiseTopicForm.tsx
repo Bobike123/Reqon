@@ -27,7 +27,7 @@ export function RaiseTopicForm({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-3">
+    <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-3" data-tutorial="topic-raise">
       <label htmlFor="topic-title" className="block text-xs font-medium text-slate-600">
         Raise a topic
       </label>

@@ -4,7 +4,7 @@ export function ConfigMissing({ names }: { names: readonly string[] }) {
   const local = ['localhost', '127.0.0.1'].includes(window.location.hostname)
   return (
     <main id="main-content" className="mx-auto max-w-xl px-4 py-12 text-slate-900">
-      <h1 className="text-xl font-semibold text-balance">Paddock Control can’t reach its database</h1>
+      <h1 className="text-xl font-semibold text-balance">Reqon can’t reach its database</h1>
       <p className="mt-2 text-sm text-slate-700">
         This copy of the app was built without{' '}
         {names.map((name, i) => (

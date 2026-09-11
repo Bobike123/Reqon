@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useClauses } from '../data/useClauses.ts'
 import {
@@ -31,7 +32,7 @@ export default function Milestones() {
   const error = milestones.error ?? sections.error
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-4xl">
+      <main id="main-content" tabIndex={-1} className={pageMain()}>
         <h1 className="text-xl font-semibold text-slate-900">Milestones</h1>
         <div className="mt-4">
           <ErrorState
@@ -52,7 +53,7 @@ export default function Milestones() {
     .reduce((n, m) => n + (m.max_points ?? 0), 0)
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-4xl">
+    <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Milestones"
         description="The MS1 deliverables: submission windows, points and section checklists."
@@ -71,7 +72,8 @@ export default function Milestones() {
         MS1 deliverables — {totalPoints} points in total
       </p>
 
-      <ul className="space-y-3">
+      {/* Two milestones side by side on a wide screen. */}
+      <ul className="grid items-start gap-3 xl:grid-cols-2">
         {(milestones.data ?? []).map((milestone, index) => {
           const window = submissionWindow(milestone, new Date())
           const mySections = sectionsFor(sections.data ?? [], milestone.key)
@@ -137,7 +139,7 @@ export default function Milestones() {
               </div>
 
               {mySections.length > 0 && (
-                <div className="mt-3">
+                <div className="mt-3" data-tutorial={index === 0 ? 'milestone-sections' : undefined}>
                   <p className="text-xs font-medium text-slate-600">
                     Sections drafted{' '}
                     <span data-testid={`sections-${milestone.key}`}>
@@ -169,7 +171,7 @@ export default function Milestones() {
       </ul>
 
       {/* Static reference, read from the imported clause rows. */}
-      <section className="mt-8" aria-labelledby="format-heading">
+      <section className="mt-8 max-w-6xl" aria-labelledby="format-heading" data-tutorial="milestone-format">
         <h2 id="format-heading" className="mb-1 text-sm font-semibold text-slate-900">
           Deliverable format — Art. F.14
         </h2>

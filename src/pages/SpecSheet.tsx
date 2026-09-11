@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -73,11 +74,13 @@ function SpecRow({
 
   return (
     <li
-      className={`border-b border-slate-200 px-3 py-2.5 ${failed ? 'bg-red-50' : ''}`}
+      // On a wide screen the measurement box sits at the right-hand end.
+      className={`border-b border-slate-200 px-3 py-2.5 lg:flex lg:items-start lg:justify-between lg:gap-6 ${failed ? 'bg-red-50' : ''}`}
       data-testid={`spec-${spec.id}`}
       data-verdict={spec.verdict ?? ''}
       data-tutorial={tutorialId}
     >
+      <div className="min-w-0 lg:flex-1">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="text-sm font-medium text-slate-900">{spec.parameter}</span>
         <VerdictBadge verdict={spec.verdict} />
@@ -96,8 +99,9 @@ function SpecRow({
       </div>
 
       {spec.condition && <p className="mt-0.5 text-xs text-slate-600">{spec.condition}</p>}
+      </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2 lg:mt-0 lg:shrink-0">
         <label className="text-xs text-slate-600" htmlFor={`measured-${spec.id}`}>
           Measured{spec.unit ? ` (${spec.unit})` : ''}
         </label>
@@ -139,7 +143,7 @@ export default function SpecSheet() {
   const error = specs.error ?? members.error
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-3xl">
+      <main id="main-content" tabIndex={-1} className={pageMain('wide')}>
         <h1 className="text-xl font-semibold text-slate-900">Spec sheet</h1>
         <div className="mt-4">
           <ErrorState
@@ -160,13 +164,13 @@ export default function SpecSheet() {
   const measured = rows.filter((s) => s.measured !== null).length
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-3xl">
+    <main id="main-content" tabIndex={-1} className={pageMain('wide')}>
       <PageHeader
         title="Spec sheet"
         description="Measured values checked against the regulation limits. The verdict comes from the rule, never typed in."
       />
 
-      <p className="mb-3 text-sm text-slate-600" data-testid="spec-summary">
+      <p className="mb-3 text-sm text-slate-600" data-testid="spec-summary" data-tutorial="spec-summary">
         {measured} of {rows.length} measured
         {failing > 0 && (
           <span className="ml-2 font-semibold text-red-700">· {failing} failing</span>

@@ -1,5 +1,5 @@
 -- =============================================================================
---  Finance checks for Paddock Control (finance_entries, migration 20260106).
+--  Finance checks for Reqon (finance_entries, migration 20260106).
 --
 --  SAFE TO RUN AGAINST THE REAL PROJECT. Everything it creates happens inside
 --  one block that always ends by raising an exception, so Postgres rolls every

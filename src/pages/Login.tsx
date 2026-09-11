@@ -31,7 +31,7 @@ export default function Login() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
       >
-        <h1 className="text-xl font-semibold text-slate-900">Paddock Control</h1>
+        <h1 className="text-xl font-semibold text-slate-900">Reqon</h1>
         <p className="mt-1 mb-6 text-sm text-slate-600">
           Sign in with your club account.
         </p>

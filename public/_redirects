@@ -1,6 +1,6 @@
 # SPA fallback for Cloudflare Pages and Netlify (both read this file).
 #
-# Paddock Control is a single-page app: React Router handles /register,
+# Reqon is a single-page app: React Router handles /register,
 # /board and the rest in the browser. The host only ever has one real file,
 # index.html, so without this rule a direct visit to
 # https://<site>/register — a refresh, a bookmark, a pasted link — asks the

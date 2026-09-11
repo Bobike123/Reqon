@@ -17,7 +17,7 @@ const { TutorialProvider } = await import('../tutorial/TutorialProvider.tsx')
 function renderHeader(path = '/register') {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <TutorialProvider steps={[{ id: 'only', target: 'help-button', title: 'Restart here', body: 'Body' }]}>
+      <TutorialProvider steps={[{ id: 'only', chapter: 'start', target: 'help-button', title: 'Restart here', body: 'Body' }]}>
         <AppHeader />
         <Routes>
           <Route path="*" element={<main id="main-content">page</main>} />
@@ -30,7 +30,7 @@ function renderHeader(path = '/register') {
 beforeEach(() => {
   signOut.mockClear()
   who.roles = []
-  window.localStorage.setItem('paddock-control.tutorial.v1', 'completed')
+  window.localStorage.setItem('reqon.tutorial.v2', 'completed')
 })
 
 const desktopNav = () => screen.getAllByRole('navigation', { name: 'Main' })[0]
@@ -98,11 +98,23 @@ describe('phone menu', () => {
 })
 
 describe('tutorial entry point', () => {
-  it('starts the tour from the header', async () => {
+  it('opens the tour chooser from the header, and the full tour starts from there', async () => {
     const user = userEvent.setup()
     renderHeader()
     await user.click(screen.getAllByRole('button', { name: 'Tutorial' })[0])
+    const chooser = await screen.findByRole('dialog', { name: 'Guided tour' })
+    await user.click(within(chooser).getByRole('button', { name: /^Full tour/ }))
     expect(await screen.findByRole('dialog', { name: 'Restart here' })).toBeInTheDocument()
+  })
+
+  it('from the phone menu, closes the menu and keeps focus on the Menu button', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+    await user.click(screen.getByRole('button', { name: 'Menu' }))
+    const phoneTutorial = screen.getAllByRole('button', { name: 'Tutorial' })[1]
+    await user.click(phoneTutorial)
+    expect(await screen.findByRole('dialog', { name: 'Guided tour' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
   })
 })
 

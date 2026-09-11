@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -109,7 +110,7 @@ export default function Register() {
   const error = clauses.error ?? statuses.error ?? members.error ?? subteams.error
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-5xl">
+      <main id="main-content" tabIndex={-1} className={pageMain()}>
         <ErrorState
           title="Could not load the register"
           error={error}
@@ -129,12 +130,12 @@ export default function Register() {
   const shown = filtered.length
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-5xl">
+    <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Register"
         description="Every rule in the regulations, and what the team has done about each one."
       >
-        <p className="mt-1 text-sm text-slate-600" data-testid="counts">
+        <p className="mt-1 text-sm text-slate-600" data-testid="counts" data-tutorial="register-live">
           {loading ? 'Loading the rulebook…' : `${shown} of ${total} rules shown`}
           <span
             className="ml-2 text-xs"
@@ -171,7 +172,7 @@ export default function Register() {
         </div>
       </fieldset>
 
-      <div className="mb-4 grid gap-2 sm:grid-cols-2" data-tutorial="register-filters">
+      <div className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-tutorial="register-filters">
         <div>
           <label htmlFor="search" className="block text-xs font-medium text-slate-600">
             Search

@@ -2,7 +2,7 @@
 # Vercel users: the equivalent goes in vercel.json under "headers".
 
 /*
-  # Paddock Control is an authenticated internal tool. It should never be
+  # Reqon is an authenticated internal tool. It should never be
   # embedded in someone else's page — that is how clickjacking works.
   X-Frame-Options: DENY
   # Do not let a browser guess a file is JavaScript when we said it is not.

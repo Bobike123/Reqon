@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { Link } from 'react-router-dom'
 import { useMilestones } from '../data/useMilestones.ts'
@@ -68,7 +69,7 @@ export default function Now() {
   const error = milestones.error ?? progress.error ?? attention.error ?? topics.error
   if (error) {
     return (
-      <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-5xl">
+      <main id="main-content" tabIndex={-1} className={pageMain()}>
         <h1 className="text-xl font-semibold text-slate-900">Now</h1>
         <div className="mt-4">
           <ErrorState
@@ -97,7 +98,7 @@ export default function Now() {
   const blocked = blockedCount(attention.data ?? [])
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-5xl">
+    <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Now"
         description="What needs attention today — the next deadline, open work and anything blocked."
@@ -113,7 +114,7 @@ export default function Now() {
           loading flip would throw away whatever someone was typing into the
           topic form below — the dashboard is the screen people keep open. */}
       <div>
-          <section aria-label="Instruments" data-tutorial="now-instruments" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <section aria-label="Instruments" data-tutorial="now-instruments" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             <Tile
               testId="tile-deadline"
               to="/milestones"
@@ -165,7 +166,10 @@ export default function Now() {
             />
           </section>
 
-          <section className="mt-6" aria-labelledby="subteams-heading">
+          {/* Side by side on a desktop: progress on the left, the topics people
+              are talking about on the right. Stacked on anything narrower. */}
+          <div className="mt-6 grid items-start gap-6 xl:grid-cols-2">
+          <section aria-labelledby="subteams-heading" data-tutorial="now-subsystems">
             <h2 id="subteams-heading" className="mb-2 text-sm font-semibold text-slate-900">
               Progress by subsystem
             </h2>
@@ -225,7 +229,7 @@ export default function Now() {
           {/* The SAME component the Meetings screen renders. Topics are
               editable here so nobody has to go hunting for another screen
               mid-conversation. */}
-          <div className="mt-6">
+          <div data-tutorial="now-topics">
             <TopicsPanel
               heading="Topics needing attention"
               // Includes 'decided': a topic must stay reachable here after it
@@ -234,6 +238,7 @@ export default function Now() {
               states={['open', 'agenda', 'decided']}
               emptyHint="Nothing waiting on a decision. Raise a topic above when something needs one."
             />
+          </div>
           </div>
       </div>
     </main>

@@ -1,5 +1,5 @@
 -- =============================================================================
---  Paddock Control — database schema
+--  Reqon — database schema
 --  Postgres / Supabase.  Paste the whole file into the Supabase SQL editor
 --  and run it once.  It is idempotent: running it twice is harmless.
 --

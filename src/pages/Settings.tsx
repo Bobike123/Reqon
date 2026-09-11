@@ -7,6 +7,7 @@ import { ChangePasswordForm } from '../account/ChangePasswordForm.tsx'
 import { RoleBadges } from '../roles/RoleBadges.tsx'
 import { RoleDialog } from '../roles/RoleDialog.tsx'
 import { buttonSecondary } from '../ui/buttons.ts'
+import { pageMain } from '../ui/layout.ts'
 import { ActionError, ErrorState, LoadingState } from '../ui/states.tsx'
 import { buildSeasonExport, downloadJson } from '../data/exportSeason.ts'
 import { useCurrentSeason } from '../data/useCurrentSeason.ts'
@@ -43,9 +44,18 @@ import {
 // decide access. Editing it to un-hide a button gets you a rejected request,
 // not access.
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  tutorialId,
+  children,
+}: {
+  title: string
+  // What the guided tour calls this section, if it points at it.
+  tutorialId?: string
+  children: React.ReactNode
+}) {
   return (
-    <section className="mt-6" aria-labelledby={`s-${title.replace(/\s+/g, '-')}`}>
+    <section className="mt-6" aria-labelledby={`s-${title.replace(/\s+/g, '-')}`} data-tutorial={tutorialId}>
       <h2
         id={`s-${title.replace(/\s+/g, '-')}`}
         className="mb-2 text-sm font-semibold text-slate-900"
@@ -57,9 +67,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
+// Used once, for what the signed-in person can do on this page.
 function Notice({ children }: { children: React.ReactNode }) {
   return (
-    <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+    <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" data-tutorial="settings-access">
       {children}
     </p>
   )
@@ -144,7 +155,7 @@ export default function Settings() {
     try {
       const data = await buildSeasonExport(currentSeason.data.id)
       const label = String(currentSeason.data.label ?? 'season').replace(/\W+/g, '-')
-      downloadJson(`paddock-control-${label}-${new Date().toISOString().slice(0, 10)}.json`, data)
+      downloadJson(`reqon-${label}-${new Date().toISOString().slice(0, 10)}.json`, data)
     } catch (err) {
       setExportError(err instanceof Error ? err.message : 'Export failed')
     } finally {
@@ -153,7 +164,7 @@ export default function Settings() {
   }
 
   return (
-    <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-3xl">
+    <main id="main-content" tabIndex={-1} className={pageMain('reading')}>
       <PageHeader
         title="Settings"
         description="The roster, subsystems, milestone dates, handover notes and seasons."
@@ -172,7 +183,7 @@ export default function Settings() {
       </Notice>
 
       {/* ---------------------------------------------------- Your account */}
-      <Section title="Your account">
+      <Section title="Your account" tutorialId="settings-account">
         <ChangePasswordForm />
       </Section>
 
@@ -198,9 +209,9 @@ export default function Settings() {
       <ActionError error={writeError} className="mt-3" />
 
       {/* ---------------------------------------------------------- Roster */}
-      <Section title="Roster">
+      <Section title="Roster" tutorialId="settings-roster">
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-          {(members.data ?? []).map((m) => (
+          {(members.data ?? []).map((m, index) => (
             <li key={m.id} className="px-3 py-2" data-testid={`member-${m.id}`}>
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`text-sm ${m.status === 'alumni' ? 'text-slate-600 line-through' : 'text-slate-900'}`}>
@@ -217,7 +228,10 @@ export default function Settings() {
               {/* Every control for this person in one row that wraps on a
                   phone, instead of a lone button pushed to the edge. */}
               {(canAdminister || canManageRoles) && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <div
+                  className="mt-1.5 flex flex-wrap items-center gap-2"
+                  data-tutorial={index === 0 ? 'roster-controls' : undefined}
+                >
                   {canManageRoles && (
                     <button
                       type="button"
@@ -226,6 +240,7 @@ export default function Settings() {
                         setRoleTarget({ id: m.id, name: m.full_name })
                       }}
                       aria-label={`Change roles for ${m.full_name}`}
+                      data-tutorial={index === 0 ? 'change-roles' : undefined}
                       className={buttonSecondary}
                     >
                       Change roles
@@ -289,7 +304,7 @@ export default function Settings() {
         />
 
         {canAdminister && (
-          <form onSubmit={submitMember} className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+          <form onSubmit={submitMember} className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-tutorial="add-member">
             <h3 className="text-sm font-medium text-slate-900">Add someone to the roster</h3>
             {/* This is the safe two-step process from the build brief. Creating
                 an Auth account needs the service_role key, which bypasses RLS
@@ -349,7 +364,7 @@ export default function Settings() {
 
       {/* -------------------------------------------------------- Subteams */}
       {canAdminister && (
-        <Section title="Subsystems">
+        <Section title="Subsystems" tutorialId="settings-subsystems">
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {(subteams.data ?? []).map((s) => (
               <li key={s.key} className="px-3 py-2" data-testid={`subteam-row-${s.key}`}>
@@ -397,7 +412,7 @@ export default function Settings() {
 
       {/* ------------------------------------------------------ Milestones */}
       {canAdminister && (
-        <Section title="Milestone dates and points">
+        <Section title="Milestone dates and points" tutorialId="settings-milestones">
           <p className="mb-2 text-xs text-slate-500">
             For a new edition. Leaving a due date blank is valid — it renders as TBC.
           </p>
@@ -445,7 +460,7 @@ export default function Settings() {
       )}
 
       {/* -------------------------------------------------- Handover notes */}
-      <Section title="Handover notes">
+      <Section title="Handover notes" tutorialId="settings-handover">
         <p className="mb-2 text-xs text-slate-500">
           One note per subsystem, for whoever picks this up next year. Saved when you
           click away.
@@ -479,7 +494,7 @@ export default function Settings() {
       </Section>
 
       {/* --------------------------------------------------------- Seasons */}
-      <Section title="Seasons">
+      <Section title="Seasons" tutorialId="settings-seasons">
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
           {(seasons.data ?? []).map((s) => (
             <li key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`season-${s.id}`}>
@@ -509,7 +524,7 @@ export default function Settings() {
         </p>
 
         {canAdminister && (
-          <form onSubmit={submitSeason} className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+          <form onSubmit={submitSeason} className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-tutorial="new-season">
             <h3 className="text-sm font-medium text-slate-900">Start a new season</h3>
             <p className="mt-0.5 mb-2 text-xs text-slate-600">
               The new season starts empty: the rulebook carries over untouched, and none
@@ -546,7 +561,7 @@ export default function Settings() {
       </Section>
 
       {/* ---------------------------------------------------------- Export */}
-      <Section title="Export">
+      <Section title="Export" tutorialId="settings-export">
         <p className="mb-2 text-xs text-slate-500">
           Everything this season, as one JSON file. Roster names and roles are included so
           owner ids resolve; no passwords, emails or keys are.

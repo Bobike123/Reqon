@@ -3,17 +3,11 @@ import { useState } from 'react'
 import type { Member } from '../data/useMembers.ts'
 import type { Task } from '../data/useTasks.ts'
 import type { Topic, TopicState } from '../data/useTopics.ts'
+import { TOPIC_STATES } from './topicStates.ts'
 
 // ONE topic card, used by BOTH the Meetings screen and the Now screen.
 // Do not fork this for a second screen — the whole point of Prompt 0's rule
 // that topics are editable from Now as well is that they behave identically.
-
-const STATES: { value: TopicState; label: string }[] = [
-  { value: 'open', label: 'Raised' },
-  { value: 'agenda', label: 'On the agenda' },
-  { value: 'decided', label: 'Decided' },
-  { value: 'parked', label: 'Parked' },
-]
 
 type Props = {
   topic: Topic
@@ -24,6 +18,8 @@ type Props = {
   onSetDecision: (id: string, decision: string) => void
   onSetOwner: (id: string, ownerId: string | null) => void
   onConvert: (topic: Topic) => void
+  // The one card the guided tour points at.
+  tutorial?: boolean
 }
 
 export function TopicCard({
@@ -35,6 +31,7 @@ export function TopicCard({
   onSetDecision,
   onSetOwner,
   onConvert,
+  tutorial = false,
 }: Props) {
   const serverDecision = topic.decision ?? ''
   const [decision, setDecision] = useState(serverDecision)
@@ -53,6 +50,7 @@ export function TopicCard({
       className="rounded-lg border border-slate-200 bg-white p-3"
       data-testid={`topic-${topic.id}`}
       data-topic-state={topic.state}
+      data-tutorial={tutorial ? 'topic-card' : undefined}
     >
       <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-semibold text-slate-900">{topic.title}</h3>
@@ -70,7 +68,7 @@ export function TopicCard({
           onChange={(e) => onSetState(topic.id, e.target.value as TopicState)}
           className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
         >
-          {STATES.map((s) => (
+          {TOPIC_STATES.map((s) => (
             <option key={s.value} value={s.value}>
               {s.label}
             </option>
@@ -98,7 +96,7 @@ export function TopicCard({
       {/* Editable in EVERY state, on purpose. A topic must never become a dead
           end because of the status it happens to be in — you can write the
           decision before marking it decided, and correct it afterwards. */}
-      <div className="mt-2">
+      <div className="mt-2" data-tutorial={tutorial ? 'topic-decision' : undefined}>
         <label
           id={`topic-decision-label-${topic.id}`}
           className="block text-xs font-medium text-slate-600"
@@ -122,7 +120,7 @@ export function TopicCard({
         />
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2" data-tutorial={tutorial ? 'topic-convert' : undefined}>
         {alreadyConverted ? (
           <span
             className="pc-fade-in inline-flex flex-wrap items-center gap-2 rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"

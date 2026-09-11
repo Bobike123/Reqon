@@ -8,6 +8,7 @@ import { formatDay, formatEuros } from '../finance/money.ts'
 import { Dialog } from '../ui/Dialog.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
+import { pageMain } from '../ui/layout.ts'
 import { ActionError, EmptyState, ErrorState, LoadingState } from '../ui/states.tsx'
 
 // The club's money for the current season.
@@ -18,7 +19,7 @@ import { ActionError, EmptyState, ErrorState, LoadingState } from '../ui/states.
 // through usePermissions() so nobody is offered a button that would always be
 // refused — but it is the database that keeps the money safe.
 
-const MAIN = 'mx-auto max-w-6xl px-3 py-4 sm:px-6 *:max-w-4xl'
+const MAIN = pageMain('reading')
 const DESCRIPTION = 'Income and expenses for the current season, in euros.'
 
 // A true minus sign, like the entries below — Intl gives a hyphen.
@@ -79,14 +80,14 @@ export default function Finances() {
   return (
     <main id="main-content" tabIndex={-1} className={MAIN}>
       <PageHeader title="Finances" description={DESCRIPTION}>
-        <p className="mt-2 text-sm text-slate-700" data-testid="finance-access">
+        <p className="mt-2 text-sm text-slate-700" data-testid="finance-access" data-tutorial="finance-access">
           {can.canManageFinances
             ? 'You are the Treasurer: you can add, edit and delete entries.'
             : `Read-only for ${describeRoles(can.roles)}. Only the Treasurer can change these entries — the database refuses changes from anyone else.`}
         </p>
       </PageHeader>
 
-      <section aria-label="Totals" className="grid grid-cols-3 gap-2">
+      <section aria-label="Totals" className="grid grid-cols-3 gap-2" data-tutorial="finance-totals">
         <Total label="Income" value={formatEuros(income)} />
         <Total label="Expenses" value={formatEuros(expenses)} />
         <Total label="Balance" value={signedEuros(balance)} tone={balance < 0 ? 'text-red-700' : 'text-slate-900'} />
@@ -98,6 +99,7 @@ export default function Finances() {
           <button
             type="button"
             className={buttonPrimary}
+            data-tutorial="finance-add"
             onClick={() => {
               setMessage('')
               setEditing('new')
@@ -111,7 +113,7 @@ export default function Finances() {
         {message}
       </p>
 
-      <div className="mt-1">
+      <div className="mt-1" data-tutorial="finance-entries">
         {entries.error ? (
           <ErrorState title="Could not load finances" error={entries.error} onRetry={() => void entries.refetch()} />
         ) : entries.isPending ? (

@@ -35,3 +35,6 @@ claude.txt
 
 # Generated mock data for a hosted project — contains a demo password
 mock-data.sql
+
+# Local list of logins and passwords — never commit
+accounts.md

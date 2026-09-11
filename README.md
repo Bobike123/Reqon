@@ -1,4 +1,4 @@
-# Paddock Control
+# Reqon
 
 Internal web app for the SDU Motorbike Club's MotoStudent entry. It tracks
 compliance against the 1,146-clause regulations book, the team's tasks, weekly
@@ -26,7 +26,7 @@ Nothing else. No Docker, no database on your laptop.
 
 ```bash
 git clone <the club's repository URL>
-cd paddock-control
+cd reqon
 npm install
 cp .env.example .env.local     # then edit .env.local — see §3
 npm run dev
@@ -192,7 +192,7 @@ requires the `service_role` key, which must never reach a browser (§3).
 1. **Supabase dashboard → Authentication → Users → Add user.** Give them an
    email and a password, and tick "Auto Confirm User".
 2. Copy that user's **UUID** from the user list.
-3. In Paddock Control: **Settings → Roster → Add someone to the roster.** Paste
+3. In Reqon: **Settings → Roster → Add someone to the roster.** Paste
    the UUID, enter their name and role, press **Link to roster**.
 
 Step 3 is what actually grants access. A person with a login but no `members`
@@ -403,7 +403,7 @@ deployment hosts in §4 all deploy from a Git repository:
 ```bash
 git init
 git add .
-git commit -m "Paddock Control"
+git commit -m "Reqon"
 git remote add origin <the club's repository URL>
 git push -u origin main
 ```
