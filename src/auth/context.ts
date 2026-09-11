@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { createContext, useContext } from 'react'
 import type { Database } from '../lib/database.types.ts'
+import type { PrivilegedRole } from './permissions.ts'
 
 export type Member = Database['public']['Tables']['members']['Row']
 
@@ -15,7 +16,9 @@ export type AuthState =
   // Signed in, but no matching `members` row — not on the club roster.
   | { status: 'notRostered'; user: User }
   // Signed in and on the roster. `member` is the caller's own row.
-  | { status: 'member'; user: User; member: Member }
+  // `roles` are the privileged roles from member_roles. Read them through
+  // usePermissions(), not directly.
+  | { status: 'member'; user: User; member: Member; roles: PrivilegedRole[] }
   // We could not find out. Do NOT fall through to either allow or deny.
   | { status: 'error'; user: User; message: string }
 

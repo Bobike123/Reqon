@@ -1,7 +1,12 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/context.ts'
-import { ErrorState, LoadingState } from '../ui/states.tsx'
+import { describeRoles, type PrivilegedRole } from '../auth/permissions.ts'
+import { usePermissions } from '../auth/usePermissions.ts'
+import { RoleBadges } from '../roles/RoleBadges.tsx'
+import { RoleDialog } from '../roles/RoleDialog.tsx'
+import { buttonSecondary } from '../ui/buttons.ts'
+import { ActionError, ErrorState, LoadingState } from '../ui/states.tsx'
 import { buildSeasonExport, downloadJson } from '../data/exportSeason.ts'
 import { useCurrentSeason } from '../data/useCurrentSeason.ts'
 import { useMembers } from '../data/useMembers.ts'
@@ -10,6 +15,7 @@ import {
   useAddMember,
   useCreateSeason,
   useHandoverNotes,
+  useMemberRoles,
   useSeasons,
   useSetCurrentSeason,
   useSetHandoverNote,
@@ -18,16 +24,23 @@ import {
   useUpdateSubteam,
 } from '../data/useSettings.ts'
 
-// Settings. Board-only actions are hidden from non-board members here AS A
-// COURTESY — the actual authorization is in the database:
+// Settings. Admin-only actions are hidden from everyone else here AS A
+// COURTESY — the actual authorization is in the database
+// (supabase/migrations/20260105000000_privileged_roles.sql):
 //
-//   members  INSERT  -> board_roster    (is_board())
-//   members  UPDATE  -> member_self     (own row, or is_board())
-//   members  DELETE  -> no policy at all: people cannot be deleted, ever
-//   subteams ALL     -> board_write     (is_board())
-//   season switch    -> set_current_season() raises unless is_board()
+//   members      INSERT  -> admin_roster_insert (is_admin(): president or vice-president)
+//   members      UPDATE  -> member_self_update  (own row, or is_admin())
+//   members      DELETE  -> no policy at all: people cannot be deleted, ever
+//   subteams     ALL     -> admin_write         (is_admin())
+//   milestones   ALL     -> admin_write         (is_admin())
+//   seasons      ALL     -> admin_write         (is_admin())
+//   season switch        -> set_current_season() raises unless is_admin()
+//   member_roles INSERT  -> role_assign         (can_manage_roles(): the president only)
+//   member_roles DELETE  -> role_remove         (the president only; never the last one)
 //
-// Editing this file to un-hide a button gets you a rejected request, not access.
+// What to show comes from usePermissions() — this file never inspects roles to
+// decide access. Editing it to un-hide a button gets you a rejected request,
+// not access.
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -53,7 +66,7 @@ function Notice({ children }: { children: React.ReactNode }) {
 
 export default function Settings() {
   const auth = useAuth()
-  const isBoard = auth.status === 'member' && auth.member.is_board
+  const { canAdminister, canManageRoles, roles: myRoles } = usePermissions()
   const myId = auth.status === 'member' ? auth.member.id : null
 
   const members = useMembers()
@@ -62,6 +75,7 @@ export default function Settings() {
   const seasons = useSeasons()
   const currentSeason = useCurrentSeason()
   const notes = useHandoverNotes()
+  const memberRoles = useMemberRoles()
 
   const addMember = useAddMember()
   const updateMember = useUpdateMember()
@@ -70,6 +84,9 @@ export default function Settings() {
   const createSeason = useCreateSeason()
   const setCurrent = useSetCurrentSeason()
   const setNote = useSetHandoverNote()
+  // Whose roles the President is editing, and the outcome of the last change.
+  const [roleTarget, setRoleTarget] = useState<{ id: string; name: string } | null>(null)
+  const [roleMessage, setRoleMessage] = useState('')
 
   const [newMember, setNewMember] = useState({ id: '', fullName: '', role: '' })
   const [newSeason, setNewSeason] = useState({ label: '', edition: '' })
@@ -83,30 +100,40 @@ export default function Settings() {
   // Reads can fail too — without this the screen rendered empty lists as though
   // the club simply had no members and no seasons.
   const readError =
-    members.error ?? subteams.error ?? milestones.error ?? seasons.error ?? notes.error
+    members.error ?? subteams.error ?? milestones.error ?? seasons.error ?? notes.error ??
+    memberRoles.error
   const loading = members.isLoading || subteams.isLoading || seasons.isLoading
+
+  // Who holds which privileged role — for display only.
+  const rolesByMember = new Map<string, PrivilegedRole[]>()
+  for (const row of memberRoles.data ?? []) {
+    rolesByMember.set(row.member_id, [...(rolesByMember.get(row.member_id) ?? []), row.role])
+  }
 
   async function submitMember(e: FormEvent) {
     e.preventDefault()
     if (addMember.isPending || !newMember.id.trim() || !newMember.fullName.trim()) return
-    await addMember
-      .mutateAsync({
+    try {
+      await addMember.mutateAsync({
         id: newMember.id.trim(),
         fullName: newMember.fullName.trim(),
         role: newMember.role.trim() || 'Member',
-        isBoard: false,
       })
-      .catch(() => {})
-    setNewMember({ id: '', fullName: '', role: '' })
+      setNewMember({ id: '', fullName: '', role: '' })
+    } catch {
+      // Refused or failed: the message is shown, and what was typed stays.
+    }
   }
 
   async function submitSeason(e: FormEvent) {
     e.preventDefault()
     if (createSeason.isPending || !newSeason.label.trim()) return
-    await createSeason
-      .mutateAsync({ label: newSeason.label.trim(), edition: newSeason.edition.trim() || null })
-      .catch(() => {})
-    setNewSeason({ label: '', edition: '' })
+    try {
+      await createSeason.mutateAsync({ label: newSeason.label.trim(), edition: newSeason.edition.trim() || null })
+      setNewSeason({ label: '', edition: '' })
+    } catch {
+      // Refused or failed: the message is shown, and what was typed stays.
+    }
   }
 
   async function doExport() {
@@ -132,13 +159,16 @@ export default function Settings() {
         tutorialId="settings-overview"
       />
 
-      {!isBoard && (
-        <Notice>
-          You are signed in as a team member. Roster, subteam and season changes are
-          reserved for the board — the database enforces this, so those forms are hidden
-          rather than shown and refused. Handover notes below are open to everyone.
-        </Notice>
-      )}
+      {/* What this person can do here, in words — never left to be inferred
+          from which buttons happen to be missing. */}
+      <Notice>
+        Signed in as <strong className="font-medium text-slate-900">{describeRoles(myRoles)}</strong>.{' '}
+        {canManageRoles
+          ? 'You can change everything on this page, including who holds which role.'
+          : canAdminister
+            ? 'You can change everything on this page except roles, which only the President can give or take away.'
+            : 'Roster, subsystem, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
+      </Notice>
 
       {readError && (
         <div className="mt-3">
@@ -151,6 +181,7 @@ export default function Settings() {
               void milestones.refetch()
               void seasons.refetch()
               void notes.refetch()
+              void memberRoles.refetch()
             }}
           />
         </div>
@@ -158,11 +189,7 @@ export default function Settings() {
 
       {loading && !readError && <LoadingState label="Loading settings…" />}
 
-      {writeError && (
-        <p role="alert" className="mt-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
-          {writeError.message}
-        </p>
-      )}
+      <ActionError error={writeError} className="mt-3" />
 
       {/* ---------------------------------------------------------- Roster */}
       <Section title="Roster">
@@ -174,28 +201,32 @@ export default function Settings() {
                   {m.full_name}
                 </span>
                 <span className="text-xs text-slate-500">{m.role}</span>
-                {m.is_board && (
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] font-medium text-white">
-                    board
-                  </span>
-                )}
+                <RoleBadges roles={rolesByMember.get(m.id) ?? []} />
                 {m.status === 'alumni' && (
                   <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">
                     alumni
                   </span>
                 )}
               </div>
-              {isBoard && (
+              {/* Every control for this person in one row that wraps on a
+                  phone, instead of a lone button pushed to the edge. */}
+              {(canAdminister || canManageRoles) && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                  <label className="flex min-h-11 items-center gap-1.5 text-xs text-slate-700 sm:min-h-0">
-                    <input
-                      type="checkbox"
-                      checked={m.is_board}
-                      onChange={(e) => updateMember.mutate({ id: m.id, isBoard: e.target.checked })}
-                      className="h-5 w-5 accent-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-                    />
-                    Board
-                  </label>
+                  {canManageRoles && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRoleMessage('')
+                        setRoleTarget({ id: m.id, name: m.full_name })
+                      }}
+                      aria-label={`Change roles for ${m.full_name}`}
+                      className={buttonSecondary}
+                    >
+                      Change roles
+                    </button>
+                  )}
+                  {canAdminister && (
+                  <>
                   <label className="sr-only" htmlFor={`status-${m.id}`}>
                     Status for {m.full_name}
                   </label>
@@ -210,15 +241,17 @@ export default function Settings() {
                     <option value="active">Active</option>
                     <option value="alumni">Alumni (retired)</option>
                   </select>
-                  <label className="sr-only" htmlFor={`role-${m.id}`}>Role for {m.full_name}</label>
+                  <label className="sr-only" htmlFor={`title-${m.id}`}>Job title for {m.full_name}</label>
                   <input
-                    id={`role-${m.id}`}
+                    id={`title-${m.id}`}
                     defaultValue={m.role}
                     onBlur={(e) => {
                       if (e.target.value !== m.role) updateMember.mutate({ id: m.id, role: e.target.value })
                     }}
                     className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
                   />
+                  </>
+                  )}
                 </div>
               )}
             </li>
@@ -228,8 +261,28 @@ export default function Settings() {
           People are retired, never deleted — the database has no delete policy for the
           roster, so old task and rule owners keep resolving to a name forever.
         </p>
+        <p className="mt-1 text-xs text-slate-500">
+          The President and Vice President run these settings, the Treasurer is the only one
+          who can change money, and a Developer can see everything without extra rights to
+          change it.{' '}
+          {canManageRoles
+            ? 'Only you, as President, can give or take away roles — and the club always keeps at least one President.'
+            : 'Roles are given and taken away by the President.'}
+        </p>
+        <p role="status" className="mt-1 min-h-4 text-xs font-medium text-emerald-800">
+          {roleMessage}
+        </p>
+        <RoleDialog
+          member={roleTarget}
+          people={(members.data ?? []).map((m) => ({ id: m.id, name: m.full_name }))}
+          onClose={() => setRoleTarget(null)}
+          onChanged={(message) => {
+            setRoleTarget(null)
+            setRoleMessage(message)
+          }}
+        />
 
-        {isBoard && (
+        {canAdminister && (
           <form onSubmit={submitMember} className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
             <h3 className="text-sm font-medium text-slate-900">Add someone to the roster</h3>
             {/* This is the safe two-step process from the build brief. Creating
@@ -268,7 +321,7 @@ export default function Settings() {
               className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
             />
             <label className="mt-2 block text-xs font-medium text-slate-600" htmlFor="new-member-role">
-              Role
+              Job title
             </label>
             <input
               id="new-member-role"
@@ -289,7 +342,7 @@ export default function Settings() {
       </Section>
 
       {/* -------------------------------------------------------- Subteams */}
-      {isBoard && (
+      {canAdminister && (
         <Section title="Subsystems">
           <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
             {(subteams.data ?? []).map((s) => (
@@ -337,7 +390,7 @@ export default function Settings() {
       )}
 
       {/* ------------------------------------------------------ Milestones */}
-      {isBoard && (
+      {canAdminister && (
         <Section title="Milestone dates and points">
           <p className="mb-2 text-xs text-slate-500">
             For a new edition. Leaving a due date blank is valid — it renders as TBC.
@@ -430,7 +483,7 @@ export default function Settings() {
                   current
                 </span>
               )}
-              {isBoard && !s.is_current && (
+              {canAdminister && !s.is_current && (
                 <button
                   type="button"
                   disabled={setCurrent.isPending}
@@ -449,7 +502,7 @@ export default function Settings() {
           with two current seasons — or none. Old seasons stay readable.
         </p>
 
-        {isBoard && (
+        {canAdminister && (
           <form onSubmit={submitSeason} className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
             <h3 className="text-sm font-medium text-slate-900">Start a new season</h3>
             <p className="mt-0.5 mb-2 text-xs text-slate-600">

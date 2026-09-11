@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
+import { ROLE_LABELS, sortRoles } from '../auth/permissions.ts'
+import { usePermissions } from '../auth/usePermissions.ts'
 import { useCurrentSeason } from '../data/useCurrentSeason.ts'
 import { useTutorial } from '../tutorial/context.ts'
 import { buttonSecondary } from './buttons.ts'
@@ -22,6 +24,7 @@ const phoneLink = ({ isActive }: { isActive: boolean }) =>
 // way out, and signing out was only possible from a leftover test page.
 export function AppHeader() {
   const auth = useAuth()
+  const can = usePermissions()
   const tutorial = useTutorial()
   const season = useCurrentSeason()
   const location = useLocation()
@@ -53,6 +56,11 @@ export function AppHeader() {
   }, [menuOpen])
 
   const name = auth.status === 'member' ? auth.member.full_name : ''
+  // Your roles beside your name, in words, so it is always clear what the
+  // screens will let you do.
+  const roleText = sortRoles(can.roles).map((role) => ROLE_LABELS[role]).join(', ')
+  // Screens that would show this person nothing are left out of the menu.
+  const items = NAV_ITEMS.filter((item) => !item.requires || can[item.requires])
   const signOut = () => void auth.signOut()
   const startTour = () => {
     setMenuOpenOn(null)
@@ -79,7 +87,12 @@ export function AppHeader() {
         )}
 
         <div className="ml-auto hidden items-center gap-2 sm:flex">
-          {name && <span className="text-xs text-slate-600">{name}</span>}
+          {name && (
+            <span className="text-xs text-slate-600">
+              {name}
+              {roleText && <span className="text-slate-500"> · {roleText}</span>}
+            </span>
+          )}
           <button type="button" onClick={startTour} className={buttonSecondary} data-tutorial="help-button">
             Tutorial
           </button>
@@ -105,7 +118,7 @@ export function AppHeader() {
 
       <nav aria-label="Main" className="mx-auto hidden max-w-6xl px-3 pb-2 sm:block sm:px-6" data-tutorial="main-nav">
         <ul className="flex flex-wrap gap-1">
-          {NAV_ITEMS.map((item) => (
+          {items.map((item) => (
             <li key={item.to}>
               <NavLink to={item.to} end={item.end} className={desktopLink}>
                 {item.label}
@@ -119,7 +132,7 @@ export function AppHeader() {
         <div id="phone-menu" ref={panelRef} className="pc-fade-in border-t border-slate-200 px-3 pb-3 sm:hidden">
           <nav aria-label="Main">
             <ul className="grid grid-cols-2 gap-1 pt-2">
-              {NAV_ITEMS.map((item) => (
+              {items.map((item) => (
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
@@ -136,7 +149,12 @@ export function AppHeader() {
             </ul>
           </nav>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-2">
-            {name && <span className="text-xs text-slate-600">Signed in as {name}</span>}
+            {name && (
+              <span className="text-xs text-slate-600">
+                Signed in as {name}
+                {roleText && ` · ${roleText}`}
+              </span>
+            )}
             <div className="flex gap-2">
               <button type="button" onClick={startTour} className={buttonSecondary}>
                 Tutorial

@@ -32,3 +32,6 @@ coverage
 
 # Local scratch notes — not part of the project
 claude.txt
+
+# Generated mock data for a hosted project — contains a demo password
+mock-data.sql

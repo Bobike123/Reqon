@@ -1,4 +1,5 @@
 import { useAuth } from '../auth/context.ts'
+import { ROLE_LABELS } from '../auth/permissions.ts'
 
 // Placeholder screen. The real Now screen replaces this in a later phase; for
 // now it proves who is signed in and that sign-out works.
@@ -19,7 +20,7 @@ export default function Home() {
       <h1 className="text-4xl font-semibold tracking-tight">hello</h1>
       <p className="text-slate-600">
         Signed in as {auth.member.full_name}
-        {auth.member.is_board ? ' (board)' : ''}
+        {auth.roles.length > 0 ? ` (${auth.roles.map((r) => ROLE_LABELS[r]).join(', ')})` : ''}
       </p>
       <button
         type="button"

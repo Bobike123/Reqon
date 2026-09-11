@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,7 @@ const state = {
   signOutCalls: 0,
   signOutThrows: false,
   memberQueries: 0,
+  memberColumns: '',
 }
 
 const supabase = {
@@ -39,14 +40,24 @@ const supabase = {
     }),
   },
   from: vi.fn(() => ({
-    select: () => ({
-      eq: () => ({
-        maybeSingle: async () => {
-          state.memberQueries += 1
-          return { data: state.memberRow, error: state.memberError }
-        },
-      }),
-    }),
+    select: (columns: string) => {
+      return {
+        eq: () => ({
+          maybeSingle: async () => {
+            state.memberQueries += 1
+            // Only the roster lookup ends in maybeSingle().
+            state.memberColumns = columns
+            return { data: state.memberRow, error: state.memberError }
+          },
+          // AuthProvider's live role refresh awaits the query directly.
+          then: (resolve: (v: unknown) => void) =>
+            resolve({
+              data: (state.memberRow as { member_roles?: unknown[] } | null)?.member_roles ?? [],
+              error: null,
+            }),
+        }),
+      }
+    },
   })),
 }
 
@@ -55,9 +66,11 @@ vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 const { AuthProvider } = await import('./AuthProvider.tsx')
 const { useAuth } = await import('./context.ts')
 const { default: RequireAuth } = await import('./RequireAuth.tsx')
+const { usePermissions } = await import('./usePermissions.ts')
 
 const ROSTERED_SESSION = { user: { id: 'user-1', email: 'rostered@sdu.dk' } }
-const MEMBER_ROW = { id: 'user-1', full_name: 'Ada Rider', is_board: false, status: 'active' }
+// As the lookup returns it: the roster row with its privileged roles embedded.
+const MEMBER_ROW = { id: 'user-1', full_name: 'Ada Rider', status: 'active', member_roles: [] }
 
 let queryClient: QueryClient
 
@@ -93,6 +106,7 @@ beforeEach(() => {
   state.signOutCalls = 0
   state.signOutThrows = false
   state.memberQueries = 0
+  state.memberColumns = ''
   vi.clearAllMocks()
 })
 
@@ -144,7 +158,7 @@ describe('signed in but NOT on the roster', () => {
     renderApp()
     expect(
       await screen.findByText(
-        'Your account is not on the club roster; ask the board to add you.',
+        'Your account is not on the club roster; ask the president or vice-president to add you.',
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText('SECRET BIKE DATA')).not.toBeInTheDocument()
@@ -221,5 +235,63 @@ describe('sign out when the network is down', () => {
     expect(screen.queryByText('SECRET BIKE DATA')).not.toBeInTheDocument()
     expect(queryClient.getQueryData(['tasks'])).toBeUndefined()
     expect(container).toBeTruthy()
+  })
+})
+
+describe('privileged roles', () => {
+  function RoleProbe() {
+    const auth = useAuth()
+    const can = usePermissions()
+    if (auth.status !== 'member') return null
+    return (
+      <p data-testid="probe">
+        {[
+          `roles=${auth.roles.join(',')}`,
+          `administer=${can.canAdminister}`,
+          `manageRoles=${can.canManageRoles}`,
+          `viewFinances=${can.canViewFinances}`,
+          `manageFinances=${can.canManageFinances}`,
+          `embedLeaks=${'member_roles' in auth.member}`,
+        ].join(' ')}
+      </p>
+    )
+  }
+
+  it('arrive with the roster row, in the same request', async () => {
+    state.session = ROSTERED_SESSION
+    state.memberRow = { ...MEMBER_ROW, member_roles: [{ role: 'treasurer' }, { role: 'developer' }] }
+    renderApp(<RoleProbe />)
+    expect(await screen.findByTestId('probe')).toHaveTextContent(
+      'roles=treasurer,developer administer=false manageRoles=false viewFinances=true manageFinances=true embedLeaks=false',
+    )
+    expect(state.memberQueries).toBe(1)
+    // member_roles points at members twice (member_id and assigned_by); without
+    // the hint PostgREST refuses the embed as ambiguous.
+    expect(state.memberColumns).toContain('member_roles!member_roles_member_id_fkey(role)')
+  })
+
+  it('pick up a role change made elsewhere, without signing in again', async () => {
+    state.session = ROSTERED_SESSION
+    state.memberRow = { ...MEMBER_ROW, member_roles: [{ role: 'treasurer' }] }
+    renderApp(<RoleProbe />)
+    expect(await screen.findByTestId('probe')).toHaveTextContent('manageFinances=true')
+
+    // The President takes Treasurer away on another device. The next re-read
+    // (every minute, on tab focus, or after any refusal) brings it in.
+    state.memberRow = { ...MEMBER_ROW, member_roles: [] }
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['member_roles'] })
+    })
+    await waitFor(() => expect(screen.getByTestId('probe')).toHaveTextContent('roles= administer=false'))
+    expect(screen.getByTestId('probe')).toHaveTextContent('manageFinances=false')
+  })
+
+  it('a member with no roles gets no privileges', async () => {
+    state.session = ROSTERED_SESSION
+    state.memberRow = MEMBER_ROW
+    renderApp(<RoleProbe />)
+    expect(await screen.findByTestId('probe')).toHaveTextContent(
+      'roles= administer=false manageRoles=false viewFinances=false manageFinances=false',
+    )
   })
 })

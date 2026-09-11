@@ -67,7 +67,7 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
       <Centered>
         <h1 className="text-lg font-semibold text-slate-900">No access</h1>
         <p className="mt-2 text-slate-700">
-          Your account is not on the club roster; ask the board to add you.
+          Your account is not on the club roster; ask the president or vice-president to add you.
         </p>
         <button
           type="button"

@@ -151,8 +151,8 @@ The database schema is in `supabase/migrations/`. Run the migrations in order
 against a new project (SQL Editor → paste → Run), then load the reference data.
 
 **Authentication settings:**
-1. **Authentication → Providers**: Email on, "Confirm email" **off** (the board
-   issues accounts to people it knows).
+1. **Authentication → Providers**: Email on, "Confirm email" **off** (accounts
+   are issued by hand, to people the club knows).
 2. **Authentication → Sign-ups**: public sign-up **disabled**.
 3. Every table has Row Level Security on. Do not turn it off "just to test".
 
@@ -165,6 +165,14 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260102000000_views_security_invoker.sql` | **security fix** — see §11 |
 | `20260103000000_attention_clause_key.sql` | adds `clause_key` to `v_attention` |
 | `20260104000000_set_current_season.sql` | atomic season switch |
+| `20260105000000_privileged_roles.sql` | privileged roles (`member_roles`) and the policies that use them — see §7 |
+| `20260106000000_finance_ledger.sql` | the finance ledger (`finance_entries`): readable by the four roles, writable by the Treasurer only — see §7 |
+
+Run them in exactly this order. `20260105` rewrites the season switch from
+`20260104`, so running `04` again afterwards would break it. `20260105` also
+converts any existing board members into roles by job title ("President" →
+President, "Vice…" → Vice President, "Treasurer" → Treasurer, anything else →
+Vice President, so nobody loses access they had) and prints one line per person.
 
 Sanity check afterwards:
 
@@ -191,7 +199,69 @@ Step 3 is what actually grants access. A person with a login but no `members`
 row sees "Your account is not on the club roster" and no data — the database
 returns nothing to them. The `members` table *is* the allowlist.
 
-Only board members (`is_board = true`) can do step 3.
+Only the President or Vice President can do step 3. Linking someone gives them
+no privileged role.
+
+### Roles
+
+Four privileged roles, stored one row per role in the `member_roles` table — a
+person can hold several (treasurer *and* developer, say). The job title on the
+roster ("Chassis lead") is only a label and grants nothing.
+
+| | Read everything, incl. money | Roster, subsystems, rulebook, milestones, seasons | Change money | Give / take away roles |
+|---|---|---|---|---|
+| **President** | yes | yes | no | **yes — the only one** |
+| **Vice President** | yes | yes | no | no |
+| **Treasurer** | yes | no | **yes — the only one** | no |
+| **Developer** | yes | no | no | no |
+| Everyone else on the roster | everything except money | no | no | no |
+
+Everyone on the roster keeps the day-to-day work: the register, tasks, meetings,
+topics, the spec sheet and handover notes.
+
+These rules are enforced by Postgres Row Level Security, not by the app. The app
+hides controls you cannot use; a request made any other way — the browser
+console, `curl`, a modified copy of the app — is refused by the database just
+the same.
+
+**The first president** has to be set in the Supabase **SQL Editor**, because
+only a president can assign roles:
+
+```sql
+insert into member_roles (member_id, role)
+select id, 'president' from members where full_name = 'Their Full Name';
+```
+
+After that, the President assigns everything else in **Settings → Roster → Change
+roles** (the button only the President sees). Developer and Vice President changes
+save straight away; anything touching President or Treasurer shows what it will
+mean and asks for confirmation first. Making someone Treasurer offers to take the
+role from the current Treasurer (the new one is added before the old one is
+removed), and giving President to someone else offers to hand over — again adding
+the new President before removing yours. The club always keeps at least one
+President: the dialog says so before you try, and the database refuses it anyway.
+
+**Checking the rules.** Paste `supabase/tests/roles_rls_test.sql` into the SQL
+Editor and run it. It acts as each role in turn, tries about 80 allowed and
+forbidden actions, and always ends with an error that starts
+`ROLE CHECKS PASSED` or `ROLE CHECKS FAILED` — raising that error is what rolls
+every test row back. Run it after any change to a policy.
+`supabase/tests/finance_rls_test.sql` does the same for the finance ledger
+(28 checks).
+
+### Finances
+
+**Finances** in the menu is the season's income and expenses, in euros (MotoStudent's
+economical plan is in euros too). The President, Vice President and Developer see
+it read-only; only the Treasurer gets **Add entry**, **Edit** and **Delete**;
+ordinary members have no menu item, and typing the address just explains who can
+see it. Amounts are stored as whole cents. Who recorded an entry is stamped by the
+database, not sent by the browser.
+
+Any future finance table must copy the same four policies from
+`20260106000000_finance_ledger.sql` (`can_view_finances()` to read,
+`can_manage_finances()` to write) — never the `member_read` / `member_write`
+policies the other tables use, or every member would see and edit the money.
 
 ### Retiring someone
 
@@ -218,8 +288,8 @@ What happens:
 - last year's work **stays readable**: switch back and it is all still there.
 
 The switch runs inside a single database transaction (`set_current_season()`), so
-the club can never end up with two current seasons — or none. Only board members
-can switch.
+the club can never end up with two current seasons — or none. Only the
+President or Vice President can switch.
 
 ---
 
@@ -276,7 +346,7 @@ compile, which is the point.
 
 These were expensive to get right. Please read before changing them.
 
-- **Row Level Security is the security.** A client-side `if (isBoard)` is a
+- **Row Level Security is the security.** A client-side `if (canAdminister)` is a
   suggestion — anyone can edit JavaScript in their browser. Every real rule is a
   database policy. Never disable RLS to make something work.
 - **Views need `security_invoker = on`.** A Postgres view runs as its *owner*
@@ -285,6 +355,14 @@ These were expensive to get right. Please read before changing them.
   `v_current_season`. Migration `20260102000000` fixes it. If you add a view, set
   the option — and note that `CREATE OR REPLACE VIEW` **resets** it.
 - **Never ship the `service_role` key to the browser.**
+- **Permissions live in `member_roles`, never on `members`.** Everyone may edit
+  their own `members` row, so a permission stored there can be self-granted —
+  that is exactly how the old `is_board` flag could be abused, which migration
+  `20260105000000` removed. Only the president may write `member_roles`.
+- **One place decides what the UI shows.** Components ask `usePermissions()`
+  (`src/auth/permissions.ts`), which mirrors the SQL functions `is_admin()`,
+  `can_manage_roles()`, `can_view_finances()` and `can_manage_finances()`.
+  Change the SQL first, then the mirror, then rerun the role test (§7).
 - **`clauses` is the rulebook, not a worksheet.** Team progress goes in
   `clause_status`. Never edit `clauses` to record what the team did.
 - **Show `printed_ref`, join on `clause_key`.** The book prints two different

@@ -11,6 +11,10 @@ export const queryKeys = {
   // Global reference data — the rulebook and the roster outlive any season.
   clauses: ['clauses'] as const,
   members: ['members'] as const,
+  // Who holds which privileged role. Every role query sits under this prefix,
+  // so one invalidation refreshes the roster's badges AND the signed-in
+  // person's own permissions (AuthProvider) together.
+  memberRoles: ['member_roles'] as const,
   subteams: ['subteams'] as const,
 
   season: (seasonId: string) => ['season', seasonId] as const,

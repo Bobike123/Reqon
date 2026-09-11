@@ -76,7 +76,7 @@ function makeBuilder(table: string) {
 const supabase = { from: (t: string) => makeBuilder(t) }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER, roles: [] }),
 }))
 
 const { default: SpecSheet } = await import('./SpecSheet.tsx')

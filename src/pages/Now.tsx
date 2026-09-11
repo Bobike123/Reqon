@@ -171,7 +171,7 @@ export default function Now() {
             </h2>
             {(progress.data ?? []).length === 0 ? (
               <p className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                No subsystems yet. The board sets these up in Settings.
+                No subsystems yet. The president or vice-president sets these up in Settings.
               </p>
             ) : (
               <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">

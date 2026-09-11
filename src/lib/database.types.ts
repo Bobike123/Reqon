@@ -216,6 +216,74 @@ export type Database = {
           },
         ]
       }
+      finance_entries: {
+        Row: {
+          amount_cents: number
+          category: string | null
+          created_at: string
+          created_by: string | null
+          description: string
+          entry_date: string
+          id: string
+          kind: Database["public"]["Enums"]["finance_kind"]
+          season_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_cents: number
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description: string
+          entry_date?: string
+          id?: string
+          kind: Database["public"]["Enums"]["finance_kind"]
+          season_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_cents?: number
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          entry_date?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["finance_kind"]
+          season_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "finance_entries_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_entries_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_entries_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "finance_entries_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+        ]
+      }
       handover_notes: {
         Row: {
           body: string
@@ -335,13 +403,48 @@ export type Database = {
           },
         ]
       }
+      member_roles: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          member_id: string
+          role: Database["public"]["Enums"]["privileged_role"]
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          member_id: string
+          role: Database["public"]["Enums"]["privileged_role"]
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          member_id?: string
+          role?: Database["public"]["Enums"]["privileged_role"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "member_roles_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "member_roles_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       members: {
         Row: {
           created_at: string
           full_name: string
           id: string
           initials: string | null
-          is_board: boolean
           notes: string | null
           phone: string | null
           role: string
@@ -355,7 +458,6 @@ export type Database = {
           full_name: string
           id: string
           initials?: string | null
-          is_board?: boolean
           notes?: string | null
           phone?: string | null
           role?: string
@@ -369,7 +471,6 @@ export type Database = {
           full_name?: string
           id?: string
           initials?: string | null
-          is_board?: boolean
           notes?: string | null
           phone?: string | null
           role?: string
@@ -989,13 +1090,22 @@ export type Database = {
       }
     }
     Functions: {
-      is_board: { Args: never; Returns: boolean }
+      can_manage_finances: { Args: never; Returns: boolean }
+      can_manage_roles: { Args: never; Returns: boolean }
+      can_view_finances: { Args: never; Returns: boolean }
+      has_role: {
+        Args: { wanted: Database["public"]["Enums"]["privileged_role"] }
+        Returns: boolean
+      }
+      is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }
     }
     Enums: {
       clause_state: "open" | "wip" | "compliant" | "verified" | "blocked" | "na"
+      finance_kind: "income" | "expense"
       member_state: "active" | "alumni"
+      privileged_role: "developer" | "treasurer" | "president" | "vicepresident"
       task_state: "urgent" | "todo" | "wip" | "blocked" | "done" | "cancelled"
       topic_state: "open" | "agenda" | "decided" | "parked"
     }
@@ -1126,7 +1236,9 @@ export const Constants = {
   public: {
     Enums: {
       clause_state: ["open", "wip", "compliant", "verified", "blocked", "na"],
+      finance_kind: ["income", "expense"],
       member_state: ["active", "alumni"],
+      privileged_role: ["developer", "treasurer", "president", "vicepresident"],
       task_state: ["urgent", "todo", "wip", "blocked", "done", "cancelled"],
       topic_state: ["open", "agenda", "decided", "parked"],
     },

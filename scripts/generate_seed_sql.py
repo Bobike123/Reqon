@@ -21,6 +21,7 @@ Re-run after dropping in a new edition's seed_clauses.csv:
     python3 scripts/generate_seed_sql.py
 """
 import csv
+import re
 import json
 import os
 
@@ -29,6 +30,19 @@ REPO = os.path.dirname(HERE)
 HANDOFF = os.path.join(os.path.dirname(REPO), "handoff")
 
 SEASON = "2026/27"
+
+
+def privileged_role_for(title):
+    """The same title mapping the is_board migration in
+    supabase/migrations/20260105000000_privileged_roles.sql uses."""
+    t = (title or "").lower()
+    if re.search(r"\bvice", t) or re.match(r"^\s*vp\b", t):
+        return "vicepresident"
+    if re.search(r"\bpresident\b", t):
+        return "president"
+    if re.search(r"\btreasurer\b", t):
+        return "treasurer"
+    return "vicepresident"
 
 
 def q(value):
@@ -210,11 +224,18 @@ def build_dev_seed(ref):
         w("       'email', now(), now(), now()")
         w(f"from auth.users u where u.email = {q(email)};")
         w("")
-        w("insert into members (id, full_name, role, study_year, skills, status, is_board, notes)")
+        w("insert into members (id, full_name, role, study_year, skills, status, notes)")
         w(f"select u.id, {q(m['name'])}, {q(m['role'])}, {q(m.get('year'))}, {q(m.get('skills'))},")
-        w(f"       {q('active' if m.get('active') else 'alumni')}, {qbool(m['id'] in board)}, {q(m.get('note'))}")
+        w(f"       {q('active' if m.get('active') else 'alumni')}, {q(m.get('note'))}")
         w(f"from auth.users u where u.email = {q(email)};")
         w("")
+        if m['id'] in board:
+            # Privileged roles live in member_roles (migration 20260105), never
+            # on members. Board members map by job title, as that migration does.
+            w("insert into member_roles (member_id, role, assigned_by)")
+            w(f"select u.id, {q(privileged_role_for(m['role']))}::privileged_role, null")
+            w(f"from auth.users u where u.email = {q(email)} on conflict do nothing;")
+            w("")
 
     def member_ref(key):
         """SQL scalar for a member id, or null when the seed has no owner."""

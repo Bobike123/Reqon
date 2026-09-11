@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }))
+const { signOut, who } = vi.hoisted(() => ({ signOut: vi.fn(), who: { roles: [] as string[] } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1', full_name: 'Ada Rider', is_board: true }, signOut }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1', full_name: 'Ada Rider' }, roles: who.roles, signOut }),
 }))
 vi.mock('../data/useCurrentSeason.ts', () => ({
   useCurrentSeason: () => ({ data: { id: 's1', label: '2026/27' } }),
@@ -29,6 +29,7 @@ function renderHeader(path = '/register') {
 
 beforeEach(() => {
   signOut.mockClear()
+  who.roles = []
   window.localStorage.setItem('paddock-control.tutorial.v1', 'completed')
 })
 
@@ -102,5 +103,26 @@ describe('tutorial entry point', () => {
     renderHeader()
     await user.click(screen.getAllByRole('button', { name: 'Tutorial' })[0])
     expect(await screen.findByRole('dialog', { name: 'Restart here' })).toBeInTheDocument()
+  })
+})
+
+describe('permission-aware navigation', () => {
+  it('offers Finances only to the roles that can see money', () => {
+    for (const roles of [['president'], ['vicepresident'], ['treasurer'], ['developer']]) {
+      who.roles = roles
+      const { unmount } = renderHeader()
+      expect(within(desktopNav()).getByRole('link', { name: 'Finances' })).toHaveAttribute('href', '/finances')
+      unmount()
+    }
+    // An ordinary member could see nothing there, so there is no dead link.
+    who.roles = []
+    renderHeader()
+    expect(within(desktopNav()).queryByRole('link', { name: 'Finances' })).not.toBeInTheDocument()
+  })
+
+  it('shows your roles beside your name, in words', () => {
+    who.roles = ['developer', 'treasurer']
+    renderHeader()
+    expect(screen.getByText(/· Treasurer, Developer/)).toBeInTheDocument()
   })
 })

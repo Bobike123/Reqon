@@ -8,3 +8,6 @@ const base =
 export const buttonPrimary = `${base} bg-slate-900 text-white hover:bg-slate-800`
 export const buttonSecondary = `${base} border border-slate-300 bg-white text-slate-800 hover:border-slate-400 hover:bg-slate-50`
 export const buttonQuiet = `${base} text-slate-700 underline underline-offset-2 hover:text-slate-900`
+
+// Only for the confirming step of something that cannot be undone.
+export const buttonDanger = `${base} bg-red-700 text-white hover:bg-red-800`

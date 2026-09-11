@@ -11,7 +11,7 @@ const state = {
 }
 
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1' } }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1' }, roles: [] }),
 }))
 vi.mock('../data/useNowMetrics.ts', () => ({
   useAttention: () => ({ data: state.attention, isLoading: false, error: null }),

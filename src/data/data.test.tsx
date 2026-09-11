@@ -102,9 +102,9 @@ const supabase = { from: (table: string) => makeBuilder(table) }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 
 // Signed in as a real rostered member, which is what attribution depends on.
-const MEMBER = { id: 'member-42', full_name: 'Ada Rider', is_board: false }
+const MEMBER = { id: 'member-42', full_name: 'Ada Rider' }
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: MEMBER.id }, member: MEMBER }),
+  useAuth: () => ({ status: 'member', user: { id: MEMBER.id }, member: MEMBER, roles: [] }),
 }))
 
 const { queryKeys } = await import('./queryKeys.ts')

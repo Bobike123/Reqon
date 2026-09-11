@@ -23,7 +23,7 @@ const PROGRESS = [
 ]
 
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1' } }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1' }, roles: [] }),
 }))
 vi.mock('../data/useClauses.ts', () => ({
   useClauses: () => ({ data: CLAUSES, isLoading: false, error: null }),

@@ -22,7 +22,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'main-nav',
     title: 'Getting around',
-    body: 'These are the eight screens. The one you are on is highlighted. On a phone they sit under Menu.',
+    body: 'These are the screens. The one you are on is highlighted. On a phone they sit under Menu.',
   },
   {
     id: 'now',
@@ -92,7 +92,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/settings',
     target: 'settings-overview',
     title: 'Settings',
-    body: 'The roster, subsystems, milestone dates, handover notes for next year’s team, and starting a new season. Some of it is for board members only.',
+    body: 'The roster, subsystems, milestone dates, handover notes for next year’s team, and starting a new season. Some of it is only for the President and Vice President.',
   },
   {
     id: 'finish',

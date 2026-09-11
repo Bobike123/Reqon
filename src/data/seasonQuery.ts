@@ -16,6 +16,8 @@ import { useCurrentSeason } from './useCurrentSeason.ts'
 export function useSeasonScopedQuery<TRow>(
   entity: string,
   load: (seasonId: string) => Promise<TRow>,
+  // false = do not ask at all (e.g. a screen this person may not read).
+  options: { enabled?: boolean } = {},
 ): UseQueryResult<TRow, Error> & { seasonId: string | undefined } {
   const season = useCurrentSeason()
   const seasonId = season.data?.id
@@ -24,7 +26,7 @@ export function useSeasonScopedQuery<TRow>(
     queryKey: seasonId
       ? queryKeys.seasonScoped(seasonId, entity)
       : ['season', 'unknown', entity],
-    enabled: Boolean(seasonId),
+    enabled: Boolean(seasonId) && (options.enabled ?? true),
     queryFn: () => load(seasonId as string),
   })
 

@@ -1,21 +1,42 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // A fake that enforces the SAME rules the database does, so a test can tell the
 // difference between "the UI hid the button" and "the write was refused".
-const BOARD = { id: 'm1', full_name: 'Ada Rider', role: 'President', is_board: true, status: 'active' }
-const CREW = { id: 'm2', full_name: 'Bo Wrench', role: 'Chassis', is_board: false, status: 'active' }
+// The rules are those of supabase/migrations/20260105000000_privileged_roles.sql;
+// the real database is checked by supabase/tests/roles_rls_test.sql.
+type Member = { id: string; full_name: string; role: string; status: string }
+type RoleRow = { member_id: string; role: string; assigned_by?: string | null }
+
+// Job titles deliberately differ from the privileged roles: a title is a label.
+const PRES: Member = { id: 'm1', full_name: 'Ada Rider', role: 'Team lead', status: 'active' }
+const CREW: Member = { id: 'm2', full_name: 'Bo Wrench', role: 'Chassis', status: 'active' }
+const VP: Member = { id: 'm3', full_name: 'Cy Deputy', role: 'Operations', status: 'active' }
+const DEV: Member = { id: 'm4', full_name: 'Di Coder', role: 'Software', status: 'active' }
+const TREAS: Member = { id: 'm5', full_name: 'Eve Ledger', role: 'Finance', status: 'active' }
+
+const LAST_PRESIDENT =
+  'The club must always have a president. Give the role to someone else first, then remove it here.'
 
 let db: Record<string, Record<string, unknown>[]>
 let rpcCalls: { fn: string; args: unknown }[]
-let caller = BOARD
+// Every role write the fake accepted, in order.
+let writes: string[] = []
+let caller: Member = PRES
 
 function reset() {
   db = {
-    members: [{ ...BOARD }, { ...CREW }],
+    members: [PRES, CREW, VP, DEV, TREAS].map((m) => ({ ...m })),
+    member_roles: [
+      { member_id: 'm1', role: 'president' },
+      { member_id: 'm3', role: 'vicepresident' },
+      { member_id: 'm4', role: 'developer' },
+      { member_id: 'm5', role: 'treasurer' },
+    ],
     subteams: [{ key: 'GEOM', name: 'Design Envelope', description: null, lead_id: null, is_parked: false, sort_order: 0 }],
     seasons: [
       { id: 'sa', label: '2026/27', edition: null, is_current: true },
@@ -28,15 +49,22 @@ function reset() {
   }
   db.v_current_season = db.seasons.filter((s) => s.is_current)
   rpcCalls = []
-  caller = BOARD
+  writes = []
+  caller = PRES
 }
 
-// Mirrors the real policies: members INSERT needs is_board(); subteams ALL
-// needs is_board(); there is NO delete policy for members at all.
-function policyAllows(table: string, op: string): boolean {
-  if (table === 'members' && op === 'insert') return caller.is_board
+const rolesOf = (id: string) =>
+  (db.member_roles as RoleRow[]).filter((r) => r.member_id === id).map((r) => r.role)
+// is_admin() and can_manage_roles(), as the SQL defines them.
+const isAdmin = (m: Member) => rolesOf(m.id).some((r) => r === 'president' || r === 'vicepresident')
+const isPresident = (m: Member) => rolesOf(m.id).includes('president')
+
+function policyAllows(table: string, op: string, filters: Record<string, unknown>): boolean {
+  if (table === 'members' && op === 'insert') return isAdmin(caller)
+  if (table === 'members' && op === 'update') return filters.id === caller.id || isAdmin(caller)
   if (table === 'members' && op === 'delete') return false
-  if (table === 'subteams') return caller.is_board
+  if (['subteams', 'seasons', 'milestones', 'clauses'].includes(table)) return isAdmin(caller)
+  if (table === 'member_roles') return (op === 'insert' || op === 'delete') && isPresident(caller)
   return true
 }
 
@@ -44,29 +72,49 @@ function makeBuilder(table: string) {
   const ctx: { op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean } = {
     op: 'select', filters: {}, single: false,
   }
+  const matches = (r: Record<string, unknown>) =>
+    Object.entries(ctx.filters).every(([k, v]) => r[k] === v)
   const run = () => {
-    if (ctx.op !== 'select' && !policyAllows(table, ctx.op)) {
+    if (ctx.op === 'delete') {
+      // As in PostgREST: a delete RLS refuses is not an error. It matches no rows.
+      if (!policyAllows(table, 'delete', ctx.filters)) return { data: [], error: null }
+      const doomed = db[table].filter(matches)
+      // The guard_last_president() trigger.
+      const presidents = db[table].filter((r) => table === 'member_roles' && r.role === 'president')
+      if (presidents.length > 0 && presidents.every((r) => doomed.includes(r))) {
+        return { data: null, error: { message: LAST_PRESIDENT, code: '42501' } }
+      }
+      db[table] = db[table].filter((r) => !matches(r))
+      if (table === 'member_roles') for (const r of doomed) writes.push(`delete member_roles ${r.member_id} ${r.role}`)
+      return { data: doomed, error: null }
+    }
+    if (ctx.op !== 'select' && !policyAllows(table, ctx.op, ctx.filters)) {
       return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
     }
-    if (ctx.op === 'insert' || ctx.op === 'upsert') {
-      const row: Record<string, unknown> = {
-        id: `${table}-${db[table].length + 1}`,
-        ...ctx.payload,
+    if (table === 'member_roles' && ctx.op === 'insert') {
+      // The primary key (member_id, role).
+      const { member_id, role } = ctx.payload as RoleRow
+      if ((db.member_roles as RoleRow[]).some((r) => r.member_id === member_id && r.role === role)) {
+        return { data: null, error: { message: 'duplicate key value violates unique constraint "member_roles_pkey"', code: '23505' } }
       }
+      writes.push(`insert member_roles ${member_id} ${role}`)
+    }
+    if (ctx.op === 'insert' || ctx.op === 'upsert') {
+      const row: Record<string, unknown> =
+        table === 'member_roles'
+          ? { assigned_by: caller.id, ...ctx.payload } // the column default: auth.uid()
+          : { id: `${table}-${db[table].length + 1}`, ...ctx.payload }
       const keyField = table === 'handover_notes' ? 'subteam_key' : 'id'
-      const i = db[table].findIndex((r) => r[keyField] === row[keyField])
+      const i = db[table].findIndex((r) => r[keyField] !== undefined && r[keyField] === row[keyField])
       if (ctx.op === 'upsert' && i >= 0) db[table][i] = { ...db[table][i], ...ctx.payload }
       else db[table].push(row)
       return { data: row, error: null }
     }
     if (ctx.op === 'update') {
-      db[table] = db[table].map((r) =>
-        Object.entries(ctx.filters).every(([k, v]) => r[k] === v) ? { ...r, ...ctx.payload } : r,
-      )
+      db[table] = db[table].map((r) => (matches(r) ? { ...r, ...ctx.payload } : r))
       return { data: null, error: null }
     }
-    let rows = [...(db[table] ?? [])]
-    for (const [k, v] of Object.entries(ctx.filters)) rows = rows.filter((r) => r[k] === v)
+    const rows = (db[table] ?? []).filter(matches)
     return { data: ctx.single ? (rows[0] ?? null) : rows, error: null }
   }
   const b: Record<string, unknown> = {
@@ -86,10 +134,16 @@ function makeBuilder(table: string) {
 const supabase = {
   from: (t: string) => makeBuilder(t),
   rpc: async (fn: string, args: Record<string, unknown>) => {
+    // What the app asks to explain a delete that matched nothing.
+    if (fn === 'can_manage_roles') return { data: isPresident(caller), error: null }
+    if (fn === 'can_manage_finances') return { data: rolesOf(caller.id).includes('treasurer'), error: null }
     rpcCalls.push({ fn, args })
-    // The real function refuses non-board callers in SQL.
-    if (!caller.is_board) {
-      return { data: null, error: { message: 'Only board members may change the current season', code: '42501' } }
+    // The real function refuses anyone but the president or vice-president in SQL.
+    if (!isAdmin(caller)) {
+      return {
+        data: null,
+        error: { message: 'Only the president or vice-president may change the current season', code: '42501' },
+      }
     }
     // One transaction: clear then set.
     db.seasons = db.seasons.map((s) => ({ ...s, is_current: s.id === args.p_season_id }))
@@ -98,12 +152,17 @@ const supabase = {
   },
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
+// The signed-in person's roles come from member_roles, exactly as AuthProvider
+// loads them. usePermissions() reads this same mocked context.
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: caller.id }, member: caller }),
+  useAuth: () => ({ status: 'member', user: { id: caller.id }, member: caller, roles: rolesOf(caller.id) }),
 }))
 
 const { default: Settings } = await import('./Settings.tsx')
 const { buildSeasonExport } = await import('../data/exportSeason.ts')
+const { useAddMember, useAssignRole, useRemoveRole, useSetCurrentSeason } = await import(
+  '../data/useSettings.ts'
+)
 
 function renderSettings() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
@@ -114,55 +173,285 @@ function renderSettings() {
   )
 }
 
+// Call a data hook directly — what someone bypassing the UI would do.
+function hook<T>(use: () => T) {
+  const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+  return renderHook(use, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    ),
+  }).result
+}
+
 beforeEach(reset)
 
-// --- Authorization -----------------------------------------------------------
+// --- Who sees what -----------------------------------------------------------
 
-describe('board vs non-board access', () => {
-  it('a board member sees the roster, subsystem, milestone and season controls', async () => {
+const changeRolesButtons = () => screen.queryAllByRole('button', { name: /^Change roles for/ })
+
+describe('who sees what', () => {
+  it('the president sees every admin control, and a role button for each member', async () => {
     renderSettings()
     expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
     expect(screen.getByText('Subsystems')).toBeInTheDocument()
     expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
+    // The roster rows arrive with the members query, after the forms.
+    expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
+    expect(changeRolesButtons()).toHaveLength(db.members.length)
+    expect(screen.getByText(/including who holds which role/)).toBeInTheDocument()
   })
 
-  it('a non-board member sees none of them, and is told why', async () => {
+  it('the vice-president sees the same admin controls and every role, but no way to change roles', async () => {
+    caller = VP
+    renderSettings()
+    expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
+    expect(screen.getByText('Subsystems')).toBeInTheDocument()
+    expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
+    expect(screen.getByText('Start a new season')).toBeInTheDocument()
+    // Wait for the roster rows, or the absence checks below prove nothing.
+    await screen.findByTestId('member-m2')
+    expect(changeRolesButtons()).toHaveLength(0)
+    expect(await within(screen.getByTestId('member-m1')).findByText('President')).toBeInTheDocument()
+    expect(screen.getByText(/except roles, which only the President can give or take away/)).toBeInTheDocument()
+    expect(screen.getByText(/Roles are given and taken away by the President/)).toBeInTheDocument()
+  })
+
+  for (const [label, who, shown] of [
+    ['team member', CREW, 'Member (no privileged role)'],
+    ['developer', DEV, 'Developer'],
+    ['treasurer', TREAS, 'Treasurer'],
+  ] as const) {
+    it(`a ${label} sees no admin or role controls, and is told why in words`, async () => {
+      caller = who
+      renderSettings()
+      expect(await screen.findByText(/reserved for the President and Vice President/)).toBeInTheDocument()
+      expect(screen.getByText(shown, { selector: 'strong' })).toBeInTheDocument()
+      await screen.findByTestId('member-m2')
+      expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
+      expect(screen.queryByText('Subsystems')).not.toBeInTheDocument()
+      expect(screen.queryByText('Start a new season')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('make-current-sb')).not.toBeInTheDocument()
+      expect(changeRolesButtons()).toHaveLength(0)
+      // Handover notes stay open to everyone.
+      expect(screen.getByText('Handover notes')).toBeInTheDocument()
+    })
+  }
+
+  it('a job title of "President" grants nothing', async () => {
+    caller = { ...CREW, role: 'President' }
+    db.members[1].role = 'President'
+    renderSettings()
+    expect(await screen.findByText(/reserved for the President/)).toBeInTheDocument()
+    expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
+  })
+
+  it('everyone can see who holds which role, by name', async () => {
     caller = CREW
     renderSettings()
-    expect(await screen.findByText(/reserved for the board/)).toBeInTheDocument()
-    expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
-    expect(screen.queryByText('Subsystems')).not.toBeInTheDocument()
-    expect(screen.queryByText('Start a new season')).not.toBeInTheDocument()
-    // Handover notes stay open to everyone.
-    expect(screen.getByText('Handover notes')).toBeInTheDocument()
+    expect(await within(await screen.findByTestId('member-m1')).findByText('President')).toBeInTheDocument()
+    expect(within(screen.getByTestId('member-m3')).getByText('Vice President')).toBeInTheDocument()
+    expect(within(screen.getByTestId('member-m4')).getByText('Developer')).toBeInTheDocument()
+    expect(within(screen.getByTestId('member-m5')).getByText('Treasurer')).toBeInTheDocument()
+    expect(within(screen.getByTestId('member-m2')).queryByText(/President|Treasurer|Developer/)).toBeNull()
+  })
+})
+
+// --- Role management ---------------------------------------------------------
+
+async function openRoles(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(await screen.findByRole('button', { name: `Change roles for ${name}` }))
+  return within(await screen.findByRole('dialog', { name: new RegExp(`^Roles for ${name}`) }))
+}
+
+describe('role management', () => {
+  it('a harmless change saves straight away and shows up in the roster', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    expect(dialog.getByText('Member (no privileged role)')).toBeInTheDocument()
+    await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
+    await user.click(dialog.getByRole('button', { name: 'Save roles' }))
+
+    expect(await screen.findByText('Roles updated for Bo Wrench.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save roles' })).not.toBeInTheDocument()
+    expect(db.member_roles).toContainEqual({ member_id: 'm2', role: 'developer', assigned_by: 'm1' })
+    expect(await within(screen.getByTestId('member-m2')).findByText('Developer')).toBeInTheDocument()
   })
 
-  it('the DATABASE refuses a non-board write even if the UI is bypassed', async () => {
-    caller = CREW
-    const { useAddMember } = await import('../data/useSettings.ts')
-    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-    const { renderHook } = await import('@testing-library/react')
-    const { result } = renderHook(() => useAddMember(), {
-      wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
-    })
+  it('making someone President asks first, says what it means, and writes nothing until confirmed', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'President' }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+
+    expect(dialog.getByRole('heading', { name: 'Check before you confirm' })).toHaveFocus()
+    expect(dialog.getByText(/Bo Wrench becomes President.*including yours/)).toBeInTheDocument()
+    expect(writes).toEqual([])
+
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
+    await waitFor(() => expect(rolesOf('m2')).toEqual(['president']))
+    // Not a hand-over unless asked for.
+    expect(rolesOf('m1')).toEqual(['president'])
+  })
+
+  it('Back and Cancel leave everything as it was', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'President' }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    await user.click(dialog.getByRole('button', { name: 'Back' }))
+    expect(dialog.getByRole('checkbox', { name: 'President' })).toBeChecked()
+    await user.click(dialog.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('button', { name: 'Review change' })).not.toBeInTheDocument()
+    expect(writes).toEqual([])
+    // Focus goes back to the button that opened the dialog.
+    expect(screen.getByRole('button', { name: 'Change roles for Bo Wrench' })).toHaveFocus()
+  })
+
+  it('replacing the Treasurer gives the role first, then takes it from the old one', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'Treasurer' }))
+    expect(dialog.getByText('Eve Ledger is Treasurer now.')).toBeInTheDocument()
+    expect(dialog.getByRole('radio', { name: /^Replace/ })).toBeChecked()
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    expect(dialog.getByText(/Eve Ledger is no longer Treasurer/)).toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
+
+    await waitFor(() => expect(rolesOf('m5')).toEqual([]))
+    expect(rolesOf('m2')).toEqual(['treasurer'])
+    expect(writes).toEqual(['insert member_roles m2 treasurer', 'delete member_roles m5 treasurer'])
+  })
+
+  it('keeping both Treasurers takes the role from nobody', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'Treasurer' }))
+    await user.click(dialog.getByRole('radio', { name: /^Keep both/ }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
+    await waitFor(() => expect(rolesOf('m2')).toEqual(['treasurer']))
+    expect(rolesOf('m5')).toEqual(['treasurer'])
+  })
+
+  it('the only President cannot remove their own presidency, and the database is never asked', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Ada Rider')
+    expect(dialog.getByRole('heading', { name: 'Roles for Ada Rider (you)' })).toBeInTheDocument()
+    await user.click(dialog.getByRole('checkbox', { name: 'President' }))
+    expect(dialog.getByRole('alert')).toHaveTextContent('You are the only President')
+    expect(dialog.getByRole('button', { name: 'Review change' })).toBeDisabled()
+    expect(writes).toEqual([])
+  })
+
+  it('handing over adds the new President before the old one steps down, and the old one loses the controls', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'President' }))
+    await user.click(dialog.getByRole('checkbox', { name: /Hand over/ }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    expect(dialog.getByText(/You stop being President/)).toBeInTheDocument()
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
+
+    await waitFor(() => expect(rolesOf('m1')).toEqual([]))
+    expect(rolesOf('m2')).toEqual(['president'])
+    expect(writes).toEqual(['insert member_roles m2 president', 'delete member_roles m1 president'])
+    // Ada is no longer President, so the role buttons go away without a reload.
+    await waitFor(() => expect(changeRolesButtons()).toHaveLength(0))
+  })
+
+  it('a refusal is shown as a permission error, and the dialog keeps what was chosen', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    // Meanwhile, on another device, the presidency moves to Cy.
+    db.member_roles = [
+      ...(db.member_roles as RoleRow[]).filter((r) => r.member_id !== 'm1'),
+      { member_id: 'm3', role: 'president' },
+    ]
+    await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
+    await user.click(dialog.getByRole('button', { name: 'Save roles' }))
+
+    expect(await dialog.findByRole('alert')).toHaveTextContent(
+      "Not permitted: You don't have permission to give the Developer role. Nothing was changed.",
+    )
+    expect(rolesOf('m2')).toEqual([])
+    expect(dialog.getByRole('checkbox', { name: 'Developer' })).toBeChecked()
+  })
+
+  it('a stale screen that re-adds a role someone already holds is not an error', async () => {
+    const assign = hook(() => useAssignRole())
+    await expect(assign.current.mutateAsync({ memberId: 'm3', role: 'vicepresident' })).resolves.toBeUndefined()
+    expect(rolesOf('m3')).toEqual(['vicepresident'])
+  })
+
+  it('the DATABASE refuses a vice-president who bypasses the UI to assign a role', async () => {
+    caller = VP
+    const assign = hook(() => useAssignRole())
     await expect(
-      result.current.mutateAsync({ id: 'x', fullName: 'Sneaky', role: 'r', isBoard: true }),
-    ).rejects.toThrow(/row-level security/)
-    expect(db.members).toHaveLength(2)
+      assign.current.mutateAsync({ memberId: 'm3', role: 'president' }),
+    ).rejects.toThrow(/don't have permission to give the President role/)
+    expect(rolesOf('m3')).toEqual(['vicepresident'])
   })
 
-  it('the season switch is refused for a non-board caller by the database', async () => {
-    caller = CREW
-    const { useSetCurrentSeason } = await import('../data/useSettings.ts')
-    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
-    const { renderHook } = await import('@testing-library/react')
-    const { result } = renderHook(() => useSetCurrentSeason(), {
-      wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
+  for (const [label, who] of [['developer', DEV], ['treasurer', TREAS], ['team member', CREW]] as const) {
+    it(`the DATABASE refuses a ${label} who makes themselves president`, async () => {
+      caller = who
+      const assign = hook(() => useAssignRole())
+      await expect(
+        assign.current.mutateAsync({ memberId: who.id, role: 'president' }),
+      ).rejects.toThrow(/don't have permission/)
+      expect(rolesOf(who.id)).not.toContain('president')
     })
-    await expect(result.current.mutateAsync('sb')).rejects.toThrow(/board members/)
-    expect(db.seasons.find((s) => s.id === 'sa')?.is_current).toBe(true)
+  }
+
+  it('a removal the database silently refuses is reported, not treated as done', async () => {
+    caller = VP
+    const remove = hook(() => useRemoveRole())
+    // RLS makes this delete match nothing, with no error — the hook must notice.
+    await expect(
+      remove.current.mutateAsync({ memberId: 'm1', role: 'president' }),
+    ).rejects.toThrow(/don't have permission to take away the President role/)
+    expect(rolesOf('m1')).toEqual(['president'])
   })
+
+  it('the database guard on the last President is shown in its own words', async () => {
+    const remove = hook(() => useRemoveRole())
+    await expect(
+      remove.current.mutateAsync({ memberId: 'm1', role: 'president' }),
+    ).rejects.toThrow(/must always have a president/)
+    expect(rolesOf('m1')).toEqual(['president'])
+  })
+})
+
+// --- Database backstops for administration -----------------------------------
+
+describe('administration is enforced by the database', () => {
+  it('refuses a roster write from a non-admin even if the UI is bypassed', async () => {
+    caller = CREW
+    const before = db.members.length
+    const add = hook(() => useAddMember())
+    await expect(
+      add.current.mutateAsync({ id: 'x', fullName: 'Sneaky', role: 'r' }),
+    ).rejects.toThrow(/don't have permission to add people to the roster/)
+    expect(db.members).toHaveLength(before)
+  })
+
+  for (const [label, who] of [['team member', CREW], ['developer', DEV], ['treasurer', TREAS]] as const) {
+    it(`refuses the season switch for a ${label}`, async () => {
+      caller = who
+      const setCurrent = hook(() => useSetCurrentSeason())
+      await expect(setCurrent.current.mutateAsync('sb')).rejects.toThrow(/president or vice-president/)
+      expect(db.seasons.find((s) => s.id === 'sa')?.is_current).toBe(true)
+    })
+  }
 })
 
 // --- Roster ------------------------------------------------------------------
@@ -170,12 +459,13 @@ describe('board vs non-board access', () => {
 describe('roster', () => {
   it('retires a member to alumni instead of deleting them', async () => {
     const user = userEvent.setup()
+    const before = db.members.length
     renderSettings()
     const row = await screen.findByTestId('member-m2')
     await user.selectOptions(within(row).getByLabelText('Status for Bo Wrench'), 'alumni')
     await waitFor(() => expect(db.members.find((m) => m.id === 'm2')?.status).toBe('alumni'))
     // Still present — historical owner references keep resolving.
-    expect(db.members).toHaveLength(2)
+    expect(db.members).toHaveLength(before)
     expect(db.members.find((m) => m.id === 'm2')?.full_name).toBe('Bo Wrench')
   })
 
@@ -183,19 +473,12 @@ describe('roster', () => {
     renderSettings()
     await screen.findByTestId('member-m2')
     expect(screen.queryByRole('button', { name: /delete|remove/i })).not.toBeInTheDocument()
-    expect(policyAllows('members', 'delete')).toBe(false)
-  })
-
-  it('toggles the board flag', async () => {
-    const user = userEvent.setup()
-    renderSettings()
-    const row = await screen.findByTestId('member-m2')
-    await user.click(within(row).getByLabelText('Board'))
-    await waitFor(() => expect(db.members.find((m) => m.id === 'm2')?.is_board).toBe(true))
+    expect(policyAllows('members', 'delete', {})).toBe(false)
   })
 
   it('links a member by pasting the Auth UUID — it never creates the login', async () => {
     const user = userEvent.setup()
+    const before = db.members.length
     renderSettings()
     await screen.findByText('Add someone to the roster')
     // The safe two-step process is spelled out on screen.
@@ -205,8 +488,10 @@ describe('roster', () => {
     await user.type(screen.getByLabelText('Auth user UUID'), 'uuid-123')
     await user.type(screen.getByLabelText('Full name'), 'Cam Newbie')
     await user.click(screen.getByRole('button', { name: 'Link to roster' }))
-    await waitFor(() => expect(db.members).toHaveLength(3))
-    expect(db.members[2]).toMatchObject({ id: 'uuid-123', full_name: 'Cam Newbie' })
+    await waitFor(() => expect(db.members).toHaveLength(before + 1))
+    expect(db.members.find((m) => m.id === 'uuid-123')).toMatchObject({ full_name: 'Cam Newbie' })
+    // Linking someone gives them no privileged role.
+    expect(rolesOf('uuid-123')).toEqual([])
   })
 })
 
@@ -324,7 +609,7 @@ describe('export', () => {
 
   it('includes the roster so owner ids resolve to names', async () => {
     const out = await buildSeasonExport('sa')
-    expect(out.members).toHaveLength(2)
+    expect(out.members).toHaveLength(db.members.length)
     expect(JSON.stringify(out.members)).toContain('Ada Rider')
   })
 

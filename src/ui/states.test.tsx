@@ -53,7 +53,7 @@ const supabase = {
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1', full_name: 'Ada', is_board: true } }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: { id: 'm1', full_name: 'Ada' }, roles: [] }),
 }))
 
 const { default: Board } = await import('../pages/Board.tsx')

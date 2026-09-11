@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // the real mutations and the real cache invalidation — not mocked-out results.
 
 const SEASON = { id: 'season-a', label: '2026/27', is_current: true }
-const MEMBER = { id: 'm1', full_name: 'Ada Rider', is_board: true, status: 'active' }
-const MEMBER2 = { id: 'm2', full_name: 'Bo Wrench', is_board: false, status: 'active' }
+const MEMBER = { id: 'm1', full_name: 'Ada Rider', status: 'active' }
+const MEMBER2 = { id: 'm2', full_name: 'Bo Wrench', status: 'active' }
 
 let db: Record<string, Record<string, unknown>[]>
 let insertCount: Record<string, number>
@@ -94,7 +94,7 @@ const supabase = {
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER, roles: [] }),
 }))
 vi.mock('../data/useRealtimeClauseStatus.ts', () => ({ useRealtimeClauseStatus: () => 'live' }))
 

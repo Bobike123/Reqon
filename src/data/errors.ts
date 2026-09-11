@@ -1,17 +1,44 @@
 import type { PostgrestError } from '@supabase/supabase-js'
 
+// Postgres's own wording when Row Level Security or a GRANT refuses a request.
+// Accurate, but meaningless to a club member, so it is replaced — while a
+// refusal the database explains itself ("The club must always have a
+// president…") is shown exactly as written.
+const GENERIC_REFUSAL = /row-level security|permission denied|insufficient[_ ]privilege/i
+
 // Every failed read or write becomes one of these, so the UI has exactly one
 // error shape to handle and nothing ever fails silently.
 export class DataError extends Error {
   code: string | null
   details: string | null
+  // True when the database refused because of WHO is asking, not because
+  // something broke. The UI words these differently, and re-reads the
+  // caller's roles in case they changed since the screen loaded.
+  permission: boolean
 
-  constructor(what: string, error: PostgrestError | null) {
-    super(error ? `${what}: ${error.message}` : what)
+  // `what` names the action so it reads after "You don't have permission to …".
+  constructor(what: string, error: PostgrestError | null, options: { permission?: boolean } = {}) {
+    const permission =
+      options.permission ??
+      (error !== null && (error.code === '42501' || GENERIC_REFUSAL.test(error.message)))
+    super(permission ? refusalMessage(what, error) : error ? `${what}: ${error.message}` : what)
     this.name = 'DataError'
     this.code = error?.code ?? null
     this.details = error?.details ?? null
+    this.permission = permission
   }
+}
+
+function refusalMessage(what: string, error: PostgrestError | null): string {
+  if (error && !GENERIC_REFUSAL.test(error.message)) return error.message
+  return `You don't have permission to ${what}. Nothing was changed. Ask the President if you need this.`
+}
+
+// A permission refusal, however deeply it has been wrapped.
+export function isPermissionError(error: unknown): boolean {
+  if (error instanceof DataError) return error.permission
+  if (error instanceof Error && error.cause !== undefined) return isPermissionError(error.cause)
+  return false
 }
 
 type Result<T> = { data: T | null; error: PostgrestError | null }

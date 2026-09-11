@@ -23,6 +23,8 @@ html {
     transition-property: color, background-color, border-color, box-shadow, opacity, transform;
     transition-duration: 150ms;
     transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+    /* No double-tap-to-zoom delay on a phone. */
+    touch-action: manipulation;
   }
 
   /* Tailwind's reset makes buttons look inert. They are not. */
@@ -45,6 +47,11 @@ html {
     outline: 2px solid var(--color-slate-900, #0f172a);
     outline-offset: 2px;
   }
+}
+
+/* While a dialog is open, the page behind it stays put. */
+html:has(dialog[open]) {
+  overflow: hidden;
 }
 
 /* Short entrances, used sparingly: the tutorial card, the phone menu, the

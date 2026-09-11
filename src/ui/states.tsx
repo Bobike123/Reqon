@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { isPermissionError } from '../data/errors.ts'
 
 // The three states every screen owes the reader, in one place so no screen
 // invents its own wording or forgets the way out of an error.
@@ -47,5 +48,24 @@ export function EmptyState({ title, children }: { title: string; children: React
       <p className="font-medium text-slate-800">{title}</p>
       <p className="mt-1 text-sm text-slate-600">{children}</p>
     </div>
+  )
+}
+
+// A failed save, worded for the person who tried it. A refusal because of who
+// they are is labelled as such — never shown as a generic failure, and never
+// swallowed.
+export function ActionError({ error, className = '' }: { error: Error | null | undefined; className?: string }) {
+  if (!error) return null
+  const refused = isPermissionError(error)
+  return (
+    <p
+      role="alert"
+      className={`rounded border p-2 text-sm ${
+        refused ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-red-300 bg-red-50 text-red-800'
+      } ${className}`}
+    >
+      {refused && <span className="font-semibold">Not permitted: </span>}
+      {error.message}
+    </p>
   )
 }
