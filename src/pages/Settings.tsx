@@ -3,6 +3,7 @@ import { useState, type FormEvent } from 'react'
 import { useAuth } from '../auth/context.ts'
 import { describeRoles, type PrivilegedRole } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
+import { ChangePasswordForm } from '../account/ChangePasswordForm.tsx'
 import { RoleBadges } from '../roles/RoleBadges.tsx'
 import { RoleDialog } from '../roles/RoleDialog.tsx'
 import { buttonSecondary } from '../ui/buttons.ts'
@@ -169,6 +170,11 @@ export default function Settings() {
             ? 'You can change everything on this page except roles, which only the President can give or take away.'
             : 'Roster, subsystem, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
+
+      {/* ---------------------------------------------------- Your account */}
+      <Section title="Your account">
+        <ChangePasswordForm />
+      </Section>
 
       {readError && (
         <div className="mt-3">

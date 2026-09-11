@@ -16,15 +16,18 @@ import type { Database } from './database.types.ts'
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!url || !anonKey) {
-  throw new Error(
-    'Missing Supabase configuration. Copy .env.example to .env.local and fill in ' +
-      'VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY from the Supabase dashboard ' +
-      '(Project Settings -> API), then restart `npm run dev`.',
-  )
-}
+// Which settings this build is missing. This used to throw right here — but
+// that happens while the scripts load, before React can draw anything, so a
+// deployment without its settings showed a completely white page with the
+// reason hidden in the console. main.tsx now shows the reason on screen.
+export const missingConfig: string[] = [
+  ...(url ? [] : ['VITE_SUPABASE_URL']),
+  ...(anonKey ? [] : ['VITE_SUPABASE_ANON_KEY']),
+]
 
-export const supabase = createClient<Database>(url, anonKey, {
+// With settings missing the app is never rendered, so this placeholder client
+// is never used; it only keeps every module that imports `supabase` loadable.
+export const supabase = createClient<Database>(url || 'http://config-missing.invalid', anonKey || 'config-missing', {
   auth: {
     // Keep the session in localStorage and refresh it in the background, so a
     // reload does not sign the user out. These are the supabase-js defaults;

@@ -263,6 +263,14 @@ Any future finance table must copy the same four policies from
 `can_manage_finances()` to write) — never the `member_read` / `member_write`
 policies the other tables use, or every member would see and edit the money.
 
+### Changing your own password
+
+**Settings → Your account → Change your password.** Everyone can do this for
+themselves: enter the current password, then the new one twice. The current
+password is checked by signing in with it first, and every other device is
+signed out once the change succeeds. A forgotten password is reset by whoever
+manages the Supabase dashboard (Authentication → Users).
+
 ### Retiring someone
 
 **Settings → Roster →** set their status to **Alumni**. Do not try to delete

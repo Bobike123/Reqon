@@ -6,6 +6,8 @@ import App from './App.tsx'
 import { AuthProvider } from './auth/AuthProvider.tsx'
 import { isPermissionError } from './data/errors.ts'
 import { queryKeys } from './data/queryKeys.ts'
+import { missingConfig } from './lib/supabase.ts'
+import { ConfigMissing } from './ui/ConfigMissing.tsx'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import './index.css'
 
@@ -33,6 +35,11 @@ if (!rootElement) {
 }
 
 createRoot(rootElement).render(
+  missingConfig.length > 0 ? (
+    // A build without its Supabase settings can do nothing useful. Say so on
+    // screen instead of leaving a blank page.
+    <ConfigMissing names={missingConfig} />
+  ) : (
   <StrictMode>
     {/* Outermost boundary: catches anything, including a provider blowing up,
         so the app can never render a blank white page. */}
@@ -47,5 +54,6 @@ createRoot(rootElement).render(
         </AuthProvider>
       </QueryClientProvider>
     </ErrorBoundary>
-  </StrictMode>,
+  </StrictMode>
+  ),
 )
