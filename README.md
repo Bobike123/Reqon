@@ -168,6 +168,7 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260105000000_privileged_roles.sql` | privileged roles (`member_roles`) and the policies that use them — see §7 |
 | `20260106000000_finance_ledger.sql` | the finance ledger (`finance_entries`): readable by the four roles, writable by the Treasurer — see §7 |
 | `20260107000000_developer_full_access.sql` | the Developer role becomes full access, for maintenance — see §7 |
+| `20260108000000_proposals_and_meetings.sql` | splits the old "Meetings" screen into task proposals, board tasks and real meetings — see §8 |
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -275,7 +276,48 @@ forbidden actions, and always ends with an error that starts
 `ROLE CHECKS PASSED` or `ROLE CHECKS FAILED` — raising that error is what rolls
 every test row back. Run it after any change to a policy.
 `supabase/tests/finance_rls_test.sql` does the same for the finance ledger
-(28 checks).
+(28 checks), and `supabase/tests/proposals_meetings_rls_test.sql` for proposals,
+board tasks and meetings (42 checks).
+
+### Proposals, board tasks and meetings
+
+Three separate things, which used to be two screens wearing the wrong names:
+
+| | Member | Treasurer | Vice President | President | Developer |
+|---|---:|---:|---:|---:|---:|
+| Suggest a task proposal | yes | yes | yes | yes | yes |
+| Review / decide a proposal | no | no | yes | yes | yes |
+| Promote it to a board task, with owner and dates | no | no | yes | yes | yes |
+| Move a task, set its owner | yes | yes | yes | yes | yes |
+| Delete a board task | no | no | **no** | yes | yes |
+| Read meetings | yes | yes | yes | yes | yes |
+| Call a meeting, write its agenda and minutes | no | no | yes | yes | yes |
+| Delete a meeting | no | no | **no** | yes | yes |
+| Edit the global agenda template | no | no | **no** | yes | yes |
+
+**Proposals** (`/proposals`) are suggested work. Anyone on the roster suggests
+one — the database pins `raised_by` to the caller, so nobody suggests in
+someone else's name. Only an administrator changes a proposal's stage, owner or
+decision, which is what stops a member approving their own suggestion through
+the API. Stages read Suggested → Under review → Decided, with Parked as a side
+exit; they are the original `topic_state` values, so no row changed when the
+concept was renamed.
+
+**Promotion** asks for an owner, an optional due date and a starting lane, then
+inserts the board task and marks the proposal decided. The task keeps
+`source_proposal`, so the Board can always answer "where did this come from?".
+Dates stay nullable: the club often does not know one, and an invented date
+would make the Board cry overdue.
+
+**Meetings** (`/meetings`) are real meetings: a required date, optional start
+and end times, a place, an agenda and minutes. A new meeting starts from the
+club's agenda template (`meeting_template`, one row). Editing *that* template is
+President or Developer only; writing any single meeting's agenda and minutes is
+ordinary administrator work, a Vice President included.
+
+Deleting is the one thing a Vice President may not do: a deleted task or meeting
+takes its history with it, and there is no undo. Both confirmations name what
+will disappear.
 
 ### Finances
 

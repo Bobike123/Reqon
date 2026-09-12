@@ -36,10 +36,13 @@ beforeEach(() => {
 const desktopNav = () => screen.getAllByRole('navigation', { name: 'Main' })[0]
 
 describe('main navigation', () => {
-  it('lists all eight screens, in the order the build brief gives them', () => {
+  it('lists every screen, in the order the build brief gives them', () => {
     renderHeader()
     const labels = within(desktopNav()).getAllByRole('link').map((a) => a.textContent)
-    expect(labels).toEqual(['Now', 'Priorities', 'Register', 'Milestones', 'Board', 'Meetings', 'Spec sheet', 'Settings'])
+    // Proposals and Meetings are two screens: the old "Meetings" was neither.
+    expect(labels).toEqual([
+      'Now', 'Priorities', 'Register', 'Milestones', 'Board', 'Proposals', 'Meetings', 'Spec sheet', 'Settings',
+    ])
   })
 
   it('makes Settings reachable — before this it had no link from anywhere', () => {

@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
-import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
 import type { Database } from '../lib/database.types.ts'
 import { DataError, unwrap } from './errors.ts'
@@ -73,56 +72,33 @@ export function useUpdateTask() {
   })
 }
 
-export type NewTask = {
-  title: string
-  detail?: string | null
-  ownerId?: string | null
-  subteamKey?: string | null
-  dueDate?: string | null
-  state?: TaskState
-  sourceTopic?: string | null
+// Deleting a board task: president or developer only (task_delete calls
+// can_delete_records()). RLS makes a refused DELETE match no rows instead of
+// failing, so when nothing was removed the database is asked whether this
+// caller may delete at all — "not allowed" and "someone else already deleted
+// it" must not read the same.
+async function mayDeleteRecords(): Promise<boolean> {
+  const { data, error } = await supabase.rpc('can_delete_records')
+  if (error) throw new DataError('check whether the task was deleted', error)
+  return data === true
 }
 
-// Creating a task is NOT optimistic. The server assigns the id, and inventing a
-// placeholder one only to swap it out later is more machinery than a spinner is
-// worth. Errors still surface through the mutation's `error`.
-export function useCreateTask() {
-  const auth = useAuth()
+export function useDeleteTask() {
   const queryClient = useQueryClient()
   const { seasonId } = useTasks()
 
-  return useMutation<Task, Error, NewTask>({
-    mutationFn: async (task) => {
-      if (auth.status !== 'member') {
-        throw new DataError('create task: not signed in as a member', null)
-      }
-      if (!seasonId) throw new DataError('create task: no current season', null)
-
-      return unwrap(
-        'create task',
-        await supabase
-          .from('tasks')
-          .insert({
-            season_id: seasonId,
-            title: task.title,
-            detail: task.detail ?? null,
-            owner_id: task.ownerId ?? null,
-            subteam_key: task.subteamKey ?? null,
-            due_date: task.dueDate ?? null,
-            state: task.state ?? 'todo',
-            source_topic: task.sourceTopic ?? null,
-            // tasks records its author in created_by (there is no updated_by).
-            created_by: auth.member.id,
-          })
-          .select()
-          .single(),
-      )
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const { data, error } = await supabase.from('tasks').delete().eq('id', id).select('id')
+      if (error) throw new DataError('delete tasks', error)
+      if (data && data.length > 0) return
+      // Already gone is the outcome that was wanted.
+      if (await mayDeleteRecords()) return
+      throw new DataError('delete tasks', null, { permission: true })
     },
-    onSuccess: () => {
+    onSettled: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.seasonScoped(seasonId, 'tasks'),
-      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'tasks') })
     },
   })
 }

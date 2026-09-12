@@ -45,7 +45,7 @@ function reset() {
     v_current_season: [],
     milestones: [{ key: 'MS1-1', season_id: 'sa', ordinal: 1, name: 'Team Plan', opens_on: '2026-11-01', due_on: '2026-11-30', max_points: 75, is_blocking: false, aim: null, article_ref: null, notes: null }],
     handover_notes: [],
-    tasks: [], topics: [], clause_status: [], clauses: [],
+    tasks: [], proposals: [], clause_status: [], clauses: [],
   }
   db.v_current_season = db.seasons.filter((s) => s.is_current)
   rpcCalls = []
@@ -229,7 +229,9 @@ describe('who sees what', () => {
     it(`a ${label} sees no admin or role controls, and is told why in words`, async () => {
       caller = who
       renderSettings()
-      expect(await screen.findByText(/reserved for the President and Vice President/)).toBeInTheDocument()
+      expect(
+        await screen.findByText(/reserved for the President, Vice President and Developer/),
+      ).toBeInTheDocument()
       expect(screen.getByText(shown, { selector: 'strong' })).toBeInTheDocument()
       await screen.findByTestId('member-m2')
       expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()

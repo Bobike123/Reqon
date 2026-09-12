@@ -43,12 +43,12 @@ vi.mock('../data/useNowMetrics.ts', () => ({
   useSubteamProgress: () => ({ data: PROGRESS, isLoading: false, error: null }),
   useAttention: () => ({ data: [], isLoading: false, error: null }),
 }))
-vi.mock('../data/useTopics.ts', () => ({
-  // Now renders the shared TopicsPanel, which needs the whole topic surface.
-  useTopics: () => ({ data: [], isLoading: false, error: null, seasonId: 's' }),
-  useCreateTopic: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
-  useUpdateTopic: () => ({ mutate: vi.fn(), isPending: false, error: null }),
-  useConvertTopicToTask: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+vi.mock('../data/useProposals.ts', () => ({
+  // Now renders the shared ProposalsPanel, which needs the whole proposal surface.
+  useProposals: () => ({ data: [], isLoading: false, error: null, seasonId: 's' }),
+  useSuggestProposal: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
+  useUpdateProposal: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  usePromoteProposal: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }))
 vi.mock('../data/useTasks.ts', () => ({
   useTasks: () => ({ data: [], isLoading: false, error: null, seasonId: 's' }),
@@ -84,7 +84,7 @@ describe('Now dashboard', () => {
     expect(screen.getByTestId('tile-obligations')).toHaveTextContent('5 / 146')
     expect(screen.getByTestId('tile-points')).toHaveTextContent('75')
     expect(screen.getByTestId('tile-overdue')).toHaveTextContent('0')
-    expect(screen.getByTestId('tile-topics')).toHaveTextContent('0')
+    expect(screen.getByTestId('tile-proposals')).toHaveTextContent('0')
     expect(screen.getByTestId('tile-blocked')).toHaveTextContent('0')
   })
 

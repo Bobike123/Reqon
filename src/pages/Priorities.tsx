@@ -2,7 +2,6 @@ import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../auth/context.ts'
 import { useSetClauseStatus } from '../data/useClauseStatus.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useAttention, type Attention } from '../data/useNowMetrics.ts'
@@ -43,7 +42,6 @@ export default function Priorities() {
   const members = useMembers()
   const setClauseStatus = useSetClauseStatus()
   const updateTask = useUpdateTask()
-  const auth = useAuth()
 
   const error = attention.error ?? members.error
   const writeError = setClauseStatus.error ?? updateTask.error
@@ -137,7 +135,7 @@ export default function Priorities() {
               {row.kind === 'clause' ? (
                 <Link
                   to={`/register?search=${encodeURIComponent(row.clause_key ?? row.ref ?? '')}`}
-                  className="rounded font-mono text-sm font-bold text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                  className="inline-flex min-h-6 items-center rounded font-mono text-sm font-bold text-slate-900 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
                   title="Open this rule in the Register"
                 >
                   {row.ref}
@@ -166,7 +164,6 @@ export default function Priorities() {
               <select
                 id={`owner-${row.clause_key ?? row.ref}`}
                 value={row.owner_id ?? ''}
-                disabled={auth.status !== 'member'}
                 onChange={(e) => assignOwner(row, e.target.value || null)}
                 className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
               >

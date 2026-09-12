@@ -158,7 +158,7 @@ describe('signed in but NOT on the roster', () => {
     renderApp()
     expect(
       await screen.findByText(
-        'Your account is not on the club roster; ask the president or vice-president to add you.',
+        'Your account is not on the club roster; ask the President or Vice President to add you.',
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText('SECRET BIKE DATA')).not.toBeInTheDocument()

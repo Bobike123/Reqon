@@ -1,4 +1,5 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { formatDay } from '../lib/dates.ts'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useState } from 'react'
@@ -90,7 +91,7 @@ function SpecRow({
         {spec.clause_key && (
           <Link
             to={`/register?search=${encodeURIComponent(spec.clause_key)}`}
-            className="font-mono text-xs text-slate-500 underline hover:text-slate-800"
+            className="inline-flex min-h-6 items-center font-mono text-xs text-slate-500 underline hover:text-slate-800"
             data-testid={`spec-rule-${spec.id}`}
           >
             {spec.clause_key}
@@ -125,7 +126,7 @@ function SpecRow({
         {spec.measured !== null && (
           <span className="text-xs text-slate-500" data-testid={`measured-by-${spec.id}`}>
             by {measuredByName ?? 'unknown'}
-            {spec.measured_at ? ` on ${spec.measured_at.slice(0, 10)}` : ''}
+            {spec.measured_at ? ` on ${formatDay(spec.measured_at)}` : ''}
           </span>
         )}
       </div>

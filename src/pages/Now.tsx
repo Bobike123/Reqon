@@ -1,17 +1,18 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { formatDay } from '../lib/dates.ts'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { Link } from 'react-router-dom'
 import { useMilestones } from '../data/useMilestones.ts'
 import { useAttention, useSubteamProgress } from '../data/useNowMetrics.ts'
-import { useTopics } from '../data/useTopics.ts'
-import { TopicsPanel } from '../topics/TopicsPanel.tsx'
+import { useProposals } from '../data/useProposals.ts'
+import { ProposalsPanel } from '../proposals/ProposalsPanel.tsx'
 import {
   blockedCount,
   liveObligations,
   ms1Points,
   nextDeadline,
-  openTopicsCount,
+  openProposalsCount,
   overdueCount,
   percent,
 } from './now/nowModel.ts'
@@ -64,9 +65,9 @@ export default function Now() {
   const milestones = useMilestones()
   const progress = useSubteamProgress()
   const attention = useAttention()
-  const topics = useTopics()
+  const proposals = useProposals()
 
-  const error = milestones.error ?? progress.error ?? attention.error ?? topics.error
+  const error = milestones.error ?? progress.error ?? attention.error ?? proposals.error
   if (error) {
     return (
       <main id="main-content" tabIndex={-1} className={pageMain()}>
@@ -79,7 +80,7 @@ export default function Now() {
               void milestones.refetch()
               void progress.refetch()
               void attention.refetch()
-              void topics.refetch()
+              void proposals.refetch()
             }}
           />
         </div>
@@ -88,13 +89,13 @@ export default function Now() {
   }
 
   const loading =
-    milestones.isLoading || progress.isLoading || attention.isLoading || topics.isLoading
+    milestones.isLoading || progress.isLoading || attention.isLoading || proposals.isLoading
 
   const deadline = nextDeadline(milestones.data ?? [], new Date())
   const obligations = liveObligations(progress.data ?? [])
   const points = ms1Points(milestones.data ?? [])
   const overdue = overdueCount(attention.data ?? [])
-  const openTopics = openTopicsCount(topics.data ?? [])
+  const openProposals = openProposalsCount(proposals.data ?? [])
   const blocked = blockedCount(attention.data ?? [])
 
   return (
@@ -112,7 +113,7 @@ export default function Now() {
 
       {/* The content stays mounted while data loads. Unmounting it on every
           loading flip would throw away whatever someone was typing into the
-          topic form below — the dashboard is the screen people keep open. */}
+          proposal form below — the dashboard is the screen people keep open. */}
       <div>
           <section aria-label="Instruments" data-tutorial="now-instruments" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             <Tile
@@ -123,7 +124,7 @@ export default function Now() {
               sub={
                 deadline.kind === 'tbc'
                   ? 'No published window yet'
-                  : `${deadline.milestoneKey} · ${deadline.name} · ${deadline.dueOn}`
+                  : `${deadline.milestoneKey} · ${deadline.name} · ${formatDay(deadline.dueOn)}`
               }
               tone={deadline.kind === 'due' && deadline.days <= 14 ? 'warn' : 'plain'}
             />
@@ -150,10 +151,10 @@ export default function Now() {
               tone={overdue > 0 ? 'bad' : 'plain'}
             />
             <Tile
-              testId="tile-topics"
+              testId="tile-proposals"
               to="/meetings"
-              label="Open topics"
-              value={String(openTopics)}
+              label="Open proposals"
+              value={String(openProposals)}
               sub="Raised, not yet on an agenda"
             />
             <Tile
@@ -166,7 +167,7 @@ export default function Now() {
             />
           </section>
 
-          {/* Side by side on a desktop: progress on the left, the topics people
+          {/* Side by side on a desktop: progress on the left, the proposals people
               are talking about on the right. Stacked on anything narrower. */}
           <div className="mt-6 grid items-start gap-6 xl:grid-cols-2">
           <section aria-labelledby="subteams-heading" data-tutorial="now-subsystems">
@@ -175,7 +176,7 @@ export default function Now() {
             </h2>
             {(progress.data ?? []).length === 0 ? (
               <p className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                No subsystems yet. The president or vice-president sets these up in Settings.
+                No subsystems yet. The President or Vice President sets these up in Settings.
               </p>
             ) : (
               <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
@@ -226,17 +227,17 @@ export default function Now() {
             )}
           </section>
 
-          {/* The SAME component the Meetings screen renders. Topics are
+          {/* The SAME component the Meetings screen renders. Proposals are
               editable here so nobody has to go hunting for another screen
               mid-conversation. */}
-          <div data-tutorial="now-topics">
-            <TopicsPanel
-              heading="Topics needing attention"
-              // Includes 'decided': a topic must stay reachable here after it
+          <div data-tutorial="now-proposals">
+            <ProposalsPanel
+              heading="Proposals needing attention"
+              // Includes 'decided': a proposal must stay reachable here after it
               // is decided, or it could never be converted to a task from Now.
               // Only 'parked' (the archive) is hidden.
               states={['open', 'agenda', 'decided']}
-              emptyHint="Nothing waiting on a decision. Raise a topic above when something needs one."
+              emptyHint="Nothing waiting on a decision. Raise a proposal above when something needs one."
             />
           </div>
           </div>

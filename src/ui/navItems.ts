@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/register', label: 'Register' },
   { to: '/milestones', label: 'Milestones' },
   { to: '/board', label: 'Board' },
+  { to: '/proposals', label: 'Proposals' },
   { to: '/meetings', label: 'Meetings' },
   { to: '/specs', label: 'Spec sheet' },
   { to: '/finances', label: 'Finances', requires: 'canViewFinances' },

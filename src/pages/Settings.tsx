@@ -106,6 +106,13 @@ export default function Settings() {
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
 
+  // Every field in this page saves when you click away, with no button to
+  // press — so say when a save is in flight, exactly as the Board, Spec sheet
+  // and Meetings screens do.
+  const saving =
+    updateMember.isPending || updateSubteam.isPending || updateMilestone.isPending ||
+    setNote.isPending || setCurrent.isPending || addMember.isPending || createSeason.isPending
+
   const writeError =
     addMember.error ?? updateMember.error ?? updateSubteam.error ??
     updateMilestone.error ?? createSeason.error ?? setCurrent.error ?? setNote.error
@@ -180,7 +187,7 @@ export default function Settings() {
           ? 'You can change everything on this page, including who holds which role.'
           : canAdminister
             ? 'You can change everything on this page except roles, which only the President or a Developer can give or take away.'
-            : 'Roster, subsystem, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
+            : 'Roster, subsystem, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
 
       {/* ---------------------------------------------------- Your account */}
@@ -208,6 +215,7 @@ export default function Settings() {
       {loading && !readError && <LoadingState label="Loading settings…" />}
 
       <ActionError error={writeError} className="mt-3" />
+      <p role="status" className="mt-2 min-h-4 text-xs text-slate-500">{saving ? 'Saving…' : ''}</p>
 
       {/* ---------------------------------------------------------- Roster */}
       <Section title="Roster" tutorialId="settings-roster">
@@ -569,8 +577,11 @@ export default function Settings() {
       {/* ---------------------------------------------------------- Export */}
       <Section title="Export" tutorialId="settings-export">
         <p className="mb-2 text-xs text-slate-500">
-          Everything this season, as one JSON file. Roster names and roles are included so
-          owner ids resolve; no passwords, emails or keys are.
+          The team&apos;s work this season as one JSON file: rules, tasks, proposals, meetings,
+          milestones, measurements, handover notes and the change log. Of the roster it
+          includes only name, job title and status — so owner ids resolve — and never phone
+          numbers, private notes, emails, passwords or keys. The regulations book and the
+          finance ledger are not included.
         </p>
         {exportError && (
           <p role="alert" className="mb-2 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">

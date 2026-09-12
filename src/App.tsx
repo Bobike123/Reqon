@@ -1,9 +1,9 @@
 import { Route, Routes, useLocation } from 'react-router-dom'
 import RequireAuth from './auth/RequireAuth.tsx'
 import Board from './pages/Board.tsx'
-import Diagnostics from './pages/Diagnostics.tsx'
 import Finances from './pages/Finances.tsx'
-import Home from './pages/Home.tsx'
+import NotFound from './pages/NotFound.tsx'
+import Proposals from './pages/Proposals.tsx'
 import Meetings from './pages/Meetings.tsx'
 import Milestones from './pages/Milestones.tsx'
 import Now from './pages/Now.tsx'
@@ -42,14 +42,13 @@ export default function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/milestones" element={<Milestones />} />
             <Route path="/board" element={<Board />} />
+            <Route path="/proposals" element={<Proposals />} />
             <Route path="/meetings" element={<Meetings />} />
             <Route path="/specs" element={<SpecSheet />} />
             <Route path="/finances" element={<Finances />} />
             <Route path="/settings" element={<Settings />} />
-            {/* Leftover Phase 1 page, and the Phase 3 measuring stick for the
-                1,146-clause gate. Neither is a real screen or in the menu. */}
-            <Route path="/hello" element={<Home />} />
-            <Route path="/diagnostics" element={<Diagnostics />} />
+            {/* Any other address: say so, with a way back. */}
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </ErrorBoundary>
       </TutorialProvider>

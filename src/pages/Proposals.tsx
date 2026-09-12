@@ -1,24 +1,26 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
-import { TopicsPanel } from '../topics/TopicsPanel.tsx'
+import { ProposalsPanel } from '../proposals/ProposalsPanel.tsx'
 
-// The Meetings screen is the topic workspace. It renders the same TopicsPanel
-// the Now screen does — same form, same cards, same actions. Anything that
-// works here works there, because it is literally the same component. Here it
-// is laid out for a big screen: the form and the running totals stay on the
-// left while the topics fill the rest of the width.
-export default function Meetings() {
+// Suggested work that is not yet an official task. This screen used to be
+// called "Meetings", which is what it never was: real meetings now have their
+// own screen, and this one has the name it always deserved.
+//
+// It renders the same ProposalsPanel the Now screen does — same form, same
+// cards, same actions — laid out for a big screen: the suggestion form and the
+// running tally stay on the left while the proposals fill the rest.
+export default function Proposals() {
   return (
     <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
-        title="Meetings"
-        description="Raise a topic, put it on the agenda, record the decision — then turn it into a task."
+        title="Task proposals"
+        description="Work anyone can suggest. The President, Vice President or a Developer decides what becomes an official board task."
       />
 
-      <TopicsPanel
+      <ProposalsPanel
         layout="wide"
-        heading="Topics"
-        emptyHint="No topics yet. Raise one above — anything that needs a decision from the team."
+        heading="Proposals"
+        emptyHint="Nothing suggested yet. Suggest the first thing above — anything the club should take on."
       />
     </main>
   )

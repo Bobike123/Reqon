@@ -20,9 +20,9 @@ export const ROLE_LABELS: Record<PrivilegedRole, string> = {
 
 // What each role may do, in one line — shown where roles are handed out.
 export const ROLE_SUMMARIES: Record<PrivilegedRole, string> = {
-  president: 'Runs Settings, and is the only role that can give or take away roles.',
+  president: 'Runs Settings, and can give or take away roles.',
   vicepresident: 'Runs Settings like the President, but cannot change roles.',
-  treasurer: 'The only role that can add, edit or delete financial entries.',
+  treasurer: 'Adds, edits and deletes financial entries.',
   developer: 'Full access, for maintenance: everything the other three roles can do, roles included.',
 }
 
@@ -59,20 +59,44 @@ export type Permissions = {
   canViewFinances: boolean
   // can_manage_finances(): create, edit and delete financial records
   canManageFinances: boolean
+  // Anyone on the roster may suggest work (proposal_insert).
+  canSuggestProposal: boolean
+  // is_admin(): decide a proposal and promote it into a board task, choosing
+  // its owner and dates as it goes (proposal_update, task_insert).
+  canPromoteProposal: boolean
+  canAssignTask: boolean
+  // is_admin(): call a meeting and write its agenda and minutes.
+  canCreateMeeting: boolean
+  // can_delete_records(): president or developer only. A vice-president may
+  // create and edit, never delete — a removed row takes its history with it.
+  canDeleteTask: boolean
+  canDeleteMeeting: boolean
+  canEditMeetingTemplate: boolean
 }
 
 export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
   const held = new Set(roles)
   const hasRole = (role: PrivilegedRole) => held.has(role)
+  // The two sets the database uses: is_admin() and can_delete_records().
+  const admin = hasRole('president') || hasRole('vicepresident') || hasRole('developer')
+  const mayDelete = hasRole('president') || hasRole('developer')
   return {
     roles,
     hasRole,
     // The developer passes every check, for maintenance and security work:
     // supabase/migrations/20260107000000_developer_full_access.sql.
-    canAdminister: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
-    canManageRoles: hasRole('president') || hasRole('developer'),
+    canAdminister: admin,
+    canManageRoles: mayDelete,
     canViewFinances: held.size > 0,
     canManageFinances: hasRole('treasurer') || hasRole('developer'),
+    // Proposals, board tasks and meetings (20260108000000_proposals_and_meetings.sql).
+    canSuggestProposal: true,
+    canPromoteProposal: admin,
+    canAssignTask: admin,
+    canCreateMeeting: admin,
+    canDeleteTask: mayDelete,
+    canDeleteMeeting: mayDelete,
+    canEditMeetingTemplate: mayDelete,
   }
 }
 

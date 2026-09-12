@@ -16,6 +16,8 @@ export const queryKeys = {
   // person's own permissions (AuthProvider) together.
   memberRoles: ['member_roles'] as const,
   subteams: ['subteams'] as const,
+  // The club's default meeting agenda. One row, not season-scoped.
+  meetingTemplate: ['meeting_template'] as const,
 
   season: (seasonId: string) => ['season', seasonId] as const,
   seasonScoped: (seasonId: string, entity: string) =>

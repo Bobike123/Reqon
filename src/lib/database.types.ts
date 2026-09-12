@@ -354,30 +354,83 @@ export type Database = {
           },
         ]
       }
-      meetings: {
+      meeting_template: {
         Row: {
-          attendees: string | null
-          created_at: string
-          held_on: string
-          id: string
-          season_id: string
-          summary: string | null
+          body: string
+          id: boolean
+          updated_at: string
+          updated_by: string | null
         }
         Insert: {
-          attendees?: string | null
-          created_at?: string
-          held_on: string
-          id?: string
-          season_id: string
-          summary?: string | null
+          body: string
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
         }
         Update: {
+          body?: string
+          id?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_template_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meetings: {
+        Row: {
+          agenda: string | null
+          attendees: string | null
+          created_at: string
+          created_by: string | null
+          ends_at: string | null
+          held_on: string
+          id: string
+          location: string | null
+          notes: string | null
+          season_id: string
+          starts_at: string | null
+          summary: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          agenda?: string | null
           attendees?: string | null
           created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          held_on: string
+          id?: string
+          location?: string | null
+          notes?: string | null
+          season_id: string
+          starts_at?: string | null
+          summary?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          agenda?: string | null
+          attendees?: string | null
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
           held_on?: string
           id?: string
+          location?: string | null
+          notes?: string | null
           season_id?: string
+          starts_at?: string | null
           summary?: string | null
+          title?: string
+          updated_at?: string
         }
         Relationships: [
           {
@@ -760,7 +813,7 @@ export type Database = {
           id: string
           owner_id: string | null
           season_id: string
-          source_topic: string | null
+          source_proposal: string | null
           starred: boolean
           state: Database["public"]["Enums"]["task_state"]
           subteam_key: string | null
@@ -775,7 +828,7 @@ export type Database = {
           id?: string
           owner_id?: string | null
           season_id: string
-          source_topic?: string | null
+          source_proposal?: string | null
           starred?: boolean
           state?: Database["public"]["Enums"]["task_state"]
           subteam_key?: string | null
@@ -790,7 +843,7 @@ export type Database = {
           id?: string
           owner_id?: string | null
           season_id?: string
-          source_topic?: string | null
+          source_proposal?: string | null
           starred?: boolean
           state?: Database["public"]["Enums"]["task_state"]
           subteam_key?: string | null
@@ -834,10 +887,10 @@ export type Database = {
             referencedColumns: ["season_id"]
           },
           {
-            foreignKeyName: "tasks_source_topic_fkey"
-            columns: ["source_topic"]
+            foreignKeyName: "tasks_source_proposal_fkey"
+            columns: ["source_proposal"]
             isOneToOne: false
-            referencedRelation: "topics"
+            referencedRelation: "task_proposals"
             referencedColumns: ["id"]
           },
           {
@@ -856,7 +909,7 @@ export type Database = {
           },
         ]
       }
-      topics: {
+      task_proposals: {
         Row: {
           context: string | null
           decided_at: string | null
@@ -904,42 +957,42 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "topics_meeting_id_fkey"
+            foreignKeyName: "task_proposals_meeting_id_fkey"
             columns: ["meeting_id"]
             isOneToOne: false
             referencedRelation: "meetings"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "topics_owner_id_fkey"
+            foreignKeyName: "task_proposals_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "topics_raised_by_fkey"
+            foreignKeyName: "task_proposals_raised_by_fkey"
             columns: ["raised_by"]
             isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "topics_season_id_fkey"
+            foreignKeyName: "task_proposals_season_id_fkey"
             columns: ["season_id"]
             isOneToOne: false
             referencedRelation: "seasons"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "topics_season_id_fkey"
+            foreignKeyName: "task_proposals_season_id_fkey"
             columns: ["season_id"]
             isOneToOne: false
             referencedRelation: "v_current_season"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "topics_season_id_fkey"
+            foreignKeyName: "task_proposals_season_id_fkey"
             columns: ["season_id"]
             isOneToOne: false
             referencedRelation: "v_subteam_progress"
@@ -1090,6 +1143,7 @@ export type Database = {
       }
     }
     Functions: {
+      can_delete_records: { Args: never; Returns: boolean }
       can_manage_finances: { Args: never; Returns: boolean }
       can_manage_roles: { Args: never; Returns: boolean }
       can_view_finances: { Args: never; Returns: boolean }

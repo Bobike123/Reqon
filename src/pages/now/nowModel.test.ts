@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Milestone } from '../../data/useMilestones.ts'
 import type { Attention, SubteamProgress } from '../../data/useNowMetrics.ts'
-import type { Topic } from '../../data/useTopics.ts'
+import type { Proposal } from '../../data/useProposals.ts'
 import {
   blockedCount,
   liveObligations,
   ms1Points,
   nextDeadline,
-  openTopicsCount,
+  openProposalsCount,
   overdueCount,
   percent,
 } from './nowModel.ts'
@@ -26,8 +26,8 @@ function att(reason: string): Attention {
   return { kind: 'clause', ref: 'X', title: 't', owner_id: null, season_id: 's',
     reason, starred: false, clause_key: 'X' } as Attention
 }
-function topic(state: string): Topic {
-  return { id: 'x', season_id: 's', title: 't', state } as unknown as Topic
+function proposal(state: string): Proposal {
+  return { id: 'x', season_id: 's', title: 't', state } as unknown as Proposal
 }
 
 describe('next deadline', () => {
@@ -101,12 +101,12 @@ describe('counts from v_attention', () => {
   })
 })
 
-describe('open topics', () => {
-  it('counts only topics still in the open state', () => {
-    expect(openTopicsCount([topic('open'), topic('open'), topic('agenda'), topic('decided')])).toBe(2)
+describe('open proposals', () => {
+  it('counts only proposals still in the open state', () => {
+    expect(openProposalsCount([proposal('open'), proposal('open'), proposal('agenda'), proposal('decided')])).toBe(2)
   })
   it('is zero on an empty list', () => {
-    expect(openTopicsCount([])).toBe(0)
+    expect(openProposalsCount([])).toBe(0)
   })
 })
 

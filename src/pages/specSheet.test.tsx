@@ -223,7 +223,7 @@ describe('what gets written', () => {
     specs = [{ ...FAIRING, measured: 580, measured_by: 'm1', measured_at: '2026-09-09T10:00:00Z' }]
     renderSheet()
     expect(await screen.findByTestId('measured-by-spec-fairing')).toHaveTextContent(
-      'by Ada Rider on 2026-09-09',
+      'by Ada Rider on 9 Sept 2026',
     )
   })
 })

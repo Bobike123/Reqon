@@ -1,9 +1,15 @@
+import { useId, useState } from 'react'
+import { usePermissions } from '../auth/usePermissions.ts'
+import { Dialog } from '../ui/Dialog.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { buttonDanger, buttonSecondary } from '../ui/buttons.ts'
+import { ActionError } from '../ui/states.tsx'
+import { formatDay } from '../lib/dates.ts'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useMembers } from '../data/useMembers.ts'
-import { useTasks, useUpdateTask, type Task, type TaskState } from '../data/useTasks.ts'
-import { useTopics } from '../data/useTopics.ts'
+import { useDeleteTask, useTasks, useUpdateTask, type Task, type TaskState } from '../data/useTasks.ts'
+import { useProposals } from '../data/useProposals.ts'
 
 // Six lanes, exactly the six task_state values in the schema. Do not add a
 // seventh here without adding it to the enum first.
@@ -23,17 +29,22 @@ const LANES: { state: TaskState; label: string; tone: string }[] = [
 function TaskCard({
   task,
   members,
-  sourceTopicTitle,
+  sourceProposalTitle,
   onMove,
   onSetOwner,
+  onDelete,
   moving,
   tutorial,
+  canDelete,
 }: {
+  // Deleting is president/developer only (task_delete -> can_delete_records()).
+  canDelete: boolean
+  onDelete: (task: Task) => void
   // The one card the guided tour points at.
   tutorial: boolean
   task: Task
   members: { id: string; full_name: string }[]
-  sourceTopicTitle?: string
+  sourceProposalTitle?: string
   onMove: (id: string, state: TaskState) => void
   onSetOwner: (id: string, ownerId: string | null) => void
   moving: boolean
@@ -49,21 +60,21 @@ function TaskCard({
       className="rounded border border-slate-200 bg-white p-2"
       data-testid={`task-${task.id}`}
       data-task-state={task.state}
-      data-source-topic={task.source_topic ?? ''}
+      data-source-proposal={task.source_proposal ?? ''}
       data-tutorial={tutorial ? 'board-card' : undefined}
     >
       <p className="text-sm font-medium text-slate-900">{task.title}</p>
       {task.detail && <p className="mt-0.5 text-xs text-slate-600">{task.detail}</p>}
 
-      {sourceTopicTitle && (
+      {sourceProposalTitle && (
         <p className="mt-1 text-[11px] text-slate-500" data-testid={`task-origin-${task.id}`}>
-          From topic: “{sourceTopicTitle}”
+          From proposal: “{sourceProposalTitle}”
         </p>
       )}
 
       {task.due_date && (
         <p className={`mt-1 text-[11px] ${overdue ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
-          Due {task.due_date}
+          Due {formatDay(task.due_date)}
           {overdue ? ' · overdue' : ''}
         </p>
       )}
@@ -102,18 +113,34 @@ function TaskCard({
             </option>
           ))}
         </select>
+
+        {canDelete && (
+          <button
+            type="button"
+            onClick={() => onDelete(task)}
+            aria-label={`Delete ${task.title}`}
+            className="min-h-11 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:border-red-400 hover:text-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+          >
+            Delete
+          </button>
+        )}
       </div>
     </li>
   )
 }
 
 export default function Board() {
+  const can = usePermissions()
+  const remove = useDeleteTask()
+  const [deleting, setDeleting] = useState<Task | null>(null)
+  const [message, setMessage] = useState('')
+  const deleteTitleId = useId()
   const tasks = useTasks()
   const members = useMembers()
-  const topics = useTopics()
+  const proposals = useProposals()
   const updateTask = useUpdateTask()
 
-  const topicTitles = new Map((topics.data ?? []).map((t) => [t.id, t.title]))
+  const proposalTitles = new Map((proposals.data ?? []).map((t) => [t.id, t.title]))
   // The tour explains one real card: the first one, reading the lanes in order.
   const tutorialTaskId = LANES.map((lane) => (tasks.data ?? []).find((t) => t.state === lane.state)).find(Boolean)?.id
 
@@ -185,10 +212,15 @@ export default function Board() {
                         task={task}
                         tutorial={task.id === tutorialTaskId}
                         members={members.data ?? []}
-                        sourceTopicTitle={
-                          task.source_topic ? topicTitles.get(task.source_topic) : undefined
+                        sourceProposalTitle={
+                          task.source_proposal ? proposalTitles.get(task.source_proposal) : undefined
                         }
                         moving={updateTask.isPending}
+                        canDelete={can.canDeleteTask}
+                        onDelete={(task) => {
+                          setMessage('')
+                          setDeleting(task)
+                        }}
                         onMove={(id, state) => updateTask.mutate({ id, state })}
                         onSetOwner={(id, ownerId) => updateTask.mutate({ id, ownerId })}
                       />
@@ -199,6 +231,65 @@ export default function Board() {
             )
           })}
       </div>
+
+      <p role="status" className="mt-2 min-h-5 text-sm text-emerald-800">
+        {message}
+      </p>
+
+      {/* Named, not generic: the one thing a confirmation must say is WHICH
+          task disappears, because a deleted task takes its history with it. */}
+      <Dialog
+        open={deleting !== null}
+        onClose={() => {
+          remove.reset()
+          setDeleting(null)
+        }}
+        labelledBy={deleteTitleId}
+        dismissible={!remove.isPending}
+      >
+        {deleting && (
+          <div>
+            <h2 id={deleteTitleId} className="text-base font-semibold text-balance text-slate-900">
+              Delete this task?
+            </h2>
+            <p className="mt-2 text-sm text-pretty text-slate-700">
+              “{deleting.title}”
+              {deleting.due_date ? ` (due ${formatDay(deleting.due_date)})` : ''} will be removed
+              for everyone. If it came from a proposal, the proposal stays. This cannot be undone.
+            </p>
+            <ActionError error={remove.error} className="mt-3" />
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className={buttonSecondary}
+                disabled={remove.isPending}
+                onClick={() => {
+                  remove.reset()
+                  setDeleting(null)
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={buttonDanger}
+                disabled={remove.isPending}
+                onClick={async () => {
+                  try {
+                    await remove.mutateAsync(deleting.id)
+                    setDeleting(null)
+                    setMessage(`Deleted “${deleting.title}”.`)
+                  } catch {
+                    // Shown in the dialog by ActionError.
+                  }
+                }}
+              >
+                {remove.isPending ? 'Deleting…' : 'Delete task'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </main>
   )
 }

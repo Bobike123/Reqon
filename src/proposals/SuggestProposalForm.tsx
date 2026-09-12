@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 
-// Shared by the Now screen and the Meetings screen. Anyone can raise a topic
+// Shared by the Now screen and the Meetings screen. Anyone can raise a proposal
 // from wherever they happen to be standing.
-export function RaiseTopicForm({
+export function SuggestProposalForm({
   onRaise,
   pending,
   error,
@@ -27,12 +27,12 @@ export function RaiseTopicForm({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-3" data-tutorial="topic-raise">
-      <label htmlFor="topic-title" className="block text-xs font-medium text-slate-600">
-        Raise a topic
+    <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-3" data-tutorial="proposal-raise">
+      <label htmlFor="proposal-title" className="block text-xs font-medium text-slate-600">
+        Raise a proposal
       </label>
       <input
-        id="topic-title"
+        id="proposal-title"
         value={title}
         onChange={(e) => {
           setTitle(e.target.value)
@@ -41,11 +41,11 @@ export function RaiseTopicForm({
         placeholder="What needs deciding?"
         className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
       />
-      <label htmlFor="topic-context" className="mt-2 block text-xs font-medium text-slate-600">
+      <label htmlFor="proposal-context" className="mt-2 block text-xs font-medium text-slate-600">
         Context (optional)
       </label>
       <input
-        id="topic-context"
+        id="proposal-context"
         value={context}
         onChange={(e) => setContext(e.target.value)}
         placeholder="Why it matters, or the rule it relates to"
@@ -57,11 +57,11 @@ export function RaiseTopicForm({
           disabled={pending || !title.trim()}
           className="min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
         >
-          {pending ? 'Raising…' : 'Raise topic'}
+          {pending ? 'Raising…' : 'Raise proposal'}
         </button>
         {justRaised && !pending && !error && (
           <span role="status" className="pc-fade-in text-sm text-green-700">
-            Topic raised.
+            Proposal raised.
           </span>
         )}
         {error && (

@@ -24,16 +24,3 @@ export function parseEuros(input: string): number | null {
 export function centsToInput(cents: number): string {
   return (cents / 100).toFixed(2)
 }
-
-// Today in the reader's own time zone, as the YYYY-MM-DD a date input wants.
-export function todayIso(): string {
-  return new Date().toLocaleDateString('en-CA')
-}
-
-export function formatDay(iso: string): string {
-  return new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}

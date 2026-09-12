@@ -18,7 +18,7 @@ export type SeasonExport = {
   subteams: unknown[]
   clauseStatus: unknown[]
   tasks: unknown[]
-  topics: unknown[]
+  proposals: unknown[]
   meetings: unknown[]
   milestones: unknown[]
   milestoneSections: unknown[]
@@ -30,7 +30,7 @@ export type SeasonExport = {
 // Only tables that actually carry a season_id. Typed as a union rather than
 // `string` so a typo cannot compile.
 type ScopedTable =
-  | 'clause_status' | 'tasks' | 'topics' | 'meetings'
+  | 'clause_status' | 'tasks' | 'task_proposals' | 'meetings'
   | 'milestones' | 'specs' | 'handover_notes' | 'activity'
 
 export async function buildSeasonExport(seasonId: string): Promise<SeasonExport> {
@@ -47,18 +47,22 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
 
   // The roster and the subteam list are global, but a handover file is useless
   // without the names its owner ids point at.
+  //
+  // Named columns, not select('*'): this file gets emailed to next year's team,
+  // and `members` also carries phone, notes, skills and study_year. Owner ids
+  // only need a name to resolve, so that is all that leaves the database.
   const members = unwrap<unknown[]>(
     'export members',
-    await supabase.from('members').select('*'),
+    await supabase.from('members').select('id, full_name, role, status'),
   )
   const subteams = unwrap<unknown[]>(
     'export subteams',
     await supabase.from('subteams').select('*'),
   )
 
-  const [clauseStatus, tasks, topics, meetings, milestones, specs, handoverNotes, activity] =
+  const [clauseStatus, tasks, proposals, meetings, milestones, specs, handoverNotes, activity] =
     await Promise.all([
-      scoped('clause_status'), scoped('tasks'), scoped('topics'), scoped('meetings'),
+      scoped('clause_status'), scoped('tasks'), scoped('task_proposals'), scoped('meetings'),
       scoped('milestones'), scoped('specs'), scoped('handover_notes'), scoped('activity'),
     ])
 
@@ -83,7 +87,7 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       subteams: subteams.length,
       clauseStatus: clauseStatus.length,
       tasks: tasks.length,
-      topics: topics.length,
+      proposals: proposals.length,
       meetings: meetings.length,
       milestones: milestones.length,
       milestoneSections: milestoneSections.length,
@@ -91,7 +95,7 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       handoverNotes: handoverNotes.length,
       activity: activity.length,
     },
-    members, subteams, clauseStatus, tasks, topics, meetings,
+    members, subteams, clauseStatus, tasks, proposals, meetings,
     milestones, milestoneSections, specs, handoverNotes, activity,
   }
 }

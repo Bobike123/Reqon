@@ -1,7 +1,7 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import type { ClauseState } from '../data/useClauseStatus.ts'
 import { useClauseStatus, useSetClauseStatus } from '../data/useClauseStatus.ts'
@@ -65,7 +65,11 @@ export default function Register() {
     () => (subteamParam ? rows.filter((r) => r.clause.subteam_key === subteamParam) : rows),
     [rows, subteamParam],
   )
-  const filtered = useMemo(() => applyFilters(scoped, filters), [scoped, filters])
+  // Re-filtering ~500 rows (each carrying two <select>s) blocked the first
+  // keystroke for 133ms, measured in Chrome. The box keeps the typed value
+  // immediately; the list re-renders at lower priority a frame later.
+  const visibleFilters = useDeferredValue(filters)
+  const filtered = useMemo(() => applyFilters(scoped, visibleFilters), [scoped, visibleFilters])
   // The tutorial points at one representative rule — one with a criticality
   // badge when there is one on screen, so the badges get explained too.
   const tutorialRowKey = useMemo(

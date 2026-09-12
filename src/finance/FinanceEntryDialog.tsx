@@ -10,7 +10,8 @@ import {
 import { Dialog } from '../ui/Dialog.tsx'
 import { buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
 import { ActionError } from '../ui/states.tsx'
-import { centsToInput, parseEuros, todayIso } from './money.ts'
+import { todayIso } from '../lib/dates.ts'
+import { centsToInput, parseEuros } from './money.ts'
 
 type Add = ReturnType<typeof useAddFinanceEntry>
 type Update = ReturnType<typeof useUpdateFinanceEntry>

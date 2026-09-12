@@ -19,7 +19,7 @@ function reset() {
     v_current_season: [SEASON],
     seasons: [SEASON],
     members: [MEMBER, MEMBER2],
-    topics: [],
+    task_proposals: [],
     tasks: [],
     clauses: [],
     clause_status: [],
@@ -41,10 +41,10 @@ function makeBuilder(table: string) {
     if (ctx.op === 'insert') {
       insertCount[table] = (insertCount[table] ?? 0) + 1
       // Column defaults come from the schema, so the fake supplies them too —
-      // the app deliberately does not send `state` when raising a topic.
+      // the app deliberately does not send `state` when raising a proposal.
       const defaults: Record<string, Record<string, unknown>> = {
-        topics: { state: 'open', starred: false, decision: null, owner_id: null, decided_at: null, meeting_id: null, raised_on: '2026-09-09' },
-        tasks: { state: 'todo', starred: false, owner_id: null, due_date: null, detail: null, source_topic: null, subteam_key: null },
+        task_proposals: { state: 'open', starred: false, decision: null, owner_id: null, decided_at: null, meeting_id: null, raised_on: '2026-09-09' },
+        tasks: { state: 'todo', starred: false, owner_id: null, due_date: null, detail: null, source_proposal: null, subteam_key: null },
       }
       const row: Record<string, unknown> = {
         id: `${table}-${nextId++}`,
@@ -52,7 +52,7 @@ function makeBuilder(table: string) {
         ...ctx.payload,
       }
       // The stamp_decided trigger lives in the database, not in React.
-      if (table === 'topics' && row.state === 'decided') row.decided_at = new Date().toISOString()
+      if (table === 'task_proposals' && row.state === 'decided') row.decided_at = new Date().toISOString()
       db[table].push(row)
       return { data: ctx.single ? row : [row], error: null }
     }
@@ -62,7 +62,7 @@ function makeBuilder(table: string) {
         const match = Object.entries(ctx.filters).every(([k, v]) => r[k] === v)
         if (!match) return r
         const next = { ...r, ...ctx.payload }
-        if (table === 'topics' && next.state === 'decided' && r.state !== 'decided') {
+        if (table === 'task_proposals' && next.state === 'decided' && r.state !== 'decided') {
           next.decided_at = new Date().toISOString()
         }
         updated.push(next)
@@ -94,13 +94,13 @@ const supabase = {
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER, roles: [] }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER, roles: ['president'] }),
 }))
 vi.mock('../data/useRealtimeClauseStatus.ts', () => ({ useRealtimeClauseStatus: () => 'live' }))
 
 const { default: Now } = await import('./Now.tsx')
 const { default: Board } = await import('./Board.tsx')
-const { default: Meetings } = await import('./Meetings.tsx')
+const { default: Proposals } = await import('./Proposals.tsx')
 const { TutorialProvider } = await import('../tutorial/TutorialProvider.tsx')
 const { AppHeader } = await import('../ui/AppHeader.tsx')
 
@@ -116,9 +116,9 @@ function renderApp(initial = '/') {
           <Route path="/" element={<Now />} />
           <Route path="/board" element={<Board />} />
           {/* The ACCEPTANCE test never navigates here — it is registered only
-              so the other tests can exercise the archive states (parked), which
+              so the other tests can exercise the archive stages (parked), which
               the Now screen deliberately hides. */}
-          <Route path="/meetings" element={<Meetings />} />
+          <Route path="/proposals" element={<Proposals />} />
         </Routes>
         </TutorialProvider>
       </MemoryRouter>
@@ -129,19 +129,19 @@ function renderApp(initial = '/') {
 beforeEach(() => { reset(); vi.clearAllMocks() })
 
 describe('ACCEPTANCE: Now -> agenda -> decision -> decided -> task -> Board', () => {
-  it('completes the whole workflow without ever visiting Meetings', async () => {
+  it('completes the whole workflow without ever visiting Proposals', async () => {
     const user = userEvent.setup()
     renderApp('/')
 
-    // --- 1. Raise a topic, from the Now screen -----------------------------
-    await screen.findByText('Topics needing attention')
-    await user.type(screen.getByLabelText('Raise a topic'), 'Fairing width tolerance')
+    // --- 1. Raise a proposal, from the Now screen -----------------------------
+    await screen.findByText('Proposals needing attention')
+    await user.type(screen.getByLabelText('Raise a proposal'), 'Fairing width tolerance')
     await user.type(screen.getByLabelText('Context (optional)'), 'B.2.1.2 is blocked')
-    await user.click(screen.getByRole('button', { name: 'Raise topic' }))
+    await user.click(screen.getByRole('button', { name: 'Raise proposal' }))
 
-    await waitFor(() => expect(db.topics).toHaveLength(1))
-    const topicId = db.topics[0].id as string
-    expect(db.topics[0]).toMatchObject({
+    await waitFor(() => expect(db.task_proposals).toHaveLength(1))
+    const proposalId = db.task_proposals[0].id as string
+    expect(db.task_proposals[0]).toMatchObject({
       title: 'Fairing width tolerance',
       state: 'open',
       season_id: 'season-a',
@@ -149,35 +149,37 @@ describe('ACCEPTANCE: Now -> agenda -> decision -> decided -> task -> Board', ()
     })
     // Re-query the card each time: React replaces these nodes on re-render,
     // and a cached reference silently detaches from the document.
-    const card = () => screen.getByTestId(`topic-${topicId}`)
-    await screen.findByTestId(`topic-${topicId}`)
+    const card = () => screen.getByTestId(`proposal-${proposalId}`)
+    await screen.findByTestId(`proposal-${proposalId}`)
 
     // --- 2. Move it to the agenda -----------------------------------------
-    await user.selectOptions(within(card()).getByLabelText(/^State for/), 'agenda')
-    await waitFor(() => expect(db.topics[0].state).toBe('agenda'))
+    await user.selectOptions(within(card()).getByLabelText(/^Stage for/), 'agenda')
+    await waitFor(() => expect(db.task_proposals[0].state).toBe('agenda'))
 
     // --- 3. Record a decision (while it is still on the agenda) -----------
     const decision = within(card()).getByLabelText('Decision')
     await user.type(decision, 'Keep 450 mm; ask the Organization to confirm.')
     await user.tab()
     await waitFor(() =>
-      expect(db.topics[0].decision).toBe('Keep 450 mm; ask the Organization to confirm.'),
+      expect(db.task_proposals[0].decision).toBe('Keep 450 mm; ask the Organization to confirm.'),
     )
 
     // --- 4. Mark it decided ------------------------------------------------
-    await user.selectOptions(within(card()).getByLabelText(/^State for/), 'decided')
-    await waitFor(() => expect(db.topics[0].state).toBe('decided'))
+    await user.selectOptions(within(card()).getByLabelText(/^Stage for/), 'decided')
+    await waitFor(() => expect(db.task_proposals[0].state).toBe('decided'))
     // The decision survived the state change and is still editable.
-    expect(db.topics[0].decision).toBe('Keep 450 mm; ask the Organization to confirm.')
+    expect(db.task_proposals[0].decision).toBe('Keep 450 mm; ask the Organization to confirm.')
     expect(within(card()).getByLabelText('Decision')).toBeEnabled()
 
     // --- 5. Convert it to a task ------------------------------------------
-    await user.click(within(card()).getByTestId(`convert-${topicId}`))
+    await user.click(within(card()).getByTestId(`promote-${proposalId}`))
+    const promoteDialog = within(await screen.findByRole('dialog', { name: 'Promote to a board task' }))
+    await user.click(promoteDialog.getByRole('button', { name: 'Promote to task' }))
     await waitFor(() => expect(db.tasks).toHaveLength(1))
     expect(db.tasks[0]).toMatchObject({
       title: 'Fairing width tolerance',
       state: 'todo',
-      source_topic: topicId,
+      source_proposal: proposalId,
       created_by: 'm1',
       season_id: 'season-a',
     })
@@ -189,29 +191,29 @@ describe('ACCEPTANCE: Now -> agenda -> decision -> decided -> task -> Board', ()
     // --- 7. The task is there, in To do, and names its origin --------------
     const taskId = db.tasks[0].id as string
     const taskCard = await screen.findByTestId(`task-${taskId}`)
-    expect(taskCard).toHaveAttribute('data-source-topic', topicId)
+    expect(taskCard).toHaveAttribute('data-source-proposal', proposalId)
     expect(taskCard).toHaveAttribute('data-task-state', 'todo')
     expect(within(screen.getByTestId('lane-todo')).getByTestId(`task-${taskId}`)).toBeInTheDocument()
     expect(screen.getByTestId(`task-origin-${taskId}`)).toHaveTextContent('Fairing width tolerance')
 
     // And Meetings was never rendered.
-    expect(screen.queryByRole('heading', { name: 'Meetings' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Task proposals' })).not.toBeInTheDocument()
   })
 })
 
 describe('the decision field is never a dead end', () => {
-  it('stays editable in every topic state', async () => {
+  it('stays editable in every proposal state', async () => {
     const user = userEvent.setup()
-    db.topics = [
+    db.task_proposals = [
       { id: 't1', season_id: 'season-a', title: 'T', context: null, state: 'open', decision: null, owner_id: null, starred: false, raised_by: 'm1', raised_on: '2026-01-01', decided_at: null, meeting_id: null, updated_at: '2026-01-01' },
     ]
-    renderApp('/meetings')
-    await screen.findByTestId('topic-t1')
-    const card = () => screen.getByTestId('topic-t1')
+    renderApp('/proposals')
+    await screen.findByTestId('proposal-t1')
+    const card = () => screen.getByTestId('proposal-t1')
 
     for (const state of ['agenda', 'decided', 'parked', 'open']) {
-      await user.selectOptions(within(card()).getByLabelText(/^State for/), state)
-      await waitFor(() => expect(db.topics[0].state).toBe(state))
+      await user.selectOptions(within(card()).getByLabelText(/^Stage for/), state)
+      await waitFor(() => expect(db.task_proposals[0].state).toBe(state))
       expect(
         within(card()).getByLabelText('Decision'),
         `decision must stay editable while ${state}`,
@@ -223,17 +225,19 @@ describe('the decision field is never a dead end', () => {
 describe('duplicate protection', () => {
   it('does not create a second task when convert is clicked twice', async () => {
     const user = userEvent.setup()
-    db.topics = [
+    db.task_proposals = [
       { id: 't1', season_id: 'season-a', title: 'Order tyres', context: null, state: 'decided', decision: 'do it', owner_id: null, starred: false, raised_by: 'm1', raised_on: '2026-01-01', decided_at: null, meeting_id: null, updated_at: '2026-01-01' },
     ]
-    renderApp('/meetings')
-    await screen.findByTestId('topic-t1')
-    await user.click(within(screen.getByTestId('topic-t1')).getByTestId('convert-t1'))
+    renderApp('/proposals')
+    await screen.findByTestId('proposal-t1')
+    await user.click(within(screen.getByTestId('proposal-t1')).getByTestId('promote-t1'))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Promote to a board task' }))
+    await user.click(dialog.getByRole('button', { name: 'Promote to task' }))
     await waitFor(() => expect(db.tasks).toHaveLength(1))
 
     // The button is replaced by a "converted" badge, and the mutation is
     // idempotent even if something calls it again.
-    await waitFor(() => expect(screen.getByTestId('topic-converted-t1')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('proposal-promoted-t1')).toBeInTheDocument())
     expect(db.tasks).toHaveLength(1)
     expect(insertCount.tasks).toBe(1)
   })
@@ -243,15 +247,15 @@ describe('duplicate protection', () => {
     // is impossible on screen. That is not enough: a retry, a stale tab or a
     // reload-and-click-again would still reach the mutation. Call it twice
     // directly and prove only one task is ever inserted.
-    const topic = {
+    const proposal = {
       id: 't9', season_id: 'season-a', title: 'Order tyres', context: null,
       state: 'decided', decision: 'do it', owner_id: null, starred: false,
       raised_by: 'm1', raised_on: '2026-01-01', decided_at: null,
       meeting_id: null, updated_at: '2026-01-01',
     }
-    db.topics = [topic]
+    db.task_proposals = [proposal]
 
-    const { useConvertTopicToTask } = await import('../data/useTopics.ts')
+    const { usePromoteProposal } = await import('../data/useProposals.ts')
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -260,36 +264,39 @@ describe('duplicate protection', () => {
     const season = renderHook(() => useCurrentSeason(), { wrapper })
     await waitFor(() => expect(season.result.current.data).toBeTruthy())
 
-    const { result } = renderHook(() => useConvertTopicToTask(), { wrapper })
+    const { result } = renderHook(() => usePromoteProposal(), { wrapper })
     // The mutation refuses to guess a season, so wait until one is resolved.
     await waitFor(() => expect(result.current).toBeTruthy())
 
-    const first = await result.current.mutateAsync(topic as never)
-    const second = await result.current.mutateAsync(topic as never)
+    const first = await result.current.mutateAsync({ proposal: proposal } as never)
+    const second = await result.current.mutateAsync({ proposal: proposal } as never)
 
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
     expect(second.task.id).toBe(first.task.id)
     expect(db.tasks).toHaveLength(1)
     expect(insertCount.tasks).toBe(1)
+    // The only path left that inserts a task, so this is the only place that
+    // can catch its author or origin being dropped.
+    expect(db.tasks[0]).toMatchObject({ created_by: 'm1', source_proposal: 't9', state: 'todo' })
   })
 
-  it('does not raise two topics from a double submit', async () => {
+  it('does not raise two proposals from a double submit', async () => {
     const user = userEvent.setup()
     renderApp('/')
-    await screen.findByText('Topics needing attention')
-    await user.type(screen.getByLabelText('Raise a topic'), 'Only once')
-    const btn = screen.getByRole('button', { name: 'Raise topic' })
+    await screen.findByText('Proposals needing attention')
+    await user.type(screen.getByLabelText('Raise a proposal'), 'Only once')
+    const btn = screen.getByRole('button', { name: 'Raise proposal' })
     await user.tripleClick(btn)
-    await waitFor(() => expect(db.topics.length).toBeGreaterThan(0))
-    expect(db.topics).toHaveLength(1)
+    await waitFor(() => expect(db.task_proposals.length).toBeGreaterThan(0))
+    expect(db.task_proposals).toHaveLength(1)
   })
 })
 
 describe('task board', () => {
   beforeEach(() => {
     db.tasks = [
-      { id: 'k1', season_id: 'season-a', title: 'Order fairing material', detail: null, state: 'todo', owner_id: null, due_date: null, starred: false, source_topic: null, created_by: 'm1', subteam_key: null, created_at: '', updated_at: '' },
+      { id: 'k1', season_id: 'season-a', title: 'Order fairing material', detail: null, state: 'todo', owner_id: null, due_date: null, starred: false, source_proposal: null, created_by: 'm1', subteam_key: null, created_at: '', updated_at: '' },
     ]
   })
 

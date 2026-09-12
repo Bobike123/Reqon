@@ -111,8 +111,8 @@ const { queryKeys } = await import('./queryKeys.ts')
 const { useCurrentSeason } = await import('./useCurrentSeason.ts')
 const { useClauses } = await import('./useClauses.ts')
 const { useClauseStatus, useSetClauseStatus } = await import('./useClauseStatus.ts')
-const { useTasks, useCreateTask } = await import('./useTasks.ts')
-const { useCreateTopic } = await import('./useTopics.ts')
+const { useTasks } = await import('./useTasks.ts')
+const { useSuggestProposal } = await import('./useProposals.ts')
 const { useMembers } = await import('./useMembers.ts')
 
 const SEASON_A = { id: 'season-a', label: '2026/27', is_current: true }
@@ -239,26 +239,14 @@ describe('attribution', () => {
     expect(write?.payload?.state).toBe('compliant')
   })
 
-  it('stamps tasks.created_by (tasks has no updated_by column)', async () => {
+  it('stamps proposals.raised_by', async () => {
     const season = renderHook(() => useCurrentSeason(), { wrapper })
     await waitFor(() => expect(season.result.current.data).toBeTruthy())
-    const { result } = renderHook(() => useCreateTask(), { wrapper })
-    await act(async () => {
-      await result.current.mutateAsync({ title: 'Order tyres' })
-    })
-    const write = calls.find((c) => c.table === 'tasks' && c.op === 'insert')
-    expect(write?.payload?.created_by).toBe(MEMBER.id)
-    expect(write?.payload).not.toHaveProperty('updated_by')
-  })
-
-  it('stamps topics.raised_by', async () => {
-    const season = renderHook(() => useCurrentSeason(), { wrapper })
-    await waitFor(() => expect(season.result.current.data).toBeTruthy())
-    const { result } = renderHook(() => useCreateTopic(), { wrapper })
+    const { result } = renderHook(() => useSuggestProposal(), { wrapper })
     await act(async () => {
       await result.current.mutateAsync({ title: 'Fairing width' })
     })
-    const write = calls.find((c) => c.table === 'topics' && c.op === 'insert')
+    const write = calls.find((c) => c.table === 'task_proposals' && c.op === 'insert')
     expect(write?.payload?.raised_by).toBe(MEMBER.id)
   })
 })

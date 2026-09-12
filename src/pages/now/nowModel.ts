@@ -1,6 +1,6 @@
 import type { Milestone } from '../../data/useMilestones.ts'
 import type { Attention, SubteamProgress } from '../../data/useNowMetrics.ts'
-import type { Topic } from '../../data/useTopics.ts'
+import type { Proposal } from '../../data/useProposals.ts'
 
 // Every instrument on the Now screen, and the SQL that reproduces it.
 // The queries themselves are in docs/now-metrics.sql — paste one into the
@@ -68,9 +68,9 @@ export function overdueCount(attention: Attention[]): number {
   return attention.filter((a) => a.reason === 'overdue').length
 }
 
-// SOURCE: topics.state = 'open', current season. docs/now-metrics.sql §5
-export function openTopicsCount(topics: Topic[]): number {
-  return topics.filter((t) => t.state === 'open').length
+// SOURCE: proposals.state = 'open', current season. docs/now-metrics.sql §5
+export function openProposalsCount(proposals: Proposal[]): number {
+  return proposals.filter((t) => t.state === 'open').length
 }
 
 // SOURCE: v_attention where reason = 'blocked' — covers blocked rules AND

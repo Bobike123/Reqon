@@ -1,6 +1,7 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
+import { formatDay } from '../lib/dates.ts'
 import { pageMain } from '../ui/layout.ts'
-import { ErrorState } from '../ui/states.tsx'
+import { EmptyState, ErrorState } from '../ui/states.tsx'
 import { useClauses } from '../data/useClauses.ts'
 import {
   useMilestones,
@@ -72,6 +73,13 @@ export default function Milestones() {
         MS1 deliverables — {totalPoints} points in total
       </p>
 
+      {!milestones.isLoading && (milestones.data ?? []).length === 0 && (
+        <EmptyState title="No milestones for this season yet">
+          The President or Vice President adds the submission windows and points in
+          Settings → Milestone dates and points.
+        </EmptyState>
+      )}
+
       {/* Two milestones side by side on a wide screen. */}
       <ul className="grid items-start gap-3 xl:grid-cols-2">
         {(milestones.data ?? []).map((milestone, index) => {
@@ -109,8 +117,8 @@ export default function Milestones() {
                 ) : (
                   <>
                     <span className="text-slate-700" data-testid={`window-${milestone.key}`}>
-                      {window.opensOn ? `${window.opensOn} → ` : 'Due '}
-                      {window.dueOn}
+                      {window.opensOn ? `${formatDay(window.opensOn)} → ` : 'Due '}
+                      {formatDay(window.dueOn)}
                     </span>
                     <span
                       className={`rounded px-2 py-0.5 text-xs font-medium ${
