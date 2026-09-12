@@ -7,8 +7,8 @@ import { formatEuros } from '../finance/money.ts'
 
 // A fake that enforces the SAME rules as the finance_* policies in
 // supabase/migrations/20260106000000_finance_ledger.sql (checked for real by
-// supabase/tests/finance_rls_test.sql): every privileged role reads, only the
-// Treasurer writes. Like PostgREST, a refused read returns no rows and a
+// supabase/tests/finance_rls_test.sql): every privileged role reads; the
+// Treasurer writes, and so does the Developer (20260107, full access). Like PostgREST, a refused read returns no rows and a
 // refused UPDATE/DELETE matches nothing — only a refused INSERT is an error.
 type Row = {
   id: string
@@ -30,7 +30,7 @@ let requests: string[]
 let rpcFails = false
 
 const canView = () => who.roles.length > 0
-const canManage = () => who.roles.includes('treasurer')
+const canManage = () => who.roles.includes('treasurer') || who.roles.includes('developer')
 
 const row = (over: Partial<Row>): Row => ({
   id: 'x', season_id: 's1', entry_date: '2026-09-01', kind: 'expense', description: 'x', category: null,
@@ -168,7 +168,7 @@ describe('the Treasurer', () => {
     const dialog = await dialogNamed('Add an entry')
     await user.type(dialog.getByLabelText('Description'), 'Brake pads')
     await user.type(dialog.getByLabelText('Amount (€)'), '45')
-    who.roles = ['developer'] // the President moved Treasurer to someone else
+    who.roles = ['president'] // the President moved Treasurer to someone else
     await user.click(dialog.getByRole('button', { name: 'Add entry' }))
 
     expect(await dialog.findByRole('alert')).toHaveTextContent(
@@ -183,14 +183,14 @@ describe('the Treasurer', () => {
     renderFinances(['treasurer'])
     await user.click(await screen.findByRole('button', { name: 'Edit Entry fee' }))
     const dialog = await dialogNamed('Edit entry')
-    who.roles = ['developer']
+    who.roles = ['president']
     await user.click(dialog.getByRole('button', { name: 'Save changes' }))
     expect(await dialog.findByRole('alert')).toHaveTextContent("You don't have permission to edit financial entries")
     expect(screen.queryByText('Entry updated.')).not.toBeInTheDocument()
   })
 })
 
-for (const [label, role] of [['President', 'president'], ['Vice President', 'vicepresident'], ['Developer', 'developer']] as const) {
+for (const [label, role] of [['President', 'president'], ['Vice President', 'vicepresident']] as const) {
   describe(`the ${label}`, () => {
     it('sees every entry of this season and the totals, read-only, with the reason in words', async () => {
       renderFinances([role])
@@ -199,13 +199,33 @@ for (const [label, role] of [['President', 'president'], ['Vice President', 'vic
       expect(screen.queryByText('Last season')).not.toBeInTheDocument()
       expect(screen.getByText(formatEuros(1000000))).toBeInTheDocument()
       expect(screen.getByText(formatEuros(1000000 - 455000))).toBeInTheDocument()
-      expect(screen.getByTestId('finance-access')).toHaveTextContent(`Read-only for ${label}. Only the Treasurer can change`)
+      expect(screen.getByTestId('finance-access')).toHaveTextContent(
+        `Read-only for ${label}. Only the Treasurer and the Developer can change`,
+      )
       expect(screen.queryByRole('button', { name: 'Add entry' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^Edit / })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^Delete / })).not.toBeInTheDocument()
     })
   })
 }
+
+describe('the Developer', () => {
+  it('has full access: writes the ledger like the Treasurer', async () => {
+    const user = userEvent.setup()
+    renderFinances(['developer'])
+    expect(await screen.findByTestId('finance-access')).toHaveTextContent('full access as Developer')
+    await user.click(await screen.findByRole('button', { name: 'Add entry' }))
+    const dialog = await dialogNamed('Add an entry')
+    await user.type(dialog.getByLabelText('Description'), 'Server bill')
+    await user.type(dialog.getByLabelText('Amount (€)'), '12')
+    await user.click(dialog.getByRole('button', { name: 'Add entry' }))
+
+    expect(await screen.findByText('Entry added.')).toBeInTheDocument()
+    expect(rows.find((r) => r.description === 'Server bill')).toMatchObject({ amount_cents: 1200 })
+    expect(screen.getByRole('button', { name: 'Edit Entry fee' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete Entry fee' })).toBeInTheDocument()
+  })
+})
 
 describe('an ordinary member', () => {
   it('is told who can see finances, and nothing is requested on their behalf', async () => {
@@ -222,7 +242,7 @@ describe('an empty ledger', () => {
     const { unmount } = renderFinances(['treasurer'])
     expect(await screen.findByText(/Add the first income or expense/)).toBeInTheDocument()
     unmount()
-    renderFinances(['developer'])
+    renderFinances(['president'])
     expect(await screen.findByText(/The Treasurer records the season’s income and expenses here/)).toBeInTheDocument()
   })
 })
@@ -272,7 +292,7 @@ describe('a failure that is not a refusal', () => {
     renderFinances(['treasurer'])
     await user.click(await screen.findByRole('button', { name: 'Edit Entry fee' }))
     const dialog = await dialogNamed('Edit entry')
-    who.roles = ['developer'] // the update will match nothing…
+    who.roles = ['president'] // the update will match nothing…
     rpcFails = true // …and the follow-up question fails too
     await user.click(dialog.getByRole('button', { name: 'Save changes' }))
     const alert = await dialog.findByRole('alert')

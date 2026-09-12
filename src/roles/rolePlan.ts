@@ -43,14 +43,14 @@ const GAINS: Record<PrivilegedRole, string> = {
   president: 'can change every setting and give or take away anyone’s roles',
   vicepresident: 'can change the roster, subsystems, milestones and seasons',
   treasurer: 'can add, edit and delete financial entries',
-  developer: 'can see everything, finances included',
+  developer: 'can do everything in the club, roles and money included',
 }
 
 const LOSES: Record<PrivilegedRole, string> = {
   president: 'can no longer give or take away roles',
   vicepresident: 'can no longer change the roster, subsystems, milestones or seasons',
   treasurer: 'can no longer change financial entries',
-  developer: 'loses the Developer view of finances',
+  developer: 'loses full access to the club’s data',
 }
 
 export function joinNames(people: readonly Person[]): string {
@@ -132,9 +132,12 @@ export function planRoleChanges(input: PlanInput): RolePlan {
   return {
     changes,
     consequences,
-    // President and Treasurer are the powerful ones: ask twice. Developer and
-    // Vice President changes save straight away.
-    needsConfirmation: changes.some((c) => c.role === 'president' || c.role === 'treasurer'),
+    // President, Treasurer and Developer are the powerful ones: ask twice.
+    // Developer is full access, so granting it deserves the same pause as
+    // granting the presidency. Vice President changes save straight away.
+    needsConfirmation: changes.some(
+      (c) => c.role === 'president' || c.role === 'treasurer' || c.role === 'developer',
+    ),
     blocked,
     otherTreasurers,
     canStepDown,

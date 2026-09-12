@@ -262,7 +262,7 @@ describe('privileged roles', () => {
     state.memberRow = { ...MEMBER_ROW, member_roles: [{ role: 'treasurer' }, { role: 'developer' }] }
     renderApp(<RoleProbe />)
     expect(await screen.findByTestId('probe')).toHaveTextContent(
-      'roles=treasurer,developer administer=false manageRoles=false viewFinances=true manageFinances=true embedLeaks=false',
+      'roles=treasurer,developer administer=true manageRoles=true viewFinances=true manageFinances=true embedLeaks=false',
     )
     expect(state.memberQueries).toBe(1)
     // member_roles points at members twice (member_id and assigned_by); without

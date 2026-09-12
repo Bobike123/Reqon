@@ -15,6 +15,7 @@
 --  anything.
 --
 --    developer      reads everything, including finance; administers nothing
+--                   (SUPERSEDED by 20260107: the developer has full access)
 --    treasurer      the ONLY role that may write financial records
 --    president      administers the club; the ONLY role that assigns roles
 --    vicepresident  administers the club like the president, minus roles

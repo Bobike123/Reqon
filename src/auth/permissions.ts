@@ -23,7 +23,7 @@ export const ROLE_SUMMARIES: Record<PrivilegedRole, string> = {
   president: 'Runs Settings, and is the only role that can give or take away roles.',
   vicepresident: 'Runs Settings like the President, but cannot change roles.',
   treasurer: 'The only role that can add, edit or delete financial entries.',
-  developer: 'Can see everything, finances included, with no extra rights to change it.',
+  developer: 'Full access, for maintenance: everything the other three roles can do, roles included.',
 }
 
 // Someone on the roster who holds no privileged role.
@@ -67,10 +67,12 @@ export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
   return {
     roles,
     hasRole,
-    canAdminister: hasRole('president') || hasRole('vicepresident'),
-    canManageRoles: hasRole('president'),
+    // The developer passes every check, for maintenance and security work:
+    // supabase/migrations/20260107000000_developer_full_access.sql.
+    canAdminister: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
+    canManageRoles: hasRole('president') || hasRole('developer'),
     canViewFinances: held.size > 0,
-    canManageFinances: hasRole('treasurer'),
+    canManageFinances: hasRole('treasurer') || hasRole('developer'),
   }
 }
 

@@ -35,9 +35,14 @@ describe('planning a role change', () => {
     expect(p.needsConfirmation).toBe(false)
   })
 
-  it('saves Developer and Vice President changes without asking twice', () => {
-    expect(plan({ desired: ['developer'] }).needsConfirmation).toBe(false)
+  it('saves a Vice President change without asking twice', () => {
     expect(plan({ target: CY, desired: [] }).needsConfirmation).toBe(false)
+  })
+
+  it('asks before granting Developer, which is full access', () => {
+    const p = plan({ desired: ['developer'] })
+    expect(p.needsConfirmation).toBe(true)
+    expect(p.consequences[0]).toMatch(/Bo becomes Developer and can do everything in the club/)
   })
 
   it('asks before making someone President, and says it includes power over your own roles', () => {

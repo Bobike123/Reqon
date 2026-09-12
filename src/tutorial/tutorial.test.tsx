@@ -264,7 +264,7 @@ describe('the tour chooser', () => {
     expect(within(chooser).getByRole('button', { name: /^Full tour.*4 steps$/ })).toBeInTheDocument()
     await user.click(within(chooser).getByRole('button', { name: /^Only the Treasurer parts.*2 steps$/ }))
     expect(await screen.findByRole('dialog', { name: 'Treasurer step' })).toBeInTheDocument()
-    expect(screen.getByText('Only for: Treasurer')).toBeInTheDocument()
+    expect(screen.getByText('Only for: Treasurer and Developer')).toBeInTheDocument()
   })
 
   it('Close leaves without starting anything', async () => {
@@ -366,22 +366,30 @@ describe('what each role is taught', () => {
     }
   })
 
-  it('the Developer learns they can read everything and change nothing extra', () => {
-    expect(ids(['developer'], 'role')).toEqual([
-      'finance-access',
-      'finance-totals',
-      'finance-read-only',
-      'developer-scope',
-      'finish',
-    ])
+  it('the Developer is taught everything, because they can do everything', () => {
+    const all = ids(['developer'])
+    expect(all).toEqual(
+      expect.arrayContaining([
+        'developer-scope',
+        'change-roles',
+        'role-rules',
+        'roster-controls',
+        'add-member',
+        'new-season',
+        'finance-add',
+        'finance-edit',
+      ]),
+    )
+    // Nothing that tells them they cannot change something.
+    expect(all).not.toContain('finance-read-only')
+    expect(all).not.toContain('vp-roles')
   })
 
   it('never tells someone with two roles two contradicting things', () => {
     const all = ids(['treasurer', 'developer'])
     expect(all).toContain('finance-add')
-    // Both of these say "you cannot change this", which is untrue for a Treasurer.
+    // Says "only the Treasurer may write", which is untrue for a Developer.
     expect(all).not.toContain('finance-read-only')
-    expect(all).not.toContain('developer-scope')
   })
 
   it('offers the Finances part only to people who can see finances', () => {

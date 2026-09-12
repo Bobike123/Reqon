@@ -28,17 +28,18 @@ import {
 
 // Settings. Admin-only actions are hidden from everyone else here AS A
 // COURTESY — the actual authorization is in the database
-// (supabase/migrations/20260105000000_privileged_roles.sql):
+// (supabase/migrations/20260105000000_privileged_roles.sql, with the developer
+// given full access by 20260107000000_developer_full_access.sql):
 //
-//   members      INSERT  -> admin_roster_insert (is_admin(): president or vice-president)
+//   members      INSERT  -> admin_roster_insert (is_admin(): president, vice-president, developer)
 //   members      UPDATE  -> member_self_update  (own row, or is_admin())
 //   members      DELETE  -> no policy at all: people cannot be deleted, ever
 //   subteams     ALL     -> admin_write         (is_admin())
 //   milestones   ALL     -> admin_write         (is_admin())
 //   seasons      ALL     -> admin_write         (is_admin())
 //   season switch        -> set_current_season() raises unless is_admin()
-//   member_roles INSERT  -> role_assign         (can_manage_roles(): the president only)
-//   member_roles DELETE  -> role_remove         (the president only; never the last one)
+//   member_roles INSERT  -> role_assign         (can_manage_roles(): president or developer)
+//   member_roles DELETE  -> role_remove         (same, and never the last president)
 //
 // What to show comes from usePermissions() — this file never inspects roles to
 // decide access. Editing it to un-hide a button gets you a rejected request,
@@ -178,7 +179,7 @@ export default function Settings() {
         {canManageRoles
           ? 'You can change everything on this page, including who holds which role.'
           : canAdminister
-            ? 'You can change everything on this page except roles, which only the President can give or take away.'
+            ? 'You can change everything on this page except roles, which only the President or a Developer can give or take away.'
             : 'Roster, subsystem, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
 
@@ -283,12 +284,12 @@ export default function Settings() {
           roster, so old task and rule owners keep resolving to a name forever.
         </p>
         <p className="mt-1 text-xs text-slate-500">
-          The President and Vice President run these settings, the Treasurer is the only one
-          who can change money, and a Developer can see everything without extra rights to
-          change it.{' '}
+          The President and Vice President run these settings and the Treasurer changes money.
+          A Developer can do all of it, roles included — the role exists so the app can be
+          maintained and repaired, so give it out sparingly.{' '}
           {canManageRoles
-            ? 'Only you, as President, can give or take away roles — and the club always keeps at least one President.'
-            : 'Roles are given and taken away by the President.'}
+            ? 'You can give or take away roles — and the club always keeps at least one President.'
+            : 'Roles are given and taken away by the President or a Developer.'}
         </p>
         <p role="status" className="mt-1 min-h-4 text-xs font-medium text-emerald-800">
           {roleMessage}
@@ -321,6 +322,11 @@ export default function Settings() {
               Accounts cannot be created from this app: doing so would require the
               service_role key in your browser, which would let anyone read and change
               the whole database.
+            </p>
+            <p className="mb-2 text-xs text-slate-600">
+              Both steps in one go:{' '}
+              <code className="rounded bg-slate-100 px-1 py-0.5">supabase/scripts/new_member.sql</code>{' '}
+              in the Supabase SQL Editor — fill in the five values at the top and run it.
             </p>
             <label className="block text-xs font-medium text-slate-600" htmlFor="new-member-id">
               Auth user UUID

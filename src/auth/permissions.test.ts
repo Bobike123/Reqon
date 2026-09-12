@@ -6,7 +6,7 @@ import { NO_PERMISSIONS, ROLE_LABELS, describeRoles, permissionsFor, type Privil
 const MATRIX: Record<PrivilegedRole | 'member', {
   canAdminister: boolean; canManageRoles: boolean; canViewFinances: boolean; canManageFinances: boolean
 }> = {
-  developer:     { canAdminister: false, canManageRoles: false, canViewFinances: true,  canManageFinances: false },
+  developer:     { canAdminister: true,  canManageRoles: true,  canViewFinances: true,  canManageFinances: true  },
   treasurer:     { canAdminister: false, canManageRoles: false, canViewFinances: true,  canManageFinances: true  },
   president:     { canAdminister: true,  canManageRoles: true,  canViewFinances: true,  canManageFinances: false },
   vicepresident: { canAdminister: true,  canManageRoles: false, canViewFinances: true,  canManageFinances: false },
@@ -26,22 +26,29 @@ describe('the permission matrix', () => {
     })
   }
 
-  it('only the president manages roles', () => {
+  it('the president and the developer manage roles', () => {
     const managers = (['developer', 'treasurer', 'president', 'vicepresident'] as PrivilegedRole[])
       .filter((r) => permissionsFor([r]).canManageRoles)
-    expect(managers).toEqual(['president'])
+    expect(managers).toEqual(['developer', 'president'])
   })
 
-  it('only the treasurer manages money', () => {
+  it('the treasurer and the developer manage money', () => {
     const managers = (['developer', 'treasurer', 'president', 'vicepresident'] as PrivilegedRole[])
       .filter((r) => permissionsFor([r]).canManageFinances)
-    expect(managers).toEqual(['treasurer'])
+    expect(managers).toEqual(['developer', 'treasurer'])
   })
 
-  it('combines roles: treasurer + developer may manage money but not administer', () => {
+  it('the developer alone has every power the club has', () => {
+    const p = permissionsFor(['developer'])
+    expect([p.canAdminister, p.canManageRoles, p.canViewFinances, p.canManageFinances]).toEqual([
+      true, true, true, true,
+    ])
+  })
+
+  it('combines roles: a treasurer who is also developer keeps full access', () => {
     const p = permissionsFor(['treasurer', 'developer'])
     expect(p.canManageFinances).toBe(true)
-    expect(p.canAdminister).toBe(false)
+    expect(p.canAdminister).toBe(true)
     expect(p.hasRole('developer')).toBe(true)
   })
 

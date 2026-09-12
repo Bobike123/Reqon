@@ -82,8 +82,10 @@ export default function Finances() {
       <PageHeader title="Finances" description={DESCRIPTION}>
         <p className="mt-2 text-sm text-slate-700" data-testid="finance-access" data-tutorial="finance-access">
           {can.canManageFinances
-            ? 'You are the Treasurer: you can add, edit and delete entries.'
-            : `Read-only for ${describeRoles(can.roles)}. Only the Treasurer can change these entries — the database refuses changes from anyone else.`}
+            ? can.hasRole('treasurer')
+              ? 'You are the Treasurer: you can add, edit and delete entries.'
+              : 'You have full access as Developer: you can add, edit and delete entries.'
+            : `Read-only for ${describeRoles(can.roles)}. Only the Treasurer and the Developer can change these entries — the database refuses changes from anyone else.`}
         </p>
       </PageHeader>
 

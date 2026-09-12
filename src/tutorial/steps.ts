@@ -30,17 +30,16 @@ export const AUDIENCES = {
     includes: (can) => can.canViewFinances,
   },
   financeReadOnly: {
-    label: 'President, Vice President and Developer',
+    label: 'President and Vice President',
     includes: (can) => can.canViewFinances && !can.canManageFinances,
   },
-  treasurer: { label: 'Treasurer', includes: (can) => can.canManageFinances },
-  admins: { label: 'President and Vice President', includes: (can) => can.canAdminister },
-  president: { label: 'President', includes: (can) => can.canManageRoles },
+  treasurer: { label: 'Treasurer and Developer', includes: (can) => can.canManageFinances },
+  admins: { label: 'President, Vice President and Developer', includes: (can) => can.canAdminister },
+  president: { label: 'President and Developer', includes: (can) => can.canManageRoles },
   vicePresident: { label: 'Vice President', includes: (can) => can.canAdminister && !can.canManageRoles },
-  developer: {
-    label: 'Developer',
-    includes: (can) => can.hasRole('developer') && !can.canAdminister && !can.canManageFinances,
-  },
+  // The Developer holds every power in the club, so this is the one audience
+  // that asks which role someone holds rather than what they may do.
+  developer: { label: 'Developer', includes: (can) => can.hasRole('developer') },
 } satisfies Record<string, { label: string; includes: (can: Permissions) => boolean }>
 
 export type Audience = keyof typeof AUDIENCES
@@ -316,7 +315,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'finance-entries',
     audience: 'financeReadOnly',
     title: 'Read-only for you',
-    body: 'You can see every entry, but only the Treasurer can add, edit or delete one — the database refuses changes from anyone else. If something looks wrong, tell the Treasurer.',
+    body: 'You can see every entry, but only the Treasurer and the Developer can add, edit or delete one — the database refuses changes from anyone else. If something looks wrong, tell the Treasurer.',
   },
   {
     id: 'finance-add',
@@ -362,7 +361,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'settings-access',
     audience: 'developer',
     title: 'What a Developer can do',
-    body: 'You can read every screen, finances included, but have no extra rights to change anything. That makes you a safe pair of eyes for checking and debugging.',
+    body: 'Everything: roles, the roster, the rulebook, seasons and the money. The role exists so the app can be maintained and repaired, so nothing on screen will stop you — be careful, and hand it back when you are done.',
   },
   {
     id: 'settings-account',
@@ -387,7 +386,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'settings-roster',
     audience: 'vicePresident',
     title: 'Roles are the President’s',
-    body: 'As Vice President you can change everything in Settings except roles. If someone needs a role given or taken away, ask the President.',
+    body: 'As Vice President you can change everything in Settings except roles. If someone needs a role given or taken away, ask the President or a Developer.',
   },
   {
     id: 'change-roles',
@@ -396,7 +395,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'change-roles',
     audience: 'president',
     title: 'Giving and taking away roles',
-    body: 'Only the President can. “Change roles” opens a checklist for that person. Developer and Vice President changes save at once; President and Treasurer changes ask you to confirm.',
+    body: 'The President and any Developer can. “Change roles” opens a checklist for that person. Vice President changes save at once; President, Treasurer and Developer changes ask you to confirm first.',
   },
   {
     id: 'role-rules',

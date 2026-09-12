@@ -166,7 +166,8 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260103000000_attention_clause_key.sql` | adds `clause_key` to `v_attention` |
 | `20260104000000_set_current_season.sql` | atomic season switch |
 | `20260105000000_privileged_roles.sql` | privileged roles (`member_roles`) and the policies that use them — see §7 |
-| `20260106000000_finance_ledger.sql` | the finance ledger (`finance_entries`): readable by the four roles, writable by the Treasurer only — see §7 |
+| `20260106000000_finance_ledger.sql` | the finance ledger (`finance_entries`): readable by the four roles, writable by the Treasurer — see §7 |
+| `20260107000000_developer_full_access.sql` | the Developer role becomes full access, for maintenance — see §7 |
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -199,8 +200,16 @@ Step 3 is what actually grants access. A person with a login but no `members`
 row sees "Your account is not on the club roster" and no data — the database
 returns nothing to them. The `members` table *is* the allowlist.
 
-Only the President or Vice President can do step 3. Linking someone gives them
-no privileged role.
+Only the President, Vice President or a Developer can do step 3. Linking someone
+gives them no privileged role.
+
+**Or do it in one query.** `supabase/scripts/new_member.sql` creates the login
+and the roster row in a single transaction: paste it into the **SQL Editor**,
+change the five values under `EDIT ME`, Run. It refuses an address that already
+has a login, can grant privileged roles at the same time, and finishes by
+printing the three newest people with what they may sign in with. This changes
+nothing about the app: the SQL Editor runs *inside* the database, so no key is
+ever shipped to a browser.
 
 ### Roles
 
@@ -210,11 +219,17 @@ roster ("Chassis lead") is only a label and grants nothing.
 
 | | Read everything, incl. money | Roster, subsystems, rulebook, milestones, seasons | Change money | Give / take away roles |
 |---|---|---|---|---|
-| **President** | yes | yes | no | **yes — the only one** |
+| **President** | yes | yes | no | yes |
 | **Vice President** | yes | yes | no | no |
-| **Treasurer** | yes | no | **yes — the only one** | no |
-| **Developer** | yes | no | no | no |
+| **Treasurer** | yes | no | yes | no |
+| **Developer** | yes | **yes** | **yes** | **yes** |
 | Everyone else on the roster | everything except money | no | no | no |
+
+**Developer is full access**, on purpose: whoever maintains the app has to be
+able to repair the club's data and undo a bad change without waiting for an
+officer. It can do everything the President, Vice President and Treasurer can —
+including giving itself any role — so give it only to the person doing that work,
+and take it back when they are done (`20260107000000_developer_full_access.sql`).
 
 Everyone on the roster keeps the day-to-day work: the register, tasks, meetings,
 topics, the spec sheet and handover notes.
@@ -232,10 +247,23 @@ insert into member_roles (member_id, role)
 select id, 'president' from members where full_name = 'Their Full Name';
 ```
 
+The same insert grants any other role — the values are `president`,
+`vicepresident`, `treasurer` and `developer`:
+
+```sql
+insert into member_roles (member_id, role)
+select id, 'developer' from members where full_name = 'Their Full Name'
+on conflict do nothing;
+```
+
+**Migrations never hand out roles.** `20260107` only changes what a Developer
+may do; nobody becomes one until someone runs an insert like the one above, or
+a President uses **Change roles**.
+
 After that, the President assigns everything else in **Settings → Roster → Change
-roles** (the button only the President sees). Developer and Vice President changes
-save straight away; anything touching President or Treasurer shows what it will
-mean and asks for confirmation first. Making someone Treasurer offers to take the
+roles** (the button only the President and a Developer see). Vice President changes
+save straight away; anything touching President, Treasurer or Developer shows what
+it will mean and asks for confirmation first. Making someone Treasurer offers to take the
 role from the current Treasurer (the new one is added before the old one is
 removed), and giving President to someone else offers to hand over — again adding
 the new President before removing yours. The club always keeps at least one
@@ -252,8 +280,8 @@ every test row back. Run it after any change to a policy.
 ### Finances
 
 **Finances** in the menu is the season's income and expenses, in euros (MotoStudent's
-economical plan is in euros too). The President, Vice President and Developer see
-it read-only; only the Treasurer gets **Add entry**, **Edit** and **Delete**;
+economical plan is in euros too). The President and Vice President see
+it read-only; the Treasurer and the Developer get **Add entry**, **Edit** and **Delete**;
 ordinary members have no menu item, and typing the address just explains who can
 see it. Amounts are stored as whole cents. Who recorded an entry is stamped by the
 database, not sent by the browser.

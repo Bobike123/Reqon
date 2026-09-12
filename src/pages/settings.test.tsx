@@ -55,16 +55,18 @@ function reset() {
 
 const rolesOf = (id: string) =>
   (db.member_roles as RoleRow[]).filter((r) => r.member_id === id).map((r) => r.role)
-// is_admin() and can_manage_roles(), as the SQL defines them.
-const isAdmin = (m: Member) => rolesOf(m.id).some((r) => r === 'president' || r === 'vicepresident')
-const isPresident = (m: Member) => rolesOf(m.id).includes('president')
+// is_admin() and can_manage_roles(), as the SQL defines them — the developer
+// passes both since 20260107000000_developer_full_access.sql.
+const isAdmin = (m: Member) =>
+  rolesOf(m.id).some((r) => r === 'president' || r === 'vicepresident' || r === 'developer')
+const canManageRoles = (m: Member) => rolesOf(m.id).some((r) => r === 'president' || r === 'developer')
 
 function policyAllows(table: string, op: string, filters: Record<string, unknown>): boolean {
   if (table === 'members' && op === 'insert') return isAdmin(caller)
   if (table === 'members' && op === 'update') return filters.id === caller.id || isAdmin(caller)
   if (table === 'members' && op === 'delete') return false
   if (['subteams', 'seasons', 'milestones', 'clauses'].includes(table)) return isAdmin(caller)
-  if (table === 'member_roles') return (op === 'insert' || op === 'delete') && isPresident(caller)
+  if (table === 'member_roles') return (op === 'insert' || op === 'delete') && canManageRoles(caller)
   return true
 }
 
@@ -135,8 +137,9 @@ const supabase = {
   from: (t: string) => makeBuilder(t),
   rpc: async (fn: string, args: Record<string, unknown>) => {
     // What the app asks to explain a delete that matched nothing.
-    if (fn === 'can_manage_roles') return { data: isPresident(caller), error: null }
-    if (fn === 'can_manage_finances') return { data: rolesOf(caller.id).includes('treasurer'), error: null }
+    if (fn === 'can_manage_roles') return { data: canManageRoles(caller), error: null }
+    if (fn === 'can_manage_finances')
+      return { data: rolesOf(caller.id).some((r) => r === 'treasurer' || r === 'developer'), error: null }
     rpcCalls.push({ fn, args })
     // The real function refuses anyone but the president or vice-president in SQL.
     if (!isAdmin(caller)) {
@@ -213,13 +216,14 @@ describe('who sees what', () => {
     await screen.findByTestId('member-m2')
     expect(changeRolesButtons()).toHaveLength(0)
     expect(await within(screen.getByTestId('member-m1')).findByText('President')).toBeInTheDocument()
-    expect(screen.getByText(/except roles, which only the President can give or take away/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/except roles, which only the President or a Developer can give or take away/),
+    ).toBeInTheDocument()
     expect(screen.getByText(/Roles are given and taken away by the President/)).toBeInTheDocument()
   })
 
   for (const [label, who, shown] of [
     ['team member', CREW, 'Member (no privileged role)'],
-    ['developer', DEV, 'Developer'],
     ['treasurer', TREAS, 'Treasurer'],
   ] as const) {
     it(`a ${label} sees no admin or role controls, and is told why in words`, async () => {
@@ -237,6 +241,18 @@ describe('who sees what', () => {
       expect(screen.getByText('Handover notes')).toBeInTheDocument()
     })
   }
+
+  it('the developer has full access: every admin control, and role buttons too', async () => {
+    caller = DEV
+    renderSettings()
+    expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
+    expect(screen.getByText('Subsystems')).toBeInTheDocument()
+    expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
+    expect(screen.getByText('Start a new season')).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
+    expect(changeRolesButtons()).toHaveLength(db.members.length)
+    expect(screen.getByText(/including who holds which role/)).toBeInTheDocument()
+  })
 
   it('a job title of "President" grants nothing', async () => {
     caller = { ...CREW, role: 'President' }
@@ -270,13 +286,26 @@ describe('role management', () => {
     renderSettings()
     const dialog = await openRoles(user, 'Bo Wrench')
     expect(dialog.getByText('Member (no privileged role)')).toBeInTheDocument()
-    await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
+    await user.click(dialog.getByRole('checkbox', { name: 'Vice President' }))
     await user.click(dialog.getByRole('button', { name: 'Save roles' }))
 
     expect(await screen.findByText('Roles updated for Bo Wrench.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save roles' })).not.toBeInTheDocument()
-    expect(db.member_roles).toContainEqual({ member_id: 'm2', role: 'developer', assigned_by: 'm1' })
-    expect(await within(screen.getByTestId('member-m2')).findByText('Developer')).toBeInTheDocument()
+    expect(db.member_roles).toContainEqual({ member_id: 'm2', role: 'vicepresident', assigned_by: 'm1' })
+    expect(await within(screen.getByTestId('member-m2')).findByText('Vice President')).toBeInTheDocument()
+  })
+
+  it('granting Developer asks first, because it is full access', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    expect(dialog.getByText(/Bo Wrench becomes Developer and can do everything in the club/)).toBeInTheDocument()
+    expect(writes).toEqual([])
+
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
+    await waitFor(() => expect(rolesOf('m2')).toEqual(['developer']))
   })
 
   it('making someone President asks first, says what it means, and writes nothing until confirmed', async () => {
@@ -377,7 +406,8 @@ describe('role management', () => {
       { member_id: 'm3', role: 'president' },
     ]
     await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
-    await user.click(dialog.getByRole('button', { name: 'Save roles' }))
+    await user.click(dialog.getByRole('button', { name: 'Review change' }))
+    await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
 
     expect(await dialog.findByRole('alert')).toHaveTextContent(
       "Not permitted: You don't have permission to give the Developer role. Nothing was changed.",
@@ -401,7 +431,14 @@ describe('role management', () => {
     expect(rolesOf('m3')).toEqual(['vicepresident'])
   })
 
-  for (const [label, who] of [['developer', DEV], ['treasurer', TREAS], ['team member', CREW]] as const) {
+  it('the DATABASE lets a developer assign a role, exactly like the president', async () => {
+    caller = DEV
+    const assign = hook(() => useAssignRole())
+    await expect(assign.current.mutateAsync({ memberId: 'm2', role: 'treasurer' })).resolves.toBeUndefined()
+    expect(rolesOf('m2')).toEqual(['treasurer'])
+  })
+
+  for (const [label, who] of [['treasurer', TREAS], ['team member', CREW]] as const) {
     it(`the DATABASE refuses a ${label} who makes themselves president`, async () => {
       caller = who
       const assign = hook(() => useAssignRole())
@@ -444,7 +481,14 @@ describe('administration is enforced by the database', () => {
     expect(db.members).toHaveLength(before)
   })
 
-  for (const [label, who] of [['team member', CREW], ['developer', DEV], ['treasurer', TREAS]] as const) {
+  it('allows the season switch for a developer', async () => {
+    caller = DEV
+    const setCurrent = hook(() => useSetCurrentSeason())
+    await expect(setCurrent.current.mutateAsync('sb')).resolves.toBeUndefined()
+    expect(db.seasons.find((s) => s.id === 'sb')?.is_current).toBe(true)
+  })
+
+  for (const [label, who] of [['team member', CREW], ['treasurer', TREAS]] as const) {
     it(`refuses the season switch for a ${label}`, async () => {
       caller = who
       const setCurrent = hook(() => useSetCurrentSeason())

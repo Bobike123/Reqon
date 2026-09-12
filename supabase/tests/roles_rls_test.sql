@@ -64,6 +64,7 @@ declare
   outsider uuid := gen_random_uuid();   -- has a login, not on the roster
   recruit  uuid := gen_random_uuid();   -- login to be linked to the roster
   spare    uuid := gen_random_uuid();   -- login nobody is allowed to link
+  spare2   uuid := gen_random_uuid();   -- login only an admin may link
   season   uuid;
   c        record;
   got      text;
@@ -75,7 +76,7 @@ begin
   insert into auth.users (id, email) values
     (dev, 'dev@roles.test'), (tre, 'tre@roles.test'), (pre, 'pre@roles.test'),
     (vp, 'vp@roles.test'), (mem, 'mem@roles.test'), (outsider, 'out@roles.test'),
-    (recruit, 'new@roles.test'), (spare, 'spare@roles.test');
+    (recruit, 'new@roles.test'), (spare, 'spare@roles.test'), (spare2, 'spare2@roles.test');
   insert into members (id, full_name, role) values
     (dev, 'Test Developer', 'Software'), (tre, 'Test Treasurer', 'Treasurer'),
     (pre, 'Test President', 'President'), (vp, 'Test Vice', 'Vice-president'),
@@ -110,10 +111,12 @@ begin
   create temp table checks (n serial, label text, who uuid, stmt text, kind text, expected text) on commit drop;
   insert into checks (label, who, stmt, kind, expected) values
     -- ============================== FINANCE ==============================
+    -- The developer has full access (20260107). Its write checks act on a row
+    -- of their own, so the Entry fee row stays for the treasurer's checks.
     ('developer     SELECT finance',          dev, 'select count(*) from zz_finance_probe', 'read', 'ALLOWED'),
-    ('developer     UPDATE finance',          dev, 'update zz_finance_probe set amount = 1', 'write', 'DENIED'),
-    ('developer     INSERT finance',          dev, 'insert into zz_finance_probe (amount) values (1)', 'write', 'DENIED'),
-    ('developer     DELETE finance',          dev, 'delete from zz_finance_probe', 'write', 'DENIED'),
+    ('developer     INSERT finance',          dev, 'insert into zz_finance_probe (amount, note) values (7, ''dev row'')', 'write', 'ALLOWED'),
+    ('developer     UPDATE finance',          dev, 'update zz_finance_probe set amount = 8 where note = ''dev row''', 'write', 'ALLOWED'),
+    ('developer     DELETE finance',          dev, 'delete from zz_finance_probe where note = ''dev row''', 'write', 'ALLOWED'),
     ('president     SELECT finance',          pre, 'select count(*) from zz_finance_probe', 'read', 'ALLOWED'),
     ('president     UPDATE finance',          pre, 'update zz_finance_probe set amount = 1', 'write', 'DENIED'),
     ('president     INSERT finance',          pre, 'insert into zz_finance_probe (amount) values (1)', 'write', 'DENIED'),
@@ -137,8 +140,11 @@ begin
     ('vicepresident assigns a role',              vp,  format('insert into member_roles (member_id, role) values (%L, ''developer'')', mem), 'write', 'DENIED'),
     ('vicepresident makes self president',        vp,  format('insert into member_roles (member_id, role) values (%L, ''president'')', vp), 'write', 'DENIED'),
     ('vicepresident removes the president',       vp,  format('delete from member_roles where member_id = %L and role = ''president''', pre), 'write', 'DENIED'),
-    ('developer     makes self president',        dev, format('insert into member_roles (member_id, role) values (%L, ''president'')', dev), 'write', 'DENIED'),
-    ('developer     assigns a role to someone',   dev, format('insert into member_roles (member_id, role) values (%L, ''treasurer'')', mem), 'write', 'DENIED'),
+    ('developer     makes someone president',     dev, format('insert into member_roles (member_id, role) values (%L, ''president'')', mem), 'write', 'ALLOWED'),
+    ('  -> and takes it back',                    dev, format('delete from member_roles where member_id = %L and role = ''president''', mem), 'write', 'ALLOWED'),
+    ('developer     assigns a role to someone',   dev, format('insert into member_roles (member_id, role) values (%L, ''treasurer'')', mem), 'write', 'ALLOWED'),
+    ('  -> and takes it away again',              dev, format('delete from member_roles where member_id = %L and role = ''treasurer''', mem), 'write', 'ALLOWED'),
+    ('developer     cannot remove the last president', dev, format('delete from member_roles where member_id = %L and role = ''president''', pre), 'write', 'DENIED'),
     ('treasurer     makes self president',        tre, format('insert into member_roles (member_id, role) values (%L, ''president'')', tre), 'write', 'DENIED'),
     ('treasurer     assigns a role to someone',   tre, format('insert into member_roles (member_id, role) values (%L, ''vicepresident'')', mem), 'write', 'DENIED'),
     ('member        makes self president',        mem, format('insert into member_roles (member_id, role) values (%L, ''president'')', mem), 'write', 'DENIED'),
@@ -158,39 +164,39 @@ begin
     -- ========================= ADMINISTRATION ============================
     ('president     edits a subsystem',           pre, 'update subteams set description = ''p'' where key = ''ZZTEST''', 'write', 'ALLOWED'),
     ('vicepresident edits a subsystem',           vp,  'update subteams set description = ''v'' where key = ''ZZTEST''', 'write', 'ALLOWED'),
-    ('developer     edits a subsystem',           dev, 'update subteams set description = ''d'' where key = ''ZZTEST''', 'write', 'DENIED'),
+    ('developer     edits a subsystem',           dev, 'update subteams set description = ''d'' where key = ''ZZTEST''', 'write', 'ALLOWED'),
     ('treasurer     edits a subsystem',           tre, 'update subteams set description = ''t'' where key = ''ZZTEST''', 'write', 'DENIED'),
     ('member        edits a subsystem',           mem, 'update subteams set description = ''m'' where key = ''ZZTEST''', 'write', 'DENIED'),
     ('vicepresident edits the rulebook',          vp,  'update clauses set body = ''edited'' where clause_key = ''ZZ.1''', 'write', 'ALLOWED'),
-    ('developer     edits the rulebook',          dev, 'update clauses set body = ''edited'' where clause_key = ''ZZ.1''', 'write', 'DENIED'),
+    ('developer     edits the rulebook',          dev, 'update clauses set body = ''edited'' where clause_key = ''ZZ.1''', 'write', 'ALLOWED'),
     ('treasurer     edits the rulebook',          tre, 'update clauses set body = ''edited'' where clause_key = ''ZZ.1''', 'write', 'DENIED'),
     ('vicepresident links a login to the roster', vp,  format('insert into members (id, full_name) values (%L, ''New Recruit'')', recruit), 'write', 'ALLOWED'),
-    ('developer     links a login to the roster', dev, format('insert into members (id, full_name) values (%L, ''Nope'')', spare), 'write', 'DENIED'),
+    ('developer     links a login to the roster', dev, format('insert into members (id, full_name) values (%L, ''Dev Recruit'')', spare2), 'write', 'ALLOWED'),
     ('treasurer     links a login to the roster', tre, format('insert into members (id, full_name) values (%L, ''Nope'')', spare), 'write', 'DENIED'),
     ('member        links a login to the roster', mem, format('insert into members (id, full_name) values (%L, ''Nope'')', spare), 'write', 'DENIED'),
     ('vicepresident edits another member',        vp,  format('update members set phone = ''1'' where id = %L', mem), 'write', 'ALLOWED'),
-    ('developer     edits another member',        dev, format('update members set phone = ''1'' where id = %L', mem), 'write', 'DENIED'),
+    ('developer     edits another member',        dev, format('update members set phone = ''1'' where id = %L', mem), 'write', 'ALLOWED'),
     ('member        edits another member',        mem, format('update members set phone = ''1'' where id = %L', tre), 'write', 'DENIED'),
     ('member        edits own details',           mem, format('update members set phone = ''2'' where id = %L', mem), 'write', 'ALLOWED'),
     ('president     starts a season',             pre, 'insert into seasons (label) values (''ROLES-TEST-2'')', 'write', 'ALLOWED'),
     ('member        starts a season',             mem, 'insert into seasons (label) values (''ROLES-TEST-3'')', 'write', 'DENIED'),
-    ('developer     starts a season',             dev, 'insert into seasons (label) values (''ROLES-TEST-4'')', 'write', 'DENIED'),
+    ('developer     starts a season',             dev, 'insert into seasons (label) values (''ROLES-TEST-4'')', 'write', 'ALLOWED'),
     ('member        flips is_current directly',   mem, format('update seasons set is_current = false where id = %L', season), 'write', 'DENIED'),
     ('vicepresident switches the season',         vp,  format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
     ('president     switches the season',         pre, format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
-    ('developer     switches the season',         dev, format('select set_current_season(%L)', season), 'write', 'DENIED'),
+    ('developer     switches the season',         dev, format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
     ('treasurer     switches the season',         tre, format('select set_current_season(%L)', season), 'write', 'DENIED'),
     ('member        switches the season',         mem, format('select set_current_season(%L)', season), 'write', 'DENIED'),
     ('vicepresident sets milestone points',       vp,  'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'ALLOWED'),
     ('member        sets milestone points',       mem, 'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'DENIED'),
-    ('developer     sets milestone points',       dev, 'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'DENIED'),
+    ('developer     sets milestone points',       dev, 'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'ALLOWED'),
 
     -- ================== EVERYDAY WORK STILL WORKS =========================
     ('member        adds a task',                 mem, format('insert into tasks (season_id, title) values (%L, ''m'')', season), 'write', 'ALLOWED'),
     ('treasurer     adds a task',                 tre, format('insert into tasks (season_id, title) values (%L, ''t'')', season), 'write', 'ALLOWED'),
     ('developer     adds a task',                 dev, format('insert into tasks (season_id, title) values (%L, ''d'')', season), 'write', 'ALLOWED'),
 
-    -- ================== THE DEVELOPER SEES EVERYTHING =====================
+    -- ============ THE DEVELOPER SEES (AND DOES) EVERYTHING ================
     ('developer     reads members',               dev, 'select count(*) from members', 'read', 'ALLOWED'),
     ('developer     reads the rulebook',          dev, 'select count(*) from clauses', 'read', 'ALLOWED'),
     ('developer     reads tasks',                 dev, 'select count(*) from tasks', 'read', 'ALLOWED'),

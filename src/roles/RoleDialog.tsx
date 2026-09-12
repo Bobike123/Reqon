@@ -19,8 +19,8 @@ type Apply = ReturnType<typeof useApplyRoleChanges>
 // The President's role editor for one member, opened from Settings → Roster.
 //
 // It only PROPOSES. The database decides: role_assign / role_remove let only
-// the President write member_roles, and a trigger refuses to remove the last
-// President. What this adds is the human part — saying what a change means
+// the President and a Developer write member_roles, and a trigger refuses to
+// remove the last President. What this adds is the human part — saying what a change means
 // before it happens, and asking twice for the ones that matter.
 export function RoleDialog({
   member,
