@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from 'react-router-dom'
 import RequireAuth from './auth/RequireAuth.tsx'
 import Board from './pages/Board.tsx'
 import Finances from './pages/Finances.tsx'
+import Gantt from './pages/Gantt.tsx'
 import NotFound from './pages/NotFound.tsx'
 import Proposals from './pages/Proposals.tsx'
 import Meetings from './pages/Meetings.tsx'
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="/priorities" element={<Priorities />} />
             <Route path="/register" element={<Register />} />
             <Route path="/milestones" element={<Milestones />} />
+            <Route path="/gantt" element={<Gantt />} />
             <Route path="/board" element={<Board />} />
             <Route path="/proposals" element={<Proposals />} />
             <Route path="/meetings" element={<Meetings />} />

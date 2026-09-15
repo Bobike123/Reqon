@@ -41,7 +41,7 @@ describe('main navigation', () => {
     const labels = within(desktopNav()).getAllByRole('link').map((a) => a.textContent)
     // Proposals and Meetings are two screens: the old "Meetings" was neither.
     expect(labels).toEqual([
-      'Now', 'Priorities', 'Register', 'Milestones', 'Board', 'Proposals', 'Meetings', 'Spec sheet', 'Settings',
+      'Now', 'Priorities', 'Register', 'Milestones', 'Gantt', 'Board', 'Proposals', 'Meetings', 'Spec sheet', 'Settings',
     ])
   })
 

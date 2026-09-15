@@ -10,6 +10,7 @@ export const CHAPTERS = [
   { id: 'priorities', label: 'Priorities' },
   { id: 'register', label: 'Register' },
   { id: 'milestones', label: 'Milestones' },
+  { id: 'gantt', label: 'Gantt' },
   { id: 'board', label: 'Board' },
   { id: 'proposals', label: 'Task proposals' },
   { id: 'meetings', label: 'Meetings' },
@@ -210,6 +211,41 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'milestone-format',
     title: 'The format rules',
     body: 'How deliverables must be formatted and what mistakes cost, taken straight from the regulations text. If it disagrees with something you were told, the book wins.',
+  },
+
+  // --------------------------------------------------------------------- Gantt
+  {
+    id: 'gantt',
+    chapter: 'gantt',
+    route: '/gantt',
+    target: 'gantt-chart',
+    title: 'Gantt — the season on one timeline',
+    body: 'Every submission as a bar across the months, with today marked in red. A bar fills from the left as the work under it is finished. “TBC” means no window has been published.',
+  },
+  {
+    id: 'gantt-expand',
+    chapter: 'gantt',
+    route: '/gantt',
+    target: 'gantt-chart',
+    title: 'Three levels',
+    body: 'Open a submission to see its sections, and a section to see its subtasks. A section with no dated subtasks borrows the submission’s window rather than inventing one.',
+  },
+  {
+    id: 'gantt-tasks',
+    chapter: 'gantt',
+    route: '/gantt',
+    target: 'gantt-chart',
+    title: 'Subtasks are Board tasks',
+    body: 'The subtasks here are the real cards from the Board, not copies. Change a status or an owner in either place and the other agrees, because there is only one task.',
+  },
+  {
+    id: 'gantt-add',
+    chapter: 'gantt',
+    route: '/gantt',
+    target: 'gantt-chart',
+    audience: 'admins',
+    title: 'Adding work to a section',
+    body: '“Add to Board” creates an ordinary task already linked to that section, and the dropdown beside it adopts a task the Board already has. Unlink leaves the task on the Board.',
   },
 
   // --------------------------------------------------------------------- Board
