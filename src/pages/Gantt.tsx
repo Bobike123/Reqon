@@ -24,6 +24,7 @@ import {
   milestonePercent,
   milestoneSpan,
   monthTicks,
+  weekTicks,
   placeBar,
   placeDay,
   progressOf,
@@ -59,6 +60,10 @@ const BAR_TONE: Record<TaskState, string> = {
 // month ruler share a single left edge — the thing that makes a Gantt readable.
 const ROW = 'grid grid-cols-[minmax(15rem,22rem)_1fr] items-start gap-3'
 
+// The label column stays visible while the timeline scrolls under it — the
+// whole point of the weekly scale is a chart wider than the screen.
+const STICKY_LABEL = 'sticky left-0 z-10 self-stretch'
+
 const selectSmall =
   'min-h-11 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0'
 
@@ -75,7 +80,7 @@ function Track({
   children?: ReactNode
 }) {
   return (
-    <div className="relative h-6 rounded bg-slate-50 ring-1 ring-inset ring-slate-100">
+    <div className="relative h-7 rounded bg-slate-50 ring-1 ring-inset ring-slate-200">
       {today !== null && (
         <span
           aria-hidden="true"
@@ -148,7 +153,7 @@ function SubtaskTools({
   const [title, setTitle] = useState('')
 
   return (
-    <div className="flex flex-wrap items-center gap-2 py-1 pl-12">
+    <div className="sticky left-12 z-10 my-1 ml-12 flex w-fit max-w-md flex-col items-start gap-2 rounded border border-dashed border-slate-300 bg-slate-50 p-2">
       {canCreate && (
         <form
           className="flex items-center gap-1"
@@ -215,6 +220,7 @@ export default function Gantt() {
   // open the level you care about.
   const [openMilestones, setOpenMilestones] = useState<ReadonlySet<string>>(new Set())
   const [openSections, setOpenSections] = useState<ReadonlySet<string>>(new Set())
+  const [scale, setScale] = useState<'month' | 'week'>('month')
 
   const toggle = (set: ReadonlySet<string>, key: string) => {
     const next = new Set(set)
@@ -233,7 +239,9 @@ export default function Gantt() {
     [...milestoneRows.flatMap((m) => [m.opens_on, m.due_on]), ...taskRows.map((t) => t.due_date)],
     today,
   )
-  const ticks = monthTicks(range)
+  const ticks = scale === 'week' ? weekTicks(range) : monthTicks(range)
+  // Weeks need room to be legible; the chart already scrolls sideways.
+  const chartWidth = scale === 'week' ? `${Math.max(52, ticks.length * 3.5)}rem` : '52rem'
   const todayLeft = placeDay(today, range)
   const unlinked = taskRows.filter((t) => t.section_id === null)
 
@@ -279,7 +287,7 @@ export default function Gantt() {
         </EmptyState>
       ) : (
         <>
-          <div className="mb-2 flex flex-wrap items-center gap-3">
+          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
             <button
               type="button"
               className={`${buttonSecondary} text-xs`}
@@ -289,6 +297,17 @@ export default function Gantt() {
             >
               {allOpen ? 'Collapse all' : 'Expand all'}
             </button>
+            <label className="flex items-center gap-1.5 text-xs text-slate-600">
+              Scale
+              <select
+                value={scale}
+                onChange={(e) => setScale(e.target.value as 'month' | 'week')}
+                className={selectSmall}
+              >
+                <option value="month">Monthly</option>
+                <option value="week">Weekly</option>
+              </select>
+            </label>
             <p className="text-xs text-slate-500">
               The red line is today. A bar fills from the left as its subtasks are done.
             </p>
@@ -296,17 +315,19 @@ export default function Gantt() {
 
           {/* The chart keeps its proportions rather than squeezing; on a phone
               it scrolls sideways, which beats months three pixels wide. */}
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white p-3">
-            <div className="min-w-[52rem]" data-tutorial="gantt-chart">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            {/* The padding lives inside the scrolled content, so the sticky
+                label column has no gap for the ruler to show through. */}
+            <div className="p-3" style={{ minWidth: chartWidth }} data-tutorial="gantt-chart">
               <div className={`${ROW} border-b border-slate-200 pb-1`}>
-                <span className="text-xs font-medium text-slate-600">
+                <span className={`${STICKY_LABEL} flex items-center bg-white pr-2 text-xs font-medium text-slate-600`}>
                   Submission · section · subtask
                 </span>
                 <div className="relative h-5" data-testid="gantt-months">
                   {ticks.map((tick) => (
                     <span
                       key={tick.key}
-                      className="absolute top-0 truncate border-l border-slate-200 pl-1 text-[11px] text-slate-500"
+                      className="absolute top-0 truncate border-l border-slate-200 px-1 text-center text-[11px] text-slate-500"
                       style={{ left: `${tick.left}%`, width: `${tick.width}%` }}
                     >
                       {tick.label}
@@ -326,11 +347,11 @@ export default function Gantt() {
                   return (
                     <li
                       key={milestone.key}
-                      className="border-b border-slate-100 py-1 last:border-0"
+                      className="border-b border-slate-100 py-1.5 last:border-0"
                       data-testid={`gantt-milestone-${milestone.key}`}
                     >
-                      <div className={ROW}>
-                        <div className="flex items-center gap-1.5">
+                      <div className={`${ROW} rounded bg-slate-100 py-0.5`}>
+                        <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-slate-100 pr-2`}>
                           <button
                             type="button"
                             aria-expanded={open}
@@ -343,10 +364,20 @@ export default function Gantt() {
                             <span className="font-mono text-xs">{milestone.key}</span>
                             <span className="font-normal">{milestone.name}</span>
                           </button>
-                          <span className="ml-auto shrink-0 text-xs text-slate-600">{percent}%</span>
+                          <span
+                            className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
+                              percent === 100
+                                ? 'bg-green-100 text-green-800'
+                                : window.kind === 'dated' && window.passed
+                                  ? 'bg-red-100 text-red-800'
+                                  : 'bg-slate-200 text-slate-700'
+                            }`}
+                          >
+                            {percent}%
+                          </span>
                         </div>
 
-                        <Track today={todayLeft} label={span ? undefined : 'Window: TBC'}>
+                        <Track today={todayLeft}>
                           {span && (
                             <Bar
                               span={span}
@@ -366,7 +397,7 @@ export default function Gantt() {
                       </div>
 
                       {open && mySections.length === 0 && (
-                        <p className="py-1 pl-6 text-xs text-slate-500">
+                        <p className={`sticky left-0 z-10 w-fit bg-white py-1 pl-6 text-xs text-slate-500`}>
                           No sections listed for this submission yet.
                         </p>
                       )}
@@ -380,8 +411,8 @@ export default function Gantt() {
 
                           return (
                             <div key={section.id} data-testid={`gantt-section-${section.id}`}>
-                              <div className={`${ROW} py-0.5`}>
-                                <div className="flex items-center gap-1.5 pl-6">
+                              <div className={`${ROW} group py-1`}>
+                                <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-white pl-6 pr-2 group-hover:bg-slate-100`}>
                                   <button
                                     type="button"
                                     aria-expanded={sectionOpen}
@@ -429,11 +460,11 @@ export default function Gantt() {
                                   {mine.map((task) => (
                                     <div
                                       key={task.id}
-                                      className={`${ROW} py-0.5`}
+                                      className={`${ROW} group py-1`}
                                       data-testid={`gantt-task-${task.id}`}
                                       data-task-state={task.state}
                                     >
-                                      <div className="flex flex-wrap items-center gap-1 pl-12">
+                                      <div className={`${STICKY_LABEL} flex flex-wrap items-center gap-1 bg-white pl-12 pr-2 group-hover:bg-slate-100`}>
                                         <span className="w-full text-xs text-slate-700">{task.title}</span>
                                         <label className="sr-only" htmlFor={`gantt-state-${task.id}`}>
                                           Move {task.title} to another lane
@@ -505,7 +536,7 @@ export default function Gantt() {
                                   ))}
 
                                   {mine.length === 0 && (
-                                    <p className="pl-12 text-[11px] text-slate-500">
+                                    <p className={`sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-500`}>
                                       No subtasks yet. Anything added here is a real Board task.
                                     </p>
                                   )}

@@ -25,6 +25,10 @@ function dayNumber(iso: string): number {
   return Math.round(Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / DAY_MS)
 }
 
+function isoOfDay(day: number): string {
+  return new Date(day * DAY_MS).toISOString().slice(0, 10)
+}
+
 function monthStart(iso: string): string {
   return `${iso.slice(0, 7)}-01`
 }
@@ -96,6 +100,34 @@ export function monthTicks(range: Span): Tick[] {
       })
     }
     month = nextMonth(month)
+  }
+  return ticks
+}
+
+// One label per week, from the Monday on or before the range's start. The first
+// and last ticks are clipped by placeBar, so a range that does not begin on a
+// Monday still gets a correctly sized partial column.
+export function weekTicks(range: Span): Tick[] {
+  const ticks: Tick[] = []
+  const start = dayNumber(range.from)
+  // Thursday 1970-01-01 is day 0, so Monday is day % 7 === 4.
+  let day = start - ((start - 4) % 7 + 7) % 7
+  const end = dayNumber(range.to)
+  for (let guard = 0; guard < 600 && day <= end; guard += 1) {
+    const from = isoOfDay(day)
+    const box = placeBar({ from, to: isoOfDay(day + 6) }, range)
+    if (box) {
+      ticks.push({
+        ...box,
+        key: from,
+        label: new Date(`${from}T00:00:00Z`).toLocaleDateString('en-GB', {
+          day: 'numeric',
+          month: 'short',
+          timeZone: 'UTC',
+        }),
+      })
+    }
+    day += 7
   }
   return ticks
 }

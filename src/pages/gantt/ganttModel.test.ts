@@ -5,6 +5,7 @@ import {
   milestonePercent,
   milestoneSpan,
   monthTicks,
+  weekTicks,
   placeBar,
   placeDay,
   progressOf,
@@ -98,6 +99,26 @@ describe('month ruler', () => {
     expect(monthTicks({ from: '2026-12-01', to: '2027-01-31' }).map((t) => t.key)).toEqual([
       '2026-12',
       '2027-01',
+    ])
+  })
+})
+
+describe('week ruler', () => {
+  it('starts on the Monday on or before the range and covers it end to end', () => {
+    // 2026-11-01 is a Sunday, so the first week starts Monday 2026-10-26 and is
+    // clipped to a single day inside the range.
+    const ticks = weekTicks({ from: '2026-11-01', to: '2026-11-30' })
+    expect(ticks[0].key).toBe('2026-10-26')
+    expect(ticks[0].left).toBe(0)
+    expect(ticks[1].key).toBe('2026-11-02')
+    const last = ticks[ticks.length - 1]
+    expect(Math.round(last.left + last.width)).toBe(100)
+  })
+
+  it('needs no clipping when the range already begins on a Monday', () => {
+    expect(weekTicks({ from: '2027-01-04', to: '2027-01-17' }).map((t) => t.key)).toEqual([
+      '2027-01-04',
+      '2027-01-11',
     ])
   })
 })

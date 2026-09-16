@@ -58,7 +58,7 @@ describe('Gantt', () => {
     expect(screen.queryByTestId('gantt-section-sec1')).not.toBeInTheDocument()
     expect(screen.queryByTestId('gantt-task-t1')).not.toBeInTheDocument()
     // A milestone with no published window is never given an invented bar.
-    expect(screen.getByTestId('gantt-milestone-MS1-7')).toHaveTextContent('Window: TBC')
+    expect(screen.queryByTitle(/^MS1-7:/)).not.toBeInTheDocument()
   })
 
   it('expands a submission into sections, then a section into subtasks', async () => {
