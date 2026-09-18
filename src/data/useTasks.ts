@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
 import type { Database } from '../lib/database.types.ts'
 import { DataError, unwrap } from './errors.ts'
@@ -29,6 +30,9 @@ export type TaskEdit = {
   title?: string
   dueDate?: string | null
   starred?: boolean
+  // Which milestone section this task is a subtask of, if any. Null detaches it
+  // from the Gantt without touching the task itself — it stays on the Board.
+  sectionId?: string | null
 }
 
 // Editing an existing task: optimistic, because the row is already in the cache
@@ -51,6 +55,7 @@ export function useUpdateTask() {
           ...(edit.title !== undefined ? { title: edit.title } : {}),
           ...(edit.dueDate !== undefined ? { due_date: edit.dueDate } : {}),
           ...(edit.starred !== undefined ? { starred: edit.starred } : {}),
+          ...(edit.sectionId !== undefined ? { section_id: edit.sectionId } : {}),
         })
         .eq('id', edit.id)
       if (error) throw new DataError('update task', error)
@@ -66,9 +71,53 @@ export function useUpdateTask() {
               ...(edit.title !== undefined ? { title: edit.title } : {}),
               ...(edit.dueDate !== undefined ? { due_date: edit.dueDate } : {}),
               ...(edit.starred !== undefined ? { starred: edit.starred } : {}),
+              ...(edit.sectionId !== undefined ? { section_id: edit.sectionId } : {}),
             }
           : row,
       ),
+  })
+}
+
+// A subtask added from the Gantt. It is an ordinary board task in the ordinary
+// tasks table that also names its milestone section — there is no second task
+// system to keep in step, which is the whole point of section_id.
+//
+// Not optimistic: a row the server has not given an id to yet cannot be
+// reconciled with the one that comes back (see optimistic.ts).
+export function useAddSectionTask() {
+  const auth = useAuth()
+  const queryClient = useQueryClient()
+  const { seasonId } = useTasks()
+
+  return useMutation<Task, Error, { sectionId: string; title: string; dueDate?: string | null }>({
+    mutationFn: async ({ sectionId, title, dueDate }) => {
+      if (auth.status !== 'member') {
+        throw new DataError('add a subtask: not signed in as a member', null)
+      }
+      if (!seasonId) throw new DataError('add a subtask: no current season', null)
+
+      // task_insert is administrators only (20260108). RLS refuses this one
+      // outright rather than by matching no rows, so unwrap surfaces it as a
+      // permission error and nothing has to be checked twice.
+      return unwrap(
+        'add a subtask',
+        await supabase
+          .from('tasks')
+          .insert({
+            season_id: seasonId,
+            title,
+            section_id: sectionId,
+            due_date: dueDate ?? null,
+            created_by: auth.member.id,
+          })
+          .select()
+          .single(),
+      )
+    },
+    onSuccess: () => {
+      if (!seasonId) return
+      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'tasks') })
+    },
   })
 }
 

@@ -13,6 +13,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/priorities', label: 'Priorities' },
   { to: '/register', label: 'Register' },
   { to: '/milestones', label: 'Milestones' },
+  { to: '/gantt', label: 'Gantt' },
   { to: '/board', label: 'Board' },
   { to: '/proposals', label: 'Proposals' },
   { to: '/meetings', label: 'Meetings' },

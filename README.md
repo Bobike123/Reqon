@@ -169,6 +169,7 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260106000000_finance_ledger.sql` | the finance ledger (`finance_entries`): readable by the four roles, writable by the Treasurer — see §7 |
 | `20260107000000_developer_full_access.sql` | the Developer role becomes full access, for maintenance — see §7 |
 | `20260108000000_proposals_and_meetings.sql` | splits the old "Meetings" screen into task proposals, board tasks and real meetings — see §8 |
+| `20260109000000_section_subtasks.sql` | adds `tasks.section_id`, which is what makes a Gantt subtask a real board task instead of a second copy |
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -318,6 +319,29 @@ ordinary administrator work, a Vice President included.
 Deleting is the one thing a Vice President may not do: a deleted task or meeting
 takes its history with it, and there is no undo. Both confirmations name what
 will disappear.
+
+### The Gantt
+
+**Gantt** (`/gantt`) puts the season on one timeline: each submission as a bar
+across the months, with today marked. Open a submission for its sections, and a
+section for its subtasks.
+
+The third level is the point. A subtask is **not** a new kind of row — it is an
+ordinary board task with `section_id` pointing at a `milestone_sections` row, so
+status, owner and due date exist once and the Board and the Gantt read the same
+task. Move a card on the Board and the Gantt moves with it.
+
+“Add to Board” creates such a task (administrators, because `task_insert` is
+`is_admin()`); the dropdown beside it adopts a task the Board already has, and
+**Unlink** detaches one without deleting it. `section_id` is nullable and
+`on delete set null`: most tasks belong to no section, and unpicking a section
+from a checklist must never take the team's work with it.
+
+Percentages roll up from those subtasks — cancelled ones leave the count
+entirely — and fall back to the drafted ticks on Milestones where a section has
+no subtasks yet, so a team that never uses this screen sees what it saw before.
+A section with no dated subtasks borrows its submission's window rather than
+inventing dates, and a milestone with no published window still reads TBC.
 
 ### Finances
 

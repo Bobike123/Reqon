@@ -813,6 +813,7 @@ export type Database = {
           id: string
           owner_id: string | null
           season_id: string
+          section_id: string | null
           source_proposal: string | null
           starred: boolean
           state: Database["public"]["Enums"]["task_state"]
@@ -828,6 +829,7 @@ export type Database = {
           id?: string
           owner_id?: string | null
           season_id: string
+          section_id?: string | null
           source_proposal?: string | null
           starred?: boolean
           state?: Database["public"]["Enums"]["task_state"]
@@ -843,6 +845,7 @@ export type Database = {
           id?: string
           owner_id?: string | null
           season_id?: string
+          section_id?: string | null
           source_proposal?: string | null
           starred?: boolean
           state?: Database["public"]["Enums"]["task_state"]
@@ -885,6 +888,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_subteam_progress"
             referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "tasks_section_id_fkey"
+            columns: ["section_id"]
+            isOneToOne: false
+            referencedRelation: "milestone_sections"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "tasks_source_proposal_fkey"
