@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { useAuth } from '../auth/context.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
 import { Dialog } from '../ui/Dialog.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
@@ -129,7 +130,61 @@ function TaskCard({
   )
 }
 
+// Two ways to read the board: everything the team is carrying, or only what is
+// on your own plate. It is a view filter, nothing more — no task is hidden from
+// anyone, and switching back shows the whole board again.
+type Scope = 'all' | 'mine'
+
+function ScopeTabs({
+  scope,
+  onScope,
+  allCount,
+  mineCount,
+}: {
+  scope: Scope
+  onScope: (scope: Scope) => void
+  allCount: number
+  mineCount: number
+}) {
+  const options: { value: Scope; label: string; count: number }[] = [
+    { value: 'all', label: 'All tasks', count: allCount },
+    { value: 'mine', label: 'Your tasks', count: mineCount },
+  ]
+
+  return (
+    <div
+      role="group"
+      aria-label="Which tasks to show"
+      className="inline-flex rounded border border-slate-300 bg-white p-0.5"
+      data-testid="board-scope"
+    >
+      {options.map((option) => {
+        const active = scope === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            // A filter, not a navigation: pressed state says which view you are
+            // in, and a screen reader reads it as such.
+            aria-pressed={active}
+            onClick={() => onScope(option.value)}
+            className={`min-h-11 rounded px-3 py-1.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 ${
+              active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            {option.label}{' '}
+            <span className={active ? 'font-normal text-slate-300' : 'font-normal text-slate-500'}>
+              ({option.count})
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function Board() {
+  const auth = useAuth()
   const can = usePermissions()
   const remove = useDeleteTask()
   const [deleting, setDeleting] = useState<Task | null>(null)
@@ -139,10 +194,19 @@ export default function Board() {
   const members = useMembers()
   const proposals = useProposals()
   const updateTask = useUpdateTask()
+  const [scope, setScope] = useState<Scope>('all')
+
+  const myId = auth.status === 'member' ? auth.member.id : null
+  const allTasks = tasks.data ?? []
+  const myTasks = myId ? allTasks.filter((t) => t.owner_id === myId) : []
+  // Reassigning a task away from yourself while in "Your tasks" drops its card
+  // out of the board, which is the honest thing for a filter to do.
+  const visibleTasks = scope === 'mine' ? myTasks : allTasks
 
   const proposalTitles = new Map((proposals.data ?? []).map((t) => [t.id, t.title]))
-  // The tour explains one real card: the first one, reading the lanes in order.
-  const tutorialTaskId = LANES.map((lane) => (tasks.data ?? []).find((t) => t.state === lane.state)).find(Boolean)?.id
+  // The tour explains one real card: the first VISIBLE one, reading the lanes in
+  // order, so the tour never points at a card the filter has hidden.
+  const tutorialTaskId = LANES.map((lane) => visibleTasks.find((t) => t.state === lane.state)).find(Boolean)?.id
 
   const error = tasks.error ?? members.error
   if (error) {
@@ -170,6 +234,24 @@ export default function Board() {
         description="The team’s tasks. Move a task between lanes with the dropdown on its card."
       />
 
+      {/* Only offered to someone the roster knows, because "yours" needs a
+          member row to mean anything. */}
+      {myId && (
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <ScopeTabs
+            scope={scope}
+            onScope={setScope}
+            allCount={allTasks.length}
+            mineCount={myTasks.length}
+          />
+          <p className="text-xs text-slate-500">
+            {scope === 'mine'
+              ? 'Showing only tasks assigned to you.'
+              : 'Showing every task in this season.'}
+          </p>
+        </div>
+      )}
+
       {updateTask.isError && (
         <p role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
           Could not move that task: {updateTask.error.message}
@@ -183,6 +265,21 @@ export default function Board() {
         <p role="status" className="mb-3 text-xs text-slate-500">Loading…</p>
       )}
 
+      {/* Six empty lanes look like a broken board; say which filter emptied it. */}
+      {!tasks.isLoading && scope === 'mine' && myTasks.length === 0 && (
+        <p className="mb-3 rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-700">
+          No tasks are assigned to you right now. Pick one from{' '}
+          <button
+            type="button"
+            onClick={() => setScope('all')}
+            className="underline underline-offset-2 hover:text-slate-900"
+          >
+            all tasks
+          </button>{' '}
+          and set yourself as its owner.
+        </p>
+      )}
+
       {/* Lanes render immediately and fill in; they are not swapped out for a
           spinner, so an open select is never yanked away mid-change. */}
       {/* All six lanes side by side once each can be at least ~13rem wide
@@ -190,7 +287,7 @@ export default function Board() {
           one on a phone. */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-[90rem]:grid-cols-6" data-tutorial="board-lanes">
           {LANES.map((lane) => {
-            const laneTasks = (tasks.data ?? []).filter((t) => t.state === lane.state)
+            const laneTasks = visibleTasks.filter((t) => t.state === lane.state)
             return (
               <section
                 key={lane.state}

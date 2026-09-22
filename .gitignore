@@ -38,3 +38,11 @@ mock-data.sql
 
 # Local list of logins and passwords — never commit
 accounts.md
+
+#supabase conn
+.mcp.json
+
+record-demo.cjs
+*.webm 
+
+.agents

@@ -6,6 +6,13 @@ import { usePermissions } from '../auth/usePermissions.ts'
 import { ChangePasswordForm } from '../account/ChangePasswordForm.tsx'
 import { RoleBadges } from '../roles/RoleBadges.tsx'
 import { RoleDialog } from '../roles/RoleDialog.tsx'
+import { JobTitleSelect } from './settings/JobTitleSelect.tsx'
+import {
+  DEFAULT_JOB_TITLE,
+  jobTitleOptions,
+  splitRoster,
+  type RosterMember,
+} from './settings/rosterModel.ts'
 import { buttonSecondary } from '../ui/buttons.ts'
 import { pageMain } from '../ui/layout.ts'
 import { ActionError, ErrorState, LoadingState } from '../ui/states.tsx'
@@ -14,6 +21,7 @@ import { useCurrentSeason } from '../data/useCurrentSeason.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones, useSubteams } from '../data/useMilestones.ts'
 import {
+  type MemberState,
   useAddMember,
   useCreateSeason,
   useHandoverNotes,
@@ -77,6 +85,119 @@ function Notice({ children }: { children: React.ReactNode }) {
   )
 }
 
+// One person on the roster. The row says three separate things and now labels
+// all three, because "Chassis" and "Treasurer" used to sit side by side as
+// unlabelled text and read as one list of roles:
+//   job title      what they work on. Free text (members.role), grants nothing.
+//   role badges    what the database lets them do (member_roles).
+//   status         on the team, or retired.
+function RosterRow({
+  member,
+  roles,
+  titles,
+  tutorial,
+  canAdminister,
+  canManageRoles,
+  onJobTitle,
+  onStatus,
+  onEditRoles,
+  disabled,
+}: {
+  member: RosterMember
+  roles: PrivilegedRole[]
+  titles: readonly string[]
+  // The one row the guided tour points at.
+  tutorial: boolean
+  canAdminister: boolean
+  canManageRoles: boolean
+  onJobTitle: (title: string) => void
+  onStatus: (status: MemberState) => void
+  onEditRoles: () => void
+  disabled: boolean
+}) {
+  const retired = member.status === 'alumni'
+  return (
+    <li className="px-3 py-2" data-testid={`member-${member.id}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`text-sm font-medium ${retired ? 'text-slate-500' : 'text-slate-900'}`}>
+          {member.full_name}
+        </span>
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-slate-700">
+          <span className="sr-only">Job title: </span>
+          {member.role}
+        </span>
+        <RoleBadges roles={roles} />
+        {retired && (
+          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">alumni</span>
+        )}
+      </div>
+
+      {/* Every control for this person in one row that wraps on a phone,
+          instead of a lone button pushed to the edge. */}
+      {(canAdminister || canManageRoles) && (
+        <div
+          className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-2"
+          data-tutorial={tutorial ? 'roster-controls' : undefined}
+        >
+          {canAdminister && (
+            <>
+              <span className="flex flex-col gap-0.5">
+                {/* Visible label AND an sr-only one on the control: sighted
+                    admins were editing a nameless text box before. */}
+                <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
+                  Job title
+                </span>
+                <JobTitleSelect
+                  id={`title-${member.id}`}
+                  label={`Job title for ${member.full_name}`}
+                  titles={titles}
+                  value={member.role}
+                  disabled={disabled}
+                  onChange={onJobTitle}
+                />
+              </span>
+              <span className="flex flex-col gap-0.5">
+                <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
+                  Status
+                </span>
+                <label className="sr-only" htmlFor={`status-${member.id}`}>
+                  Status for {member.full_name}
+                </label>
+                <select
+                  id={`status-${member.id}`}
+                  value={member.status}
+                  disabled={disabled}
+                  onChange={(e) => onStatus(e.target.value as MemberState)}
+                  className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
+                >
+                  <option value="active">Active</option>
+                  <option value="alumni">Alumni (retired)</option>
+                </select>
+              </span>
+            </>
+          )}
+          {canManageRoles && (
+            <span className="flex flex-col gap-0.5">
+              <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
+                Privileged roles
+              </span>
+              <button
+                type="button"
+                onClick={onEditRoles}
+                aria-label={`Change roles for ${member.full_name}`}
+                data-tutorial={tutorial ? 'change-roles' : undefined}
+                className={`${buttonSecondary} text-xs`}
+              >
+                Change roles
+              </button>
+            </span>
+          )}
+        </div>
+      )}
+    </li>
+  )
+}
+
 export default function Settings() {
   const auth = useAuth()
   const { canAdminister, canManageRoles, roles: myRoles } = usePermissions()
@@ -101,7 +222,7 @@ export default function Settings() {
   const [roleTarget, setRoleTarget] = useState<{ id: string; name: string } | null>(null)
   const [roleMessage, setRoleMessage] = useState('')
 
-  const [newMember, setNewMember] = useState({ id: '', fullName: '', role: '' })
+  const [newMember, setNewMember] = useState({ id: '', fullName: '', role: DEFAULT_JOB_TITLE })
   const [newSeason, setNewSeason] = useState({ label: '', edition: '' })
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -130,6 +251,19 @@ export default function Settings() {
     rolesByMember.set(row.member_id, [...(rolesByMember.get(row.member_id) ?? []), row.role])
   }
 
+  // Current members and alumni are shown apart: a retired name between two
+  // current ones is the kind of thing people read straight past.
+  const { active, alumni } = splitRoster(members.data ?? [])
+  const roster = [
+    { heading: 'On the team', people: active, empty: 'Nobody is on the roster yet.' },
+    { heading: 'Alumni', people: alumni, empty: 'Nobody has been retired yet.' },
+    // An empty alumni group says nothing worth a heading; an empty team is
+    // worth saying out loud.
+  ].filter((group) => group.heading !== 'Alumni' || group.people.length > 0)
+
+  // The job titles already in use, offered everywhere a title is set.
+  const titles = jobTitleOptions(members.data ?? [], newMember.role)
+
   async function submitMember(e: FormEvent) {
     e.preventDefault()
     if (addMember.isPending || !newMember.id.trim() || !newMember.fullName.trim()) return
@@ -137,9 +271,9 @@ export default function Settings() {
       await addMember.mutateAsync({
         id: newMember.id.trim(),
         fullName: newMember.fullName.trim(),
-        role: newMember.role.trim() || 'Member',
+        role: newMember.role.trim() || DEFAULT_JOB_TITLE,
       })
-      setNewMember({ id: '', fullName: '', role: '' })
+      setNewMember({ id: '', fullName: '', role: DEFAULT_JOB_TITLE })
     } catch {
       // Refused or failed: the message is shown, and what was typed stays.
     }
@@ -219,79 +353,59 @@ export default function Settings() {
 
       {/* ---------------------------------------------------------- Roster */}
       <Section title="Roster" tutorialId="settings-roster">
-        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-          {(members.data ?? []).map((m, index) => (
-            <li key={m.id} className="px-3 py-2" data-testid={`member-${m.id}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-sm ${m.status === 'alumni' ? 'text-slate-600 line-through' : 'text-slate-900'}`}>
-                  {m.full_name}
-                </span>
-                <span className="text-xs text-slate-500">{m.role}</span>
-                <RoleBadges roles={rolesByMember.get(m.id) ?? []} />
-                {m.status === 'alumni' && (
-                  <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">
-                    alumni
-                  </span>
-                )}
-              </div>
-              {/* Every control for this person in one row that wraps on a
-                  phone, instead of a lone button pushed to the edge. */}
-              {(canAdminister || canManageRoles) && (
-                <div
-                  className="mt-1.5 flex flex-wrap items-center gap-2"
-                  data-tutorial={index === 0 ? 'roster-controls' : undefined}
-                >
-                  {canManageRoles && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setRoleMessage('')
-                        setRoleTarget({ id: m.id, name: m.full_name })
-                      }}
-                      aria-label={`Change roles for ${m.full_name}`}
-                      data-tutorial={index === 0 ? 'change-roles' : undefined}
-                      className={buttonSecondary}
-                    >
-                      Change roles
-                    </button>
-                  )}
-                  {canAdminister && (
-                  <>
-                  <label className="sr-only" htmlFor={`status-${m.id}`}>
-                    Status for {m.full_name}
-                  </label>
-                  <select
-                    id={`status-${m.id}`}
-                    value={m.status}
-                    onChange={(e) =>
-                      updateMember.mutate({ id: m.id, status: e.target.value as 'active' | 'alumni' })
-                    }
-                    className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                  >
-                    <option value="active">Active</option>
-                    <option value="alumni">Alumni (retired)</option>
-                  </select>
-                  <label className="sr-only" htmlFor={`title-${m.id}`}>Job title for {m.full_name}</label>
-                  <input
-                    id={`title-${m.id}`}
-                    defaultValue={m.role}
-                    onBlur={(e) => {
-                      if (e.target.value !== m.role) updateMember.mutate({ id: m.id, role: e.target.value })
-                    }}
-                    className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                  />
-                  </>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1 text-xs text-slate-500">
-          People are retired, never deleted — the database has no delete policy for the
-          roster, so old task and rule owners keep resolving to a name forever.
+        {/* The one sentence that makes the rest of this section readable. Two
+            different things are called a "role" in this club, and the roster
+            shows both on the same line. */}
+        <p className="mb-2 text-xs text-pretty text-slate-600">
+          A <strong className="font-medium text-slate-800">job title</strong> says what someone works
+          on — Chassis, Aerodynamics, Finance. It is a label and grants nothing. A{' '}
+          <strong className="font-medium text-slate-800">privileged role</strong> badge — President,
+          Vice President, Treasurer, Developer — is what the database actually lets them do.
         </p>
-        <p className="mt-1 text-xs text-slate-500">
+
+        {roster.map((group) => (
+          <div key={group.heading} className="mt-3 first:mt-0">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
+              {group.heading}{' '}
+              <span className="font-normal text-slate-500">({group.people.length})</span>
+            </h3>
+            {group.people.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-600">
+                {group.empty}
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+                {group.people.map((m, index) => (
+                  <RosterRow
+                    key={m.id}
+                    member={m}
+                    roles={rolesByMember.get(m.id) ?? []}
+                    titles={titles}
+                    tutorial={group.heading === 'On the team' && index === 0}
+                    canAdminister={canAdminister}
+                    canManageRoles={canManageRoles}
+                    disabled={updateMember.isPending}
+                    onJobTitle={(role) => {
+                      if (role !== m.role) updateMember.mutate({ id: m.id, role })
+                    }}
+                    onStatus={(status) => updateMember.mutate({ id: m.id, status })}
+                    onEditRoles={() => {
+                      setRoleMessage('')
+                      setRoleTarget({ id: m.id, name: m.full_name })
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
+
+        <p className="mt-2 text-xs text-pretty text-slate-500">
+          People are retired, never deleted — the database has no delete policy for the roster, so
+          old task and rule owners keep resolving to a name forever. Alumni is a label, not a lock:
+          to stop someone signing in, remove their login in the Supabase dashboard as well.
+        </p>
+        <p className="mt-1 text-xs text-pretty text-slate-500">
           The President and Vice President run these settings and the Treasurer changes money.
           A Developer can do all of it, roles included — the role exists so the app can be
           maintained and repaired, so give it out sparingly.{' '}
@@ -355,16 +469,21 @@ export default function Settings() {
               onChange={(e) => setNewMember((s) => ({ ...s, fullName: e.target.value }))}
               className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
             />
-            <label className="mt-2 block text-xs font-medium text-slate-600" htmlFor="new-member-role">
+            <span aria-hidden="true" className="mt-2 block text-xs font-medium text-slate-600">
               Job title
-            </label>
-            <input
-              id="new-member-role"
-              value={newMember.role}
-              onChange={(e) => setNewMember((s) => ({ ...s, role: e.target.value }))}
-              placeholder="Engineer"
-              className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-            />
+            </span>
+            {/* Same picker as the roster rows, so a new person gets one of the
+                titles the club already uses rather than a fifth spelling of it. */}
+            <div className="mt-1">
+              <JobTitleSelect
+                id="new-member-role"
+                label="Job title"
+                titles={titles}
+                value={newMember.role}
+                disabled={addMember.isPending}
+                onChange={(role) => setNewMember((s) => ({ ...s, role }))}
+              />
+            </div>
             <button
               type="submit"
               disabled={addMember.isPending}

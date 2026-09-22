@@ -539,6 +539,71 @@ describe('roster', () => {
     // Linking someone gives them no privileged role.
     expect(rolesOf('uuid-123')).toEqual([])
   })
+
+  it('offers the job titles the club already uses instead of a blank text box', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('member-m2')
+    const select = within(row).getByLabelText('Job title for Bo Wrench')
+    // Every title on the roster, deduped and alphabetical, plus the way out.
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Chassis',
+      'Finance',
+      'Member',
+      'Operations',
+      'Software',
+      'Team lead',
+      'Add a new job title…',
+    ])
+
+    await user.selectOptions(select, 'Operations')
+    await waitFor(() => expect(db.members.find((m) => m.id === 'm2')?.role).toBe('Operations'))
+  })
+
+  it('takes a job title nobody holds yet, and then offers it to everyone', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('member-m2')
+    await user.selectOptions(
+      within(row).getByLabelText('Job title for Bo Wrench'),
+      within(row).getByRole('option', { name: 'Add a new job title…' }),
+    )
+    await user.type(within(row).getByLabelText('New job title for this person'), 'Powertrain')
+    await user.click(within(row).getByRole('button', { name: 'Use it' }))
+
+    await waitFor(() => expect(db.members.find((m) => m.id === 'm2')?.role).toBe('Powertrain'))
+    // The roster IS the list of titles, so the next person picks it, never
+    // retypes it — which is how "Chassis" and "chassis" stopped happening.
+    const other = await screen.findByTestId('member-m3')
+    await waitFor(() =>
+      expect(
+        within(within(other).getByLabelText('Job title for Cy Deputy')).queryByRole('option', {
+          name: 'Powertrain',
+        }),
+      ).toBeInTheDocument(),
+    )
+  })
+
+  it('keeps alumni in their own group instead of mixed among the team', async () => {
+    db.members = db.members.map((m) => (m.id === 'm2' ? { ...m, status: 'alumni' } : m))
+    renderSettings()
+    await screen.findByTestId('member-m2')
+
+    expect(screen.getByRole('heading', { name: /On the team \(4\)/ })).toBeInTheDocument()
+    const alumniHeading = screen.getByRole('heading', { name: /Alumni \(1\)/ })
+    const group = alumniHeading.parentElement as HTMLElement
+    expect(within(group).getByTestId('member-m2')).toBeInTheDocument()
+    expect(within(group).queryByTestId('member-m1')).not.toBeInTheDocument()
+  })
+
+  it('says which kind of role each thing on a row is', async () => {
+    renderSettings()
+    const row = await screen.findByTestId('member-m1')
+    // "Team lead" (a job title) and "President" (a privileged role) sit on the
+    // same line; only one of them grants anything.
+    expect(within(row).getByText('Job title:').parentElement).toHaveTextContent('Team lead')
+    expect(within(row).getByText('Roles:').parentElement).toHaveTextContent('President')
+  })
 })
 
 // --- Subteams, milestones, notes ---------------------------------------------
