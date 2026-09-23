@@ -15,7 +15,7 @@ in this code.
 | Need | Version | Check with |
 |---|---|---|
 | Node.js | 22.22.2 or newer (see `.nvmrc`) | `node --version` |
-| npm | 10.9.8 or newer (ships with that Node) | `npm --version` |
+| npm | 10.9.7 or newer (the version bundled with Node 22.22.2) | `npm --version` |
 | A Supabase project | free tier is enough | see §6 |
 | Docker | any recent version — **only** for the database tests (§2a) | `docker info` |
 
