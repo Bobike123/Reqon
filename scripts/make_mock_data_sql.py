@@ -6,18 +6,21 @@ the same rows as migration 20260101000001, safe to re-run), then the demo
 roster, topics, tasks and meetings from ../handoff/seed_reference.json.
 
     python3 scripts/make_mock_data_sql.py
+    MOCK_DATA_PASSWORD='...' python3 scripts/make_mock_data_sql.py   # supply your own
 
 Then paste mock-data.sql into Supabase → SQL Editor → Run. The file:
-  * creates one login per demo person, all sharing ONE random password that is
+  * creates one login per demo person, all sharing ONE password that is
     printed below and nowhere else. Never the old `paddock123`: that one is
     written in this repo, so on a real site anyone could sign in with it;
+  * uses MOCK_DATA_PASSWORD if set, otherwise a fresh random value every run
+    — an old mock-data.sql on disk is never read back, so a password that
+    already leaked (old file, screenshot, chat log) is never reused;
   * refuses to run twice — the second time nothing is changed;
   * runs as one transaction: all of it lands, or none of it.
 
 It contains that password, so it is git-ignored. Delete it after use.
 """
 import os
-import re
 import secrets
 import sys
 
@@ -54,10 +57,12 @@ def main():
     clauses, ref = gen.load()
     sql = gen.build_dev_seed(ref)
     members = ref["members"]
-    # Keep the password already handed out, if this file was made before.
-    previous = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else ""
-    found = re.search(r"extensions\.crypt\('([A-Za-z0-9_-]+)'", previous)
-    password = found.group(1) if found else secrets.token_urlsafe(15)
+    # A locally supplied secret always wins — set this after rotating a
+    # password that leaked, or to hand out a specific value on purpose.
+    # Otherwise generate a fresh one-off value every run: a mock-data.sql
+    # left over from a previous run is never read back, so a password once
+    # exposed (chat log, screenshot, old file) is never silently reused.
+    password = os.environ.get("MOCK_DATA_PASSWORD") or secrets.token_urlsafe(15)
 
     def swap(old, new, expected):
         nonlocal sql

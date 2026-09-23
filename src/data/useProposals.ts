@@ -1,27 +1,36 @@
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
-import type { Database } from '../lib/database.types.ts'
-import { DataError, unwrap } from './errors.ts'
+import type { Proposal, ProposalState } from '../proposals/types.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows, unwrap } from './errors.ts'
 import type { Task, TaskState } from './useTasks.ts'
 import { useOptimisticListMutation } from './optimistic.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
-export type Proposal = Database['public']['Tables']['task_proposals']['Row']
-export type ProposalState = Database['public']['Enums']['topic_state']
+export type { Proposal, ProposalState } from '../proposals/types.ts'
 
-export function useProposals() {
-  return useSeasonScopedQuery<Proposal[]>('task_proposals', async (seasonId) =>
-    unwrap(
+export function useProposalsForSeason(seasonId: string | undefined): UseQueryResult<Proposal[], Error> {
+  return useSeasonScopedQuery<Proposal[]>(queryKeys.proposals(seasonId), seasonId, (sid) =>
+    fetchAllRows(
       'load proposals',
-      await supabase
-        .from('task_proposals')
-        .select('*')
-        .eq('season_id', seasonId)
-        .order('raised_on', { ascending: false }),
+      (row) => row.id,
+      (from, to) =>
+        supabase
+          .from('task_proposals')
+          .select('*')
+          .eq('season_id', sid)
+          .order('raised_on', { ascending: false })
+          .order('id')
+          .range(from, to),
     ),
-  ) as UseQueryResult<Proposal[], Error> & { seasonId: string | undefined }
+  )
+}
+
+export function useProposals(): UseQueryResult<Proposal[], Error> {
+  return useProposalsForSeason(useSeasonId())
 }
 
 export type ProposalEdit = {
@@ -36,11 +45,11 @@ export type ProposalEdit = {
 }
 
 export function useUpdateProposal() {
-  const { seasonId } = useProposals()
+  const seasonId = useSeasonId()
 
   return useOptimisticListMutation<Proposal, ProposalEdit>({
-    entity: 'task_proposals',
-    seasonId,
+    queryKey: queryKeys.proposals(seasonId),
+    identify: (row, edit) => row.id === edit.id,
 
     write: async (edit) => {
       // `decided_at` is stamped by the trg_proposal_decided trigger, not here.
@@ -105,7 +114,7 @@ export type Promotion = {
 export function usePromoteProposal() {
   const auth = useAuth()
   const queryClient = useQueryClient()
-  const { seasonId } = useProposals()
+  const seasonId = useSeasonId()
 
   return useMutation<{ task: Task; created: boolean }, Error, Promotion>({
     mutationFn: async ({ proposal, ownerId, dueDate, state }) => {
@@ -114,50 +123,34 @@ export function usePromoteProposal() {
       }
       if (!seasonId) throw new DataError('convert proposal: no current season', null)
 
-      const existing = unwrap<Task[]>(
-        'check for an existing task from this proposal',
-        await supabase.from('tasks').select('*').eq('source_proposal', proposal.id).limit(1),
-      )
-      if (existing.length > 0) return { task: existing[0], created: false }
-
-      const task = unwrap<Task>(
+      // One transaction in the database (promote_proposal(),
+      // 20260110000000_atomic_proposal_promotion.sql): the existence check,
+      // the insert and marking the proposal decided used to be three separate
+      // round trips from here, which could land a task with no matching
+      // "decided" proposal if the connection dropped in between, or create
+      // two tasks for one proposal under a genuine race. The function is
+      // idempotent — promoting an already-promoted proposal again returns the
+      // existing task with created = false rather than erroring.
+      const rows = unwrap<{ task: Task; created: boolean }[]>(
         'convert proposal to task',
-        await supabase
-          .from('tasks')
-          .insert({
-            season_id: seasonId,
-            title: proposal.title,
-            detail: proposal.context,
-            owner_id: ownerId ?? proposal.owner_id,
-            due_date: dueDate ?? null,
-            state: state ?? 'todo',
-            source_proposal: proposal.id,
-            created_by: auth.member.id,
-          })
-          .select()
-          .single(),
+        await supabase.rpc('promote_proposal', {
+          p_proposal_id: proposal.id,
+          p_season_id: seasonId,
+          p_owner_id: ownerId ?? proposal.owner_id ?? null,
+          p_due_date: dueDate ?? null,
+          p_state: state ?? 'todo',
+        }),
       )
-
-      // The proposal is now answered. Its own row records that, so the
-      // suggester sees a status without having to find the task.
-      const { error } = await supabase
-        .from('task_proposals')
-        .update({ state: 'decided', decided_at: new Date().toISOString() })
-        .eq('id', proposal.id)
-      if (error) throw new DataError('mark the proposal decided', error)
-
-      return { task, created: true }
+      const result = rows[0]
+      if (!result) throw new DataError('convert proposal to task: no row returned', null)
+      return result
     },
     onSuccess: () => {
       if (!seasonId) return
       // Both caches move: a new task exists, and the proposal now shows as
       // converted. Invalidating only one leaves the other stale.
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.seasonScoped(seasonId, 'tasks'),
-      })
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.seasonScoped(seasonId, 'task_proposals'),
-      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks(seasonId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.proposals(seasonId) })
     },
   })
 }
@@ -167,7 +160,7 @@ export type NewProposal = { title: string; context?: string | null }
 export function useSuggestProposal() {
   const auth = useAuth()
   const queryClient = useQueryClient()
-  const { seasonId } = useProposals()
+  const seasonId = useSeasonId()
 
   return useMutation<Proposal, Error, NewProposal>({
     mutationFn: async (proposal) => {
@@ -193,9 +186,7 @@ export function useSuggestProposal() {
     },
     onSuccess: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.seasonScoped(seasonId, 'task_proposals'),
-      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.proposals(seasonId) })
     },
   })
 }

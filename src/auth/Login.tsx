@@ -1,10 +1,14 @@
 import { useState, type FormEvent } from 'react'
-import { useAuth } from '../auth/context.ts'
+import { useAuth } from './context.ts'
 
 // Accounts are created by the board in the Supabase dashboard. There is
 // deliberately no sign-up link here, and no password-reset link: password
 // reset needs a configured mailer, and a link that goes nowhere is worse than
 // no link. Ask the board to reset it for you.
+//
+// Lives in auth/, not pages/ (Phase 6 §6.4): it is rendered by RequireAuth
+// when signed out, not routed to directly, and auth/ owning its own
+// signed-out UI removes the one place auth/ used to depend upward on pages/.
 export default function Login() {
   const { signIn } = useAuth()
   const [email, setEmail] = useState('')

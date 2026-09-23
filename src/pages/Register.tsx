@@ -7,7 +7,7 @@ import type { ClauseState } from '../data/useClauseStatus.ts'
 import { useClauseStatus, useSetClauseStatus } from '../data/useClauseStatus.ts'
 import { useClauses } from '../data/useClauses.ts'
 import { useMembers } from '../data/useMembers.ts'
-import { useSubteams } from '../data/useMilestones.ts'
+import { useSubteams } from '../data/useSubteams.ts'
 import { useRealtimeClauseStatus } from '../data/useRealtimeClauseStatus.ts'
 import { ClauseRow } from './register/ClauseRow.tsx'
 import {

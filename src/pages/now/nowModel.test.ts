@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Milestone } from '../../data/useMilestones.ts'
-import type { Attention, SubteamProgress } from '../../data/useNowMetrics.ts'
+import type { Attention, SubteamProgress } from '../../metrics/types.ts'
 import type { Proposal } from '../../data/useProposals.ts'
 import {
   blockedCount,

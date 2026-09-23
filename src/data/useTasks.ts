@@ -1,26 +1,40 @@
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
-import type { Database } from '../lib/database.types.ts'
-import { DataError, unwrap } from './errors.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows, unwrap } from './errors.ts'
 import { useOptimisticListMutation } from './optimistic.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
+import type { Task, TaskState } from '../tasks/types.ts'
 
-export type Task = Database['public']['Tables']['tasks']['Row']
-export type TaskState = Database['public']['Enums']['task_state']
+export type { Task, TaskState } from '../tasks/types.ts'
 
-export function useTasks() {
-  return useSeasonScopedQuery<Task[]>('tasks', async (seasonId) =>
-    unwrap(
+// The season-parameterized read. Prefer useTasks() for the current season —
+// this exists so a mutation or a future multi-season view can ask for a
+// SPECIFIC season without going through "whatever is current right now".
+export function useTasksForSeason(seasonId: string | undefined): UseQueryResult<Task[], Error> {
+  return useSeasonScopedQuery<Task[]>(queryKeys.tasks(seasonId), seasonId, (sid) =>
+    fetchAllRows(
       'load tasks',
-      await supabase
-        .from('tasks')
-        .select('*')
-        .eq('season_id', seasonId)
-        .order('created_at', { ascending: false }),
+      (row) => row.id,
+      // created_at alone is not unique — two tasks can share a timestamp — so
+      // id is added as the tie-breaker paging needs.
+      (from, to) =>
+        supabase
+          .from('tasks')
+          .select('*')
+          .eq('season_id', sid)
+          .order('created_at', { ascending: false })
+          .order('id')
+          .range(from, to),
     ),
-  ) as UseQueryResult<Task[], Error> & { seasonId: string | undefined }
+  )
+}
+
+export function useTasks(): UseQueryResult<Task[], Error> {
+  return useTasksForSeason(useSeasonId())
 }
 
 export type TaskEdit = {
@@ -38,11 +52,14 @@ export type TaskEdit = {
 // Editing an existing task: optimistic, because the row is already in the cache
 // and can be restored byte for byte if the write fails.
 export function useUpdateTask() {
-  const { seasonId } = useTasks()
+  // The season boundary, not a list-query observer: useUpdateTask() used to
+  // call useTasks() just to read .seasonId off it, which meant every task
+  // edit anywhere in the app silently mounted a second full tasks query.
+  const seasonId = useSeasonId()
 
   return useOptimisticListMutation<Task, TaskEdit>({
-    entity: 'tasks',
-    seasonId,
+    queryKey: queryKeys.tasks(seasonId),
+    identify: (row, edit) => row.id === edit.id,
 
     write: async (edit) => {
       // `tasks` has no updated_by column, so there is nothing to stamp here.
@@ -87,7 +104,7 @@ export function useUpdateTask() {
 export function useAddSectionTask() {
   const auth = useAuth()
   const queryClient = useQueryClient()
-  const { seasonId } = useTasks()
+  const seasonId = useSeasonId()
 
   return useMutation<Task, Error, { sectionId: string; title: string; dueDate?: string | null }>({
     mutationFn: async ({ sectionId, title, dueDate }) => {
@@ -116,7 +133,7 @@ export function useAddSectionTask() {
     },
     onSuccess: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'tasks') })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks(seasonId) })
     },
   })
 }
@@ -134,7 +151,7 @@ async function mayDeleteRecords(): Promise<boolean> {
 
 export function useDeleteTask() {
   const queryClient = useQueryClient()
-  const { seasonId } = useTasks()
+  const seasonId = useSeasonId()
 
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
@@ -147,7 +164,7 @@ export function useDeleteTask() {
     },
     onSettled: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'tasks') })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tasks(seasonId) })
     },
   })
 }

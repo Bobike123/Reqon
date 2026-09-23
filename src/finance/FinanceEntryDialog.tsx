@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { flushSync } from 'react-dom'
-import { isPermissionError } from '../data/errors.ts'
+import { isPermissionError } from '../core/errors.ts'
 import {
   useAddFinanceEntry,
   useUpdateFinanceEntry,

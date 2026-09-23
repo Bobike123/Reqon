@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import { describeRoles } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
-import { isPermissionError } from '../data/errors.ts'
+import { isPermissionError } from '../core/errors.ts'
 import { useDeleteFinanceEntry, useFinanceEntries, type FinanceEntry } from '../data/useFinances.ts'
 import { FinanceEntryDialog } from '../finance/FinanceEntryDialog.tsx'
 import { formatEuros } from '../finance/money.ts'

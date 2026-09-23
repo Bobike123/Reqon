@@ -23,9 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local environment — real Supabase credentials, never commit
-.env.local
-.env.*.local
+# Local environment — real Supabase credentials, never commit.
+# .env.example is the one exception: it is committed and holds placeholders only.
+.env*
+!.env.example
 
 # Test and build artefacts
 coverage
@@ -46,3 +47,11 @@ record-demo.cjs
 *.webm 
 
 .agents
+
+# Local archives/backups — never part of the project, and a snapshot of the
+# working tree can carry node_modules and the credential files ignored above.
+*.zip
+
+# Local Supabase CLI state — not part of the project
+supabase/.temp
+supabase/.branches

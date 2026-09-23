@@ -1,5 +1,4 @@
-import type { Clause } from '../../data/useClauses.ts'
-import type { ClauseState, ClauseStatus } from '../../data/useClauseStatus.ts'
+import type { Clause, ClauseState, ClauseStatus } from '../../clauses/types.ts'
 
 // One rule, joined to what the team did about it this season.
 //

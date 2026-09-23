@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import type { Member } from '../data/useMembers.ts'
 import { usePromoteProposal, type Proposal } from '../data/useProposals.ts'
 import type { TaskState } from '../data/useTasks.ts'
+import { TASK_CREATION_STATES } from '../tasks/taskState.ts'
 import { Dialog } from '../ui/Dialog.tsx'
 import { buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
 import { ActionError } from '../ui/states.tsx'
@@ -14,13 +15,14 @@ import { ActionError } from '../ui/states.tsx'
 // task_insert and proposal_update both call is_admin(). A member who forced the
 // dialog open would have the insert refused by the database.
 
-// Lanes a promotion can start in. Promoting straight into Done or Cancelled
-// would record work that never happened, so they are not offered.
-const START_LANES: { value: TaskState; label: string }[] = [
-  { value: 'todo', label: 'To do' },
-  { value: 'urgent', label: 'Urgent' },
-  { value: 'wip', label: 'In progress' },
-]
+// Lanes a promotion can start in — exactly the "creationEligible" states from
+// the one shared task-state definition (tasks/taskState.ts, Phase 6 §6.7).
+// Promoting straight into Done or Cancelled would record work that never
+// happened, so they are not offered.
+const START_LANES: { value: TaskState; label: string }[] = TASK_CREATION_STATES.map((s) => ({
+  value: s.state,
+  label: s.label,
+}))
 
 export function PromoteDialog({
   proposal,

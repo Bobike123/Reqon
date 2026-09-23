@@ -32,6 +32,9 @@ vi.mock('../data/useMembers.ts', () => ({
 vi.mock('../data/useProposals.ts', () => ({
   useProposals: () => ({ data: [], isLoading: false, error: null }),
 }))
+vi.mock('../data/useRealtimeTasks.ts', () => ({
+  useRealtimeTasks: () => 'off',
+}))
 vi.mock('../data/useTasks.ts', () => ({
   useTasks: () => ({ data: state.tasks, isLoading: false, error: null, refetch: () => {}, seasonId: 's' }),
   useUpdateTask: () => ({

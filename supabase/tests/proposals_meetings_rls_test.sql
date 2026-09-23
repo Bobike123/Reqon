@@ -61,6 +61,14 @@ declare
   mem    uuid := gen_random_uuid();
   season uuid;
   prop   uuid;           -- a proposal to review
+  -- 20260110 added a UNIQUE index on tasks(source_proposal): at most one task
+  -- per proposal. The three ALLOWED promotion checks below each insert a real
+  -- task, so each needs its OWN proposal — sharing `prop` between them would
+  -- make the 2nd and 3rd fail on the unique index, which is not what those
+  -- checks are testing (they test per-role INSERT permission, not promotion).
+  prop_vp  uuid;
+  prop_pre uuid;
+  prop_dev uuid;
   p_del1 uuid; p_del2 uuid; p_del3 uuid;
   t_keep uuid; t_del1 uuid; t_del2 uuid; t_del3 uuid; t_del4 uuid;
   m_keep uuid; m_del1 uuid; m_del2 uuid;
@@ -82,6 +90,12 @@ begin
 
   insert into task_proposals (season_id, title, raised_by) values (season, 'Review me', mem)
     returning id into prop;
+  insert into task_proposals (season_id, title, raised_by) values (season, 'Promote (VP)', mem)
+    returning id into prop_vp;
+  insert into task_proposals (season_id, title, raised_by) values (season, 'Promote (president)', mem)
+    returning id into prop_pre;
+  insert into task_proposals (season_id, title, raised_by) values (season, 'Promote (developer)', mem)
+    returning id into prop_dev;
   insert into task_proposals (season_id, title, raised_by) values (season, 'Delete 1', mem)
     returning id into p_del1;
   insert into task_proposals (season_id, title, raised_by) values (season, 'Delete 2', mem)
@@ -119,9 +133,9 @@ begin
     -- ================== PROMOTION = INSERTING A BOARD TASK =================
     ('member    promotes (inserts a task)',  mem, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Sneaky'', %L)', season, prop), 'write', 'DENIED'),
     ('treasurer promotes',                   tre, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Sneaky'', %L)', season, prop), 'write', 'DENIED'),
-    ('vicepresident promotes, with owner',   vp,  format('insert into tasks (season_id, title, source_proposal, owner_id, due_date) values (%L, ''Promoted by VP'', %L, %L, ''2026-10-01'')', season, prop, mem), 'write', 'ALLOWED'),
-    ('president promotes',                   pre, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Promoted by president'', %L)', season, prop), 'write', 'ALLOWED'),
-    ('developer promotes',                   dev, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Promoted by developer'', %L)', season, prop), 'write', 'ALLOWED'),
+    ('vicepresident promotes, with owner',   vp,  format('insert into tasks (season_id, title, source_proposal, owner_id, due_date) values (%L, ''Promoted by VP'', %L, %L, ''2026-10-01'')', season, prop_vp, mem), 'write', 'ALLOWED'),
+    ('president promotes',                   pre, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Promoted by president'', %L)', season, prop_pre), 'write', 'ALLOWED'),
+    ('developer promotes',                   dev, format('insert into tasks (season_id, title, source_proposal) values (%L, ''Promoted by developer'', %L)', season, prop_dev), 'write', 'ALLOWED'),
 
     -- ===================== THE BOARD STAYS EVERYONE'S ======================
     ('member    moves a task',               mem, format('update tasks set state = ''wip'' where id = %L', t_keep), 'write', 'ALLOWED'),

@@ -1,6 +1,7 @@
-import type { Milestone } from '../../data/useMilestones.ts'
-import type { Attention, SubteamProgress } from '../../data/useNowMetrics.ts'
-import type { Proposal } from '../../data/useProposals.ts'
+import type { Milestone } from '../../milestones/types.ts'
+import type { Attention, SubteamProgress } from '../../metrics/types.ts'
+import type { Proposal } from '../../proposals/types.ts'
+import { toLocalDateString } from '../../lib/dates.ts'
 
 // Every instrument on the Now screen, and the SQL that reproduces it.
 // The queries themselves are in docs/now-metrics.sql — paste one into the
@@ -17,7 +18,7 @@ export type NextDeadline =
 // SOURCE: milestones.due_on, current season, earliest date not yet passed.
 // docs/now-metrics.sql §1
 export function nextDeadline(milestones: Milestone[], today: Date): NextDeadline {
-  const todayIso = today.toISOString().slice(0, 10)
+  const todayIso = toLocalDateString(today)
   const upcoming = milestones
     .filter((m): m is Milestone & { due_on: string } => m.due_on !== null)
     .filter((m) => m.due_on >= todayIso)

@@ -83,6 +83,15 @@ begin
     (mem, 'Test Member', 'Chassis');
   insert into member_roles (member_id, role) values
     (dev, 'developer'), (tre, 'treasurer'), (pre, 'president'), (vp, 'vicepresident');
+  -- trg_guard_last_president looks at ALL of member_roles, not just this
+  -- test's rows. On a seeded project pre is not really the only president, so
+  -- the "cannot remove the last president" check below would be ALLOWED
+  -- instead of DENIED — and, because it is a real DELETE, would actually take
+  -- the role away from pre for the rest of this test, cascading into every
+  -- later check that needs pre to still be an administrator. Every other
+  -- president is removed up front so pre genuinely is the last one for the
+  -- whole test; the whole block still rolls back at the end.
+  delete from member_roles where role = 'president' and member_id <> pre;
 
   -- ------------------------------------------------------ things to act on
   insert into seasons (label, is_current) values ('ROLES-TEST', false) returning id into season;
@@ -192,8 +201,13 @@ begin
     ('developer     sets milestone points',       dev, 'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'ALLOWED'),
 
     -- ================== EVERYDAY WORK STILL WORKS =========================
-    ('member        adds a task',                 mem, format('insert into tasks (season_id, title) values (%L, ''m'')', season), 'write', 'ALLOWED'),
-    ('treasurer     adds a task',                 tre, format('insert into tasks (season_id, title) values (%L, ''t'')', season), 'write', 'ALLOWED'),
+    -- Corrected 20260112: task_insert has required is_admin() since 20260108
+    -- (proposals_and_meetings) — a task is created by promoting a proposal,
+    -- not typed directly, so only an administrator may INSERT one. Moving a
+    -- card and picking its owner (task_update) is still everyone's, which is
+    -- what proposals_meetings_rls_test.sql's "moves a task" checks cover.
+    ('member        adds a task',                 mem, format('insert into tasks (season_id, title) values (%L, ''m'')', season), 'write', 'DENIED'),
+    ('treasurer     adds a task',                 tre, format('insert into tasks (season_id, title) values (%L, ''t'')', season), 'write', 'DENIED'),
     ('developer     adds a task',                 dev, format('insert into tasks (season_id, title) values (%L, ''d'')', season), 'write', 'ALLOWED'),
 
     -- ============ THE DEVELOPER SEES (AND DOES) EVERYTHING ================

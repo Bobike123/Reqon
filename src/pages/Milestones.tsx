@@ -8,6 +8,7 @@ import {
   useMilestoneSections,
   useSetSectionDrafted,
 } from '../data/useMilestones.ts'
+import { useRealtimeMilestoneSections } from '../data/useRealtimeMilestoneSections.ts'
 import {
   draftedCount,
   sectionsFor,
@@ -16,7 +17,8 @@ import {
 
 export default function Milestones() {
   const milestones = useMilestones()
-  const sections = useMilestoneSections()
+  const sections = useMilestoneSections(milestones.data?.map((m) => m.key))
+  const realtime = useRealtimeMilestoneSections()
   const clauses = useClauses()
   const setDrafted = useSetSectionDrafted()
 
@@ -58,7 +60,13 @@ export default function Milestones() {
       <PageHeader
         title="Milestones"
         description="The MS1 deliverables: submission windows, points and section checklists."
-      />
+      >
+        <p className="mt-1 text-xs text-slate-500">
+          <span data-testid="milestones-realtime-state" title="Live updates from other people editing">
+            Live updates: {realtime}
+          </span>
+        </p>
+      </PageHeader>
 
       {milestones.isLoading && (
         <p role="status" className="mb-2 text-xs text-slate-500">Loading…</p>

@@ -33,7 +33,10 @@ function reset() {
 
 let nextId = 1
 function makeBuilder(table: string) {
-  const ctx: { op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean } = {
+  const ctx: {
+    op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean
+    range?: [number, number]
+  } = {
     op: 'select', filters: {}, single: false,
   }
   const run = () => {
@@ -71,11 +74,14 @@ function makeBuilder(table: string) {
       return { data: ctx.single ? (updated[0] ?? null) : updated, error: null }
     }
     for (const [k, v] of Object.entries(ctx.filters)) rows = rows.filter((r) => r[k] === v)
+    if (ctx.range) rows = rows.slice(ctx.range[0], ctx.range[1] + 1)
     return { data: ctx.single ? (rows[0] ?? null) : rows, error: null }
   }
 
   const b: Record<string, unknown> = {
-    select: () => b, order: () => b, in: () => b, range: () => b, limit: () => b,
+    select: () => b, order: () => b, in: () => b,
+    range: (from: number, to: number) => { ctx.range = [from, to]; return b },
+    limit: () => b,
     eq: (c: string, v: unknown) => { ctx.filters[c] = v; return b },
     insert: (p: Record<string, unknown>) => { ctx.op = 'insert'; ctx.payload = p; return b },
     update: (p: Record<string, unknown>) => { ctx.op = 'update'; ctx.payload = p; return b },
@@ -87,8 +93,41 @@ function makeBuilder(table: string) {
   return b
 }
 
+// Mirrors promote_proposal() (20260110000000_atomic_proposal_promotion.sql):
+// one call, idempotent on an already-promoted proposal, so a retry or a
+// second click never inserts a second task.
+function promoteProposal(args: Record<string, unknown>) {
+  const proposal = (db.task_proposals as Record<string, unknown>[]).find((p) => p.id === args.p_proposal_id)
+  if (!proposal) return { data: null, error: { message: 'proposal not found', code: '23503' } }
+  const existing = (db.tasks as Record<string, unknown>[]).find((t) => t.source_proposal === args.p_proposal_id)
+  if (existing) return { data: [{ task: existing, created: false }], error: null }
+  const task: Record<string, unknown> = {
+    id: `tasks-${nextId++}`,
+    season_id: args.p_season_id,
+    title: proposal.title,
+    detail: proposal.context ?? null,
+    owner_id: args.p_owner_id ?? proposal.owner_id ?? null,
+    due_date: args.p_due_date ?? null,
+    state: args.p_state ?? 'todo',
+    starred: false,
+    subteam_key: null,
+    source_proposal: args.p_proposal_id,
+    created_by: 'm1',
+  }
+  insertCount.tasks = (insertCount.tasks ?? 0) + 1
+  db.tasks.push(task)
+  db.task_proposals = (db.task_proposals as Record<string, unknown>[]).map((p) =>
+    p.id === args.p_proposal_id ? { ...p, state: 'decided', decided_at: new Date().toISOString() } : p,
+  )
+  return { data: [{ task, created: true }], error: null }
+}
+
 const supabase = {
   from: (t: string) => makeBuilder(t),
+  rpc: async (fn: string, args?: Record<string, unknown>) => {
+    if (fn === 'promote_proposal') return promoteProposal(args ?? {})
+    return { data: null, error: { message: `workflow.test.tsx fake: unhandled rpc "${fn}"`, code: 'P0001' } }
+  },
   channel: () => ({ on: () => ({ subscribe: () => ({}) }), subscribe: () => ({}) }),
   removeChannel: () => {},
 }
@@ -103,25 +142,28 @@ const { default: Board } = await import('./Board.tsx')
 const { default: Proposals } = await import('./Proposals.tsx')
 const { TutorialProvider } = await import('../tutorial/TutorialProvider.tsx')
 const { AppHeader } = await import('../ui/AppHeader.tsx')
+const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 function renderApp(initial = '/') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[initial]}>
-        {/* The real app shell: navigation lives in the header now. */}
-        <TutorialProvider>
-        <AppHeader />
-        <Routes>
-          <Route path="/" element={<Now />} />
-          <Route path="/board" element={<Board />} />
-          {/* The ACCEPTANCE test never navigates here — it is registered only
-              so the other tests can exercise the archive stages (parked), which
-              the Now screen deliberately hides. */}
-          <Route path="/proposals" element={<Proposals />} />
-        </Routes>
-        </TutorialProvider>
-      </MemoryRouter>
+      <SeasonProvider>
+        <MemoryRouter initialEntries={[initial]}>
+          {/* The real app shell: navigation lives in the header now. */}
+          <TutorialProvider>
+          <AppHeader />
+          <Routes>
+            <Route path="/" element={<Now />} />
+            <Route path="/board" element={<Board />} />
+            {/* The ACCEPTANCE test never navigates here — it is registered only
+                so the other tests can exercise the archive stages (parked), which
+                the Now screen deliberately hides. */}
+            <Route path="/proposals" element={<Proposals />} />
+          </Routes>
+          </TutorialProvider>
+        </MemoryRouter>
+      </SeasonProvider>
     </QueryClientProvider>,
   )
 }
@@ -129,6 +171,12 @@ function renderApp(initial = '/') {
 beforeEach(() => { reset(); vi.clearAllMocks() })
 
 describe('ACCEPTANCE: Now -> agenda -> decision -> decided -> task -> Board', () => {
+  // Longer timeout: this test alone drives a full multi-screen workflow, and
+  // every season-scoped query now costs one legitimate extra round trip to
+  // confirm an empty terminating page (Phase 4 §4.1 — a short page is no
+  // longer trusted as "no more data", since a real server's row cap can sit
+  // below what was requested). That is cheap individually but adds up across
+  // this many screens under full coverage-instrumented parallel test load.
   it('completes the whole workflow without ever visiting Proposals', async () => {
     const user = userEvent.setup()
     renderApp('/')
@@ -198,7 +246,7 @@ describe('ACCEPTANCE: Now -> agenda -> decision -> decided -> task -> Board', ()
 
     // And Meetings was never rendered.
     expect(screen.queryByRole('heading', { name: 'Task proposals' })).not.toBeInTheDocument()
-  })
+  }, 15000)
 })
 
 describe('the decision field is never a dead end', () => {
@@ -258,7 +306,9 @@ describe('duplicate protection', () => {
     const { usePromoteProposal } = await import('../data/useProposals.ts')
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const wrapper = ({ children }: { children: React.ReactNode }) => (
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={qc}>
+        <SeasonProvider>{children}</SeasonProvider>
+      </QueryClientProvider>
     )
     const { useCurrentSeason } = await import('../data/useCurrentSeason.ts')
     const season = renderHook(() => useCurrentSeason(), { wrapper })

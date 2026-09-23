@@ -1,26 +1,35 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
-import type { Database } from '../lib/database.types.ts'
-import { DataError, fetchAllRows } from './errors.ts'
+import type { ClauseState, ClauseStatus } from '../clauses/types.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows } from './errors.ts'
 import { useOptimisticListMutation } from './optimistic.ts'
+import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
-export type ClauseStatus = Database['public']['Tables']['clause_status']['Row']
-export type ClauseState = Database['public']['Enums']['clause_state']
+export type { ClauseState, ClauseStatus } from '../clauses/types.ts'
 
 // What the team did about each rule, this season. Season-scoped: a new season
 // starts with this table empty and the rulebook untouched.
-export function useClauseStatus() {
-  return useSeasonScopedQuery<ClauseStatus[]>('clause_status', (seasonId) =>
-    fetchAllRows('load clause status', (from, to) =>
-      supabase
-        .from('clause_status')
-        .select('*')
-        .eq('season_id', seasonId)
-        .range(from, to),
+export function useClauseStatusForSeason(seasonId: string | undefined): UseQueryResult<ClauseStatus[], Error> {
+  return useSeasonScopedQuery<ClauseStatus[]>(queryKeys.clauseStatus(seasonId), seasonId, (sid) =>
+    fetchAllRows(
+      'load clause status',
+      (row) => row.id,
+      // `.order('clause_key')` was missing before Phase 4: paging with no
+      // ORDER BY has no guaranteed stable row order between requests, which is
+      // exactly the condition that lets OFFSET pagination duplicate or skip
+      // rows. clause_key is unique within one season_id, already filtered above.
+      (from, to) =>
+        supabase.from('clause_status').select('*').eq('season_id', sid).order('clause_key').range(from, to),
     ),
-  ) as UseQueryResult<ClauseStatus[], Error> & { seasonId: string | undefined }
+  )
+}
+
+export function useClauseStatus(): UseQueryResult<ClauseStatus[], Error> {
+  return useClauseStatusForSeason(useSeasonId())
 }
 
 export type ClauseStatusEdit = {
@@ -35,11 +44,11 @@ export type ClauseStatusEdit = {
 // than an insert-or-update dance in the client.
 export function useSetClauseStatus() {
   const auth = useAuth()
-  const { seasonId } = useClauseStatus()
+  const seasonId = useSeasonId()
 
   return useOptimisticListMutation<ClauseStatus, ClauseStatusEdit>({
-    entity: 'clause_status',
-    seasonId,
+    queryKey: queryKeys.clauseStatus(seasonId),
+    identify: (row, edit) => row.clause_key === edit.clauseKey,
 
     write: async (edit) => {
       if (auth.status !== 'member') {

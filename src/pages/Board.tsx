@@ -5,23 +5,20 @@ import { Dialog } from '../ui/Dialog.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { buttonDanger, buttonSecondary } from '../ui/buttons.ts'
 import { ActionError } from '../ui/states.tsx'
-import { formatDay } from '../lib/dates.ts'
+import { formatDay, todayIso } from '../lib/dates.ts'
+import { isOverdue } from './board/boardModel.ts'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { useMembers } from '../data/useMembers.ts'
+import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
 import { useDeleteTask, useTasks, useUpdateTask, type Task, type TaskState } from '../data/useTasks.ts'
 import { useProposals } from '../data/useProposals.ts'
+import { TASK_STATES } from '../tasks/taskState.ts'
 
-// Six lanes, exactly the six task_state values in the schema. Do not add a
-// seventh here without adding it to the enum first.
-const LANES: { state: TaskState; label: string; tone: string }[] = [
-  { state: 'urgent', label: 'Urgent', tone: 'border-red-300 bg-red-50' },
-  { state: 'todo', label: 'To do', tone: 'border-slate-200 bg-white' },
-  { state: 'wip', label: 'In progress', tone: 'border-blue-200 bg-blue-50' },
-  { state: 'blocked', label: 'Blocked', tone: 'border-amber-300 bg-amber-50' },
-  { state: 'done', label: 'Done', tone: 'border-green-200 bg-green-50' },
-  { state: 'cancelled', label: 'Cancelled', tone: 'border-slate-200 bg-slate-100' },
-]
+// The six lanes, exactly the six task_state values in the schema — from the
+// one domain-owned definition (tasks/taskState.ts, Phase 6 §6.7). Gantt's
+// move-dropdown and PromoteDialog's starting-lane list read the same source.
+const LANES = TASK_STATES
 
 // Movement is a <select>, not drag-and-drop. A drag library is a large
 // dependency, and a drag target is unusable with a keyboard and awkward on a
@@ -37,6 +34,7 @@ function TaskCard({
   moving,
   tutorial,
   canDelete,
+  today,
 }: {
   // Deleting is president/developer only (task_delete -> can_delete_records()).
   canDelete: boolean
@@ -49,12 +47,9 @@ function TaskCard({
   onMove: (id: string, state: TaskState) => void
   onSetOwner: (id: string, ownerId: string | null) => void
   moving: boolean
+  today: string
 }) {
-  const overdue =
-    task.due_date !== null &&
-    task.due_date < new Date().toISOString().slice(0, 10) &&
-    task.state !== 'done' &&
-    task.state !== 'cancelled'
+  const overdue = isOverdue(task, today)
 
   return (
     <li
@@ -194,7 +189,9 @@ export default function Board() {
   const members = useMembers()
   const proposals = useProposals()
   const updateTask = useUpdateTask()
+  const realtime = useRealtimeTasks()
   const [scope, setScope] = useState<Scope>('all')
+  const today = todayIso()
 
   const myId = auth.status === 'member' ? auth.member.id : null
   const allTasks = tasks.data ?? []
@@ -232,7 +229,13 @@ export default function Board() {
       <PageHeader
         title="Board"
         description="The team’s tasks. Move a task between lanes with the dropdown on its card."
-      />
+      >
+        <p className="mt-1 text-xs text-slate-500">
+          <span data-testid="board-realtime-state" title="Live updates from other people editing">
+            Live updates: {realtime}
+          </span>
+        </p>
+      </PageHeader>
 
       {/* Only offered to someone the roster knows, because "yours" needs a
           member row to mean anything. */}
@@ -291,7 +294,7 @@ export default function Board() {
             return (
               <section
                 key={lane.state}
-                className={`rounded-lg border p-2 ${lane.tone}`}
+                className={`rounded-lg border p-2 ${lane.boardTone}`}
                 aria-labelledby={`lane-${lane.state}`}
                 data-testid={`lane-${lane.state}`}
               >
@@ -307,6 +310,7 @@ export default function Board() {
                       <TaskCard
                         key={task.id}
                         task={task}
+                        today={today}
                         tutorial={task.id === tutorialTaskId}
                         members={members.data ?? []}
                         sourceProposalTitle={

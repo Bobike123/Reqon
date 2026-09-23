@@ -1,41 +1,24 @@
+import type { ReactNode } from 'react'
 import { PageHeader } from '../ui/PageHeader.tsx'
-import { useState, type FormEvent } from 'react'
-import { useAuth } from '../auth/context.ts'
-import { describeRoles, type PrivilegedRole } from '../auth/permissions.ts'
+import { describeRoles } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
-import { ChangePasswordForm } from '../account/ChangePasswordForm.tsx'
-import { RoleBadges } from '../roles/RoleBadges.tsx'
-import { RoleDialog } from '../roles/RoleDialog.tsx'
-import { JobTitleSelect } from './settings/JobTitleSelect.tsx'
-import {
-  DEFAULT_JOB_TITLE,
-  jobTitleOptions,
-  splitRoster,
-  type RosterMember,
-} from './settings/rosterModel.ts'
-import { buttonSecondary } from '../ui/buttons.ts'
 import { pageMain } from '../ui/layout.ts'
-import { ActionError, ErrorState, LoadingState } from '../ui/states.tsx'
-import { buildSeasonExport, downloadJson } from '../data/exportSeason.ts'
-import { useCurrentSeason } from '../data/useCurrentSeason.ts'
-import { useMembers } from '../data/useMembers.ts'
-import { useMilestones, useSubteams } from '../data/useMilestones.ts'
-import {
-  type MemberState,
-  useAddMember,
-  useCreateSeason,
-  useHandoverNotes,
-  useMemberRoles,
-  useSeasons,
-  useSetCurrentSeason,
-  useSetHandoverNote,
-  useUpdateMember,
-  useUpdateMilestone,
-  useUpdateSubteam,
-} from '../data/useSettings.ts'
+import { AccountSettings } from './settings/AccountSettings.tsx'
+import { RosterSettings } from './settings/RosterSettings.tsx'
+import { SubsystemSettings } from './settings/SubsystemSettings.tsx'
+import { MilestoneSettings } from './settings/MilestoneSettings.tsx'
+import { HandoverSettings } from './settings/HandoverSettings.tsx'
+import { SeasonSettings } from './settings/SeasonSettings.tsx'
+import { SeasonExport } from './settings/SeasonExport.tsx'
 
-// Settings. Admin-only actions are hidden from everyone else here AS A
-// COURTESY — the actual authorization is in the database
+// The route shell (Phase 6 §6.1): coordinates only what genuinely is shared
+// between sections — the page chrome, and the one capability summary that
+// describes the WHOLE page at a glance. Every section below owns its own
+// data queries, mutations, pending state, action errors and form state; the
+// shell does not read a single row of data itself.
+//
+// Admin-only actions are hidden from everyone else here AS A COURTESY — the
+// actual authorization is in the database
 // (supabase/migrations/20260105000000_privileged_roles.sql, with the developer
 // given full access by 20260107000000_developer_full_access.sql):
 //
@@ -61,7 +44,7 @@ function Section({
   title: string
   // What the guided tour calls this section, if it points at it.
   tutorialId?: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="mt-6" aria-labelledby={`s-${title.replace(/\s+/g, '-')}`} data-tutorial={tutorialId}>
@@ -77,7 +60,7 @@ function Section({
 }
 
 // Used once, for what the signed-in person can do on this page.
-function Notice({ children }: { children: React.ReactNode }) {
+function Notice({ children }: { children: ReactNode }) {
   return (
     <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" data-tutorial="settings-access">
       {children}
@@ -85,225 +68,8 @@ function Notice({ children }: { children: React.ReactNode }) {
   )
 }
 
-// One person on the roster. The row says three separate things and now labels
-// all three, because "Chassis" and "Treasurer" used to sit side by side as
-// unlabelled text and read as one list of roles:
-//   job title      what they work on. Free text (members.role), grants nothing.
-//   role badges    what the database lets them do (member_roles).
-//   status         on the team, or retired.
-function RosterRow({
-  member,
-  roles,
-  titles,
-  tutorial,
-  canAdminister,
-  canManageRoles,
-  onJobTitle,
-  onStatus,
-  onEditRoles,
-  disabled,
-}: {
-  member: RosterMember
-  roles: PrivilegedRole[]
-  titles: readonly string[]
-  // The one row the guided tour points at.
-  tutorial: boolean
-  canAdminister: boolean
-  canManageRoles: boolean
-  onJobTitle: (title: string) => void
-  onStatus: (status: MemberState) => void
-  onEditRoles: () => void
-  disabled: boolean
-}) {
-  const retired = member.status === 'alumni'
-  return (
-    <li className="px-3 py-2" data-testid={`member-${member.id}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`text-sm font-medium ${retired ? 'text-slate-500' : 'text-slate-900'}`}>
-          {member.full_name}
-        </span>
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-slate-700">
-          <span className="sr-only">Job title: </span>
-          {member.role}
-        </span>
-        <RoleBadges roles={roles} />
-        {retired && (
-          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">alumni</span>
-        )}
-      </div>
-
-      {/* Every control for this person in one row that wraps on a phone,
-          instead of a lone button pushed to the edge. */}
-      {(canAdminister || canManageRoles) && (
-        <div
-          className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-2"
-          data-tutorial={tutorial ? 'roster-controls' : undefined}
-        >
-          {canAdminister && (
-            <>
-              <span className="flex flex-col gap-0.5">
-                {/* Visible label AND an sr-only one on the control: sighted
-                    admins were editing a nameless text box before. */}
-                <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
-                  Job title
-                </span>
-                <JobTitleSelect
-                  id={`title-${member.id}`}
-                  label={`Job title for ${member.full_name}`}
-                  titles={titles}
-                  value={member.role}
-                  disabled={disabled}
-                  onChange={onJobTitle}
-                />
-              </span>
-              <span className="flex flex-col gap-0.5">
-                <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
-                  Status
-                </span>
-                <label className="sr-only" htmlFor={`status-${member.id}`}>
-                  Status for {member.full_name}
-                </label>
-                <select
-                  id={`status-${member.id}`}
-                  value={member.status}
-                  disabled={disabled}
-                  onChange={(e) => onStatus(e.target.value as MemberState)}
-                  className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-                >
-                  <option value="active">Active</option>
-                  <option value="alumni">Alumni (retired)</option>
-                </select>
-              </span>
-            </>
-          )}
-          {canManageRoles && (
-            <span className="flex flex-col gap-0.5">
-              <span aria-hidden="true" className="text-[11px] font-medium text-slate-600">
-                Privileged roles
-              </span>
-              <button
-                type="button"
-                onClick={onEditRoles}
-                aria-label={`Change roles for ${member.full_name}`}
-                data-tutorial={tutorial ? 'change-roles' : undefined}
-                className={`${buttonSecondary} text-xs`}
-              >
-                Change roles
-              </button>
-            </span>
-          )}
-        </div>
-      )}
-    </li>
-  )
-}
-
 export default function Settings() {
-  const auth = useAuth()
   const { canAdminister, canManageRoles, roles: myRoles } = usePermissions()
-  const myId = auth.status === 'member' ? auth.member.id : null
-
-  const members = useMembers()
-  const subteams = useSubteams()
-  const milestones = useMilestones()
-  const seasons = useSeasons()
-  const currentSeason = useCurrentSeason()
-  const notes = useHandoverNotes()
-  const memberRoles = useMemberRoles()
-
-  const addMember = useAddMember()
-  const updateMember = useUpdateMember()
-  const updateSubteam = useUpdateSubteam()
-  const updateMilestone = useUpdateMilestone()
-  const createSeason = useCreateSeason()
-  const setCurrent = useSetCurrentSeason()
-  const setNote = useSetHandoverNote()
-  // Whose roles the President is editing, and the outcome of the last change.
-  const [roleTarget, setRoleTarget] = useState<{ id: string; name: string } | null>(null)
-  const [roleMessage, setRoleMessage] = useState('')
-
-  const [newMember, setNewMember] = useState({ id: '', fullName: '', role: DEFAULT_JOB_TITLE })
-  const [newSeason, setNewSeason] = useState({ label: '', edition: '' })
-  const [exporting, setExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
-
-  // Every field in this page saves when you click away, with no button to
-  // press — so say when a save is in flight, exactly as the Board, Spec sheet
-  // and Meetings screens do.
-  const saving =
-    updateMember.isPending || updateSubteam.isPending || updateMilestone.isPending ||
-    setNote.isPending || setCurrent.isPending || addMember.isPending || createSeason.isPending
-
-  const writeError =
-    addMember.error ?? updateMember.error ?? updateSubteam.error ??
-    updateMilestone.error ?? createSeason.error ?? setCurrent.error ?? setNote.error
-
-  // Reads can fail too — without this the screen rendered empty lists as though
-  // the club simply had no members and no seasons.
-  const readError =
-    members.error ?? subteams.error ?? milestones.error ?? seasons.error ?? notes.error ??
-    memberRoles.error
-  const loading = members.isLoading || subteams.isLoading || seasons.isLoading
-
-  // Who holds which privileged role — for display only.
-  const rolesByMember = new Map<string, PrivilegedRole[]>()
-  for (const row of memberRoles.data ?? []) {
-    rolesByMember.set(row.member_id, [...(rolesByMember.get(row.member_id) ?? []), row.role])
-  }
-
-  // Current members and alumni are shown apart: a retired name between two
-  // current ones is the kind of thing people read straight past.
-  const { active, alumni } = splitRoster(members.data ?? [])
-  const roster = [
-    { heading: 'On the team', people: active, empty: 'Nobody is on the roster yet.' },
-    { heading: 'Alumni', people: alumni, empty: 'Nobody has been retired yet.' },
-    // An empty alumni group says nothing worth a heading; an empty team is
-    // worth saying out loud.
-  ].filter((group) => group.heading !== 'Alumni' || group.people.length > 0)
-
-  // The job titles already in use, offered everywhere a title is set.
-  const titles = jobTitleOptions(members.data ?? [], newMember.role)
-
-  async function submitMember(e: FormEvent) {
-    e.preventDefault()
-    if (addMember.isPending || !newMember.id.trim() || !newMember.fullName.trim()) return
-    try {
-      await addMember.mutateAsync({
-        id: newMember.id.trim(),
-        fullName: newMember.fullName.trim(),
-        role: newMember.role.trim() || DEFAULT_JOB_TITLE,
-      })
-      setNewMember({ id: '', fullName: '', role: DEFAULT_JOB_TITLE })
-    } catch {
-      // Refused or failed: the message is shown, and what was typed stays.
-    }
-  }
-
-  async function submitSeason(e: FormEvent) {
-    e.preventDefault()
-    if (createSeason.isPending || !newSeason.label.trim()) return
-    try {
-      await createSeason.mutateAsync({ label: newSeason.label.trim(), edition: newSeason.edition.trim() || null })
-      setNewSeason({ label: '', edition: '' })
-    } catch {
-      // Refused or failed: the message is shown, and what was typed stays.
-    }
-  }
-
-  async function doExport() {
-    if (!currentSeason.data?.id) return
-    setExporting(true)
-    setExportError(null)
-    try {
-      const data = await buildSeasonExport(currentSeason.data.id)
-      const label = String(currentSeason.data.label ?? 'season').replace(/\W+/g, '-')
-      downloadJson(`reqon-${label}-${new Date().toISOString().slice(0, 10)}.json`, data)
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : 'Export failed')
-    } finally {
-      setExporting(false)
-    }
-  }
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain('reading')}>
@@ -324,398 +90,36 @@ export default function Settings() {
             : 'Roster, subsystem, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
 
-      {/* ---------------------------------------------------- Your account */}
       <Section title="Your account" tutorialId="settings-account">
-        <ChangePasswordForm />
+        <AccountSettings />
       </Section>
 
-      {readError && (
-        <div className="mt-3">
-          <ErrorState
-            title="Could not load settings"
-            error={readError}
-            onRetry={() => {
-              void members.refetch()
-              void subteams.refetch()
-              void milestones.refetch()
-              void seasons.refetch()
-              void notes.refetch()
-              void memberRoles.refetch()
-            }}
-          />
-        </div>
-      )}
-
-      {loading && !readError && <LoadingState label="Loading settings…" />}
-
-      <ActionError error={writeError} className="mt-3" />
-      <p role="status" className="mt-2 min-h-4 text-xs text-slate-500">{saving ? 'Saving…' : ''}</p>
-
-      {/* ---------------------------------------------------------- Roster */}
       <Section title="Roster" tutorialId="settings-roster">
-        {/* The one sentence that makes the rest of this section readable. Two
-            different things are called a "role" in this club, and the roster
-            shows both on the same line. */}
-        <p className="mb-2 text-xs text-pretty text-slate-600">
-          A <strong className="font-medium text-slate-800">job title</strong> says what someone works
-          on — Chassis, Aerodynamics, Finance. It is a label and grants nothing. A{' '}
-          <strong className="font-medium text-slate-800">privileged role</strong> badge — President,
-          Vice President, Treasurer, Developer — is what the database actually lets them do.
-        </p>
-
-        {roster.map((group) => (
-          <div key={group.heading} className="mt-3 first:mt-0">
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">
-              {group.heading}{' '}
-              <span className="font-normal text-slate-500">({group.people.length})</span>
-            </h3>
-            {group.people.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-600">
-                {group.empty}
-              </p>
-            ) : (
-              <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-                {group.people.map((m, index) => (
-                  <RosterRow
-                    key={m.id}
-                    member={m}
-                    roles={rolesByMember.get(m.id) ?? []}
-                    titles={titles}
-                    tutorial={group.heading === 'On the team' && index === 0}
-                    canAdminister={canAdminister}
-                    canManageRoles={canManageRoles}
-                    disabled={updateMember.isPending}
-                    onJobTitle={(role) => {
-                      if (role !== m.role) updateMember.mutate({ id: m.id, role })
-                    }}
-                    onStatus={(status) => updateMember.mutate({ id: m.id, status })}
-                    onEditRoles={() => {
-                      setRoleMessage('')
-                      setRoleTarget({ id: m.id, name: m.full_name })
-                    }}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-
-        <p className="mt-2 text-xs text-pretty text-slate-500">
-          People are retired, never deleted — the database has no delete policy for the roster, so
-          old task and rule owners keep resolving to a name forever. Alumni is a label, not a lock:
-          to stop someone signing in, remove their login in the Supabase dashboard as well.
-        </p>
-        <p className="mt-1 text-xs text-pretty text-slate-500">
-          The President and Vice President run these settings and the Treasurer changes money.
-          A Developer can do all of it, roles included — the role exists so the app can be
-          maintained and repaired, so give it out sparingly.{' '}
-          {canManageRoles
-            ? 'You can give or take away roles — and the club always keeps at least one President.'
-            : 'Roles are given and taken away by the President or a Developer.'}
-        </p>
-        <p role="status" className="mt-1 min-h-4 text-xs font-medium text-emerald-800">
-          {roleMessage}
-        </p>
-        <RoleDialog
-          member={roleTarget}
-          people={(members.data ?? []).map((m) => ({ id: m.id, name: m.full_name }))}
-          onClose={() => setRoleTarget(null)}
-          onChanged={(message) => {
-            setRoleTarget(null)
-            setRoleMessage(message)
-          }}
-        />
-
-        {canAdminister && (
-          <form onSubmit={submitMember} className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-tutorial="add-member">
-            <h3 className="text-sm font-medium text-slate-900">Add someone to the roster</h3>
-            {/* This is the safe two-step process from the build brief. Creating
-                an Auth account needs the service_role key, which bypasses RLS
-                and must never be shipped to a browser. */}
-            <ol className="mt-1 mb-2 list-decimal pl-5 text-xs text-slate-600">
-              <li>
-                In the Supabase dashboard: <strong>Authentication → Users → Add user</strong>.
-                Give them an email and a password, and confirm the email.
-              </li>
-              <li>Copy the new user&apos;s <strong>UUID</strong> from that list.</li>
-              <li>Paste it below. That links the login to the roster and grants access.</li>
-            </ol>
-            <p className="mb-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
-              Accounts cannot be created from this app: doing so would require the
-              service_role key in your browser, which would let anyone read and change
-              the whole database.
-            </p>
-            <p className="mb-2 text-xs text-slate-600">
-              Both steps in one go:{' '}
-              <code className="rounded bg-slate-100 px-1 py-0.5">supabase/scripts/new_member.sql</code>{' '}
-              in the Supabase SQL Editor — fill in the five values at the top and run it.
-            </p>
-            <label className="block text-xs font-medium text-slate-600" htmlFor="new-member-id">
-              Auth user UUID
-            </label>
-            <input
-              id="new-member-id"
-              value={newMember.id}
-              onChange={(e) => setNewMember((s) => ({ ...s, id: e.target.value }))}
-              placeholder="00000000-0000-0000-0000-000000000000"
-              className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-            />
-            <label className="mt-2 block text-xs font-medium text-slate-600" htmlFor="new-member-name">
-              Full name
-            </label>
-            <input
-              id="new-member-name"
-              value={newMember.fullName}
-              onChange={(e) => setNewMember((s) => ({ ...s, fullName: e.target.value }))}
-              className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-            />
-            <span aria-hidden="true" className="mt-2 block text-xs font-medium text-slate-600">
-              Job title
-            </span>
-            {/* Same picker as the roster rows, so a new person gets one of the
-                titles the club already uses rather than a fifth spelling of it. */}
-            <div className="mt-1">
-              <JobTitleSelect
-                id="new-member-role"
-                label="Job title"
-                titles={titles}
-                value={newMember.role}
-                disabled={addMember.isPending}
-                onChange={(role) => setNewMember((s) => ({ ...s, role }))}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={addMember.isPending}
-              className="mt-2 min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-            >
-              {addMember.isPending ? 'Linking…' : 'Link to roster'}
-            </button>
-          </form>
-        )}
+        <RosterSettings />
       </Section>
 
-      {/* -------------------------------------------------------- Subteams */}
       {canAdminister && (
         <Section title="Subsystems" tutorialId="settings-subsystems">
-          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-            {(subteams.data ?? []).map((s) => (
-              <li key={s.key} className="px-3 py-2" data-testid={`subteam-row-${s.key}`}>
-                <span className="font-mono text-xs text-slate-500">{s.key}</span>
-                <div className="mt-1 flex flex-wrap gap-2">
-                  <label className="sr-only" htmlFor={`sub-name-${s.key}`}>Name for {s.key}</label>
-                  <input
-                    id={`sub-name-${s.key}`}
-                    defaultValue={s.name}
-                    onBlur={(e) => {
-                      if (e.target.value !== s.name) updateSubteam.mutate({ key: s.key, name: e.target.value })
-                    }}
-                    className="min-h-11 flex-1 rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                  />
-                  <label className="sr-only" htmlFor={`sub-lead-${s.key}`}>Lead for {s.key}</label>
-                  <select
-                    id={`sub-lead-${s.key}`}
-                    value={s.lead_id ?? ''}
-                    onChange={(e) => updateSubteam.mutate({ key: s.key, leadId: e.target.value || null })}
-                    className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                  >
-                    <option value="">No lead</option>
-                    {(members.data ?? []).map((m) => (
-                      <option key={m.id} value={m.id}>{m.full_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <label className="sr-only" htmlFor={`sub-desc-${s.key}`}>Description for {s.key}</label>
-                <input
-                  id={`sub-desc-${s.key}`}
-                  defaultValue={s.description ?? ''}
-                  placeholder="What this subsystem covers"
-                  onBlur={(e) => {
-                    if (e.target.value !== (s.description ?? '')) {
-                      updateSubteam.mutate({ key: s.key, description: e.target.value || null })
-                    }
-                  }}
-                  className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                />
-              </li>
-            ))}
-          </ul>
+          <SubsystemSettings />
         </Section>
       )}
 
-      {/* ------------------------------------------------------ Milestones */}
       {canAdminister && (
         <Section title="Milestone dates and points" tutorialId="settings-milestones">
-          <p className="mb-2 text-xs text-slate-500">
-            For a new edition. Leaving a due date blank is valid — it renders as TBC.
-          </p>
-          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-            {(milestones.data ?? []).map((m) => (
-              <li key={m.key} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`ms-row-${m.key}`}>
-                <span className="w-32 shrink-0 text-sm text-slate-900">
-                  <span className="font-mono text-xs">{m.key}</span> {m.name}
-                </span>
-                <label className="sr-only" htmlFor={`ms-opens-${m.key}`}>Opens on for {m.key}</label>
-                <input
-                  id={`ms-opens-${m.key}`} type="date" defaultValue={m.opens_on ?? ''}
-                  onBlur={(e) => {
-                    if (e.target.value !== (m.opens_on ?? '')) {
-                      updateMilestone.mutate({ key: m.key, opensOn: e.target.value || null })
-                    }
-                  }}
-                  className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                />
-                <label className="sr-only" htmlFor={`ms-due-${m.key}`}>Due on for {m.key}</label>
-                <input
-                  id={`ms-due-${m.key}`} type="date" defaultValue={m.due_on ?? ''}
-                  onBlur={(e) => {
-                    if (e.target.value !== (m.due_on ?? '')) {
-                      updateMilestone.mutate({ key: m.key, dueOn: e.target.value || null })
-                    }
-                  }}
-                  className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                />
-                <label className="sr-only" htmlFor={`ms-points-${m.key}`}>Max points for {m.key}</label>
-                <input
-                  id={`ms-points-${m.key}`} type="number" min={0} defaultValue={m.max_points}
-                  onBlur={(e) => {
-                    const n = Number(e.target.value)
-                    if (Number.isFinite(n) && n !== m.max_points) {
-                      updateMilestone.mutate({ key: m.key, maxPoints: n })
-                    }
-                  }}
-                  className="min-h-11 w-20 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                />
-              </li>
-            ))}
-          </ul>
+          <MilestoneSettings />
         </Section>
       )}
 
-      {/* -------------------------------------------------- Handover notes */}
       <Section title="Handover notes" tutorialId="settings-handover">
-        <p className="mb-2 text-xs text-slate-500">
-          One note per subsystem, for whoever picks this up next year. Saved when you
-          click away.
-        </p>
-        <ul className="space-y-2">
-          {(subteams.data ?? []).map((s) => {
-            const note = (notes.data ?? []).find((n) => n.subteam_key === s.key)
-            return (
-              <li key={s.key} className="rounded-lg border border-slate-200 bg-white p-3">
-                <label className="block text-xs font-medium text-slate-700" htmlFor={`note-${s.key}`}>
-                  {s.name}
-                </label>
-                <textarea
-                  id={`note-${s.key}`}
-                  aria-labelledby={undefined}
-                  rows={2}
-                  defaultValue={note?.body ?? ''}
-                  placeholder="What the next person needs to know…"
-                  onBlur={(e) => {
-                    if (!myId) return
-                    if (e.target.value !== (note?.body ?? '')) {
-                      setNote.mutate({ subteamKey: s.key, body: e.target.value, memberId: myId })
-                    }
-                  }}
-                  className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-                />
-              </li>
-            )
-          })}
-        </ul>
+        <HandoverSettings />
       </Section>
 
-      {/* --------------------------------------------------------- Seasons */}
       <Section title="Seasons" tutorialId="settings-seasons">
-        <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-          {(seasons.data ?? []).map((s) => (
-            <li key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`season-${s.id}`}>
-              <span className="text-sm text-slate-900">{s.label}</span>
-              {s.is_current && (
-                <span className="rounded bg-green-700 px-1.5 py-0.5 text-[11px] font-medium text-white" data-testid={`current-${s.id}`}>
-                  current
-                </span>
-              )}
-              {canAdminister && !s.is_current && (
-                <button
-                  type="button"
-                  disabled={setCurrent.isPending}
-                  onClick={() => setCurrent.mutate(s.id)}
-                  data-testid={`make-current-${s.id}`}
-                  className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-xs hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-                >
-                  {setCurrent.isPending ? 'Switching…' : 'Make current'}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-1 text-xs text-slate-500">
-          Switching runs in a single database transaction, so the club can never end up
-          with two current seasons — or none. Old seasons stay readable.
-        </p>
-
-        {canAdminister && (
-          <form onSubmit={submitSeason} className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-tutorial="new-season">
-            <h3 className="text-sm font-medium text-slate-900">Start a new season</h3>
-            <p className="mt-0.5 mb-2 text-xs text-slate-600">
-              The new season starts empty: the rulebook carries over untouched, and none
-              of this year&apos;s progress is copied. Nothing becomes current until you
-              press “Make current”.
-            </p>
-            <label className="block text-xs font-medium text-slate-600" htmlFor="new-season-label">Label</label>
-            <input
-              id="new-season-label"
-              value={newSeason.label}
-              onChange={(e) => setNewSeason((s) => ({ ...s, label: e.target.value }))}
-              placeholder="2028/29"
-              className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-            />
-            <label className="mt-2 block text-xs font-medium text-slate-600" htmlFor="new-season-edition">
-              Edition (optional)
-            </label>
-            <input
-              id="new-season-edition"
-              value={newSeason.edition}
-              onChange={(e) => setNewSeason((s) => ({ ...s, edition: e.target.value }))}
-              placeholder="X"
-              className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-            />
-            <button
-              type="submit"
-              disabled={createSeason.isPending}
-              className="mt-2 min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-            >
-              {createSeason.isPending ? 'Creating…' : 'Create season'}
-            </button>
-          </form>
-        )}
+        <SeasonSettings canAdminister={canAdminister} />
       </Section>
 
-      {/* ---------------------------------------------------------- Export */}
       <Section title="Export" tutorialId="settings-export">
-        <p className="mb-2 text-xs text-slate-500">
-          The team&apos;s work this season as one JSON file: rules, tasks, proposals, meetings,
-          milestones, measurements, handover notes and the change log. Of the roster it
-          includes only name, job title and status — so owner ids resolve — and never phone
-          numbers, private notes, emails, passwords or keys. The regulations book and the
-          finance ledger are not included.
-        </p>
-        {exportError && (
-          <p role="alert" className="mb-2 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
-            {exportError}
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={() => void doExport()}
-          disabled={exporting || !currentSeason.data}
-          data-testid="export-button"
-          className="min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-        >
-          {exporting ? 'Preparing…' : 'Download season JSON'}
-        </button>
+        <SeasonExport />
       </Section>
     </main>
   )

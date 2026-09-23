@@ -5,6 +5,7 @@ import { queryKeys } from '../data/queryKeys.ts'
 import { supabase } from '../lib/supabase.ts'
 import { AuthContext, type AuthState, type Member } from './context.ts'
 import type { PrivilegedRole } from './permissions.ts'
+import type { AuthenticatedUser } from './types.ts'
 
 // The roster answer, tagged with the user it belongs to. Tagging means a stale
 // answer for the previous user can never be shown for the next one, without
@@ -143,13 +144,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (session === null) return { status: 'signedOut' }
     // Only trust a lookup that belongs to the user who is signed in right now.
     if (!lookup || lookup.userId !== session.user.id) return { status: 'loading' }
+    // The app's own shape (auth/types.ts), built here and nowhere else — the
+    // one place a Supabase Session is ever read (Phase 6 §6.6).
+    const user: AuthenticatedUser = { id: session.user.id, email: session.user.email ?? null }
     if (lookup.error) {
-      return { status: 'error', user: session.user, message: lookup.error }
+      return { status: 'error', user, message: lookup.error }
     }
-    if (lookup.member === null) return { status: 'notRostered', user: session.user }
+    if (lookup.member === null) return { status: 'notRostered', user }
     // If the live re-read fails, the roles from sign-in stand; the database
     // enforces the real ones either way.
-    return { status: 'member', user: session.user, member: lookup.member, roles: liveRoles.data ?? lookup.roles }
+    return { status: 'member', user, member: lookup.member, roles: liveRoles.data ?? lookup.roles }
   }, [session, lookup, liveRoles.data])
 
   const value = useMemo(

@@ -3,13 +3,22 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.22.2",
+    "npm": ">=10.9.8"
+  },
+  "packageManager": "npm@10.9.8",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "oxlint",
+    "build": "tsc -b && vite build && node scripts/check-bundle-budget.mjs",
+    "lint": "oxlint src vite.config.ts scripts --ignore-path .gitignore",
     "preview": "vite preview",
-    "types:gen": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_ID\" --schema public > src/lib/database.types.ts",
+    "typecheck": "tsc -b --noEmit",
+    "test:coverage": "vitest run --coverage",
+    "types:gen": "node scripts/gen-types.mjs",
+    "check": "npm run typecheck && npm run lint && npm test",
     "test": "vitest run",
+    "test:db": "bash scripts/verify_db.sh",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -31,6 +40,7 @@
     "@vitest/coverage-v8": "^5.0.0",
     "jsdom": "^30.0.1",
     "oxlint": "^1.79.0",
+    "supabase": "^2.117.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.2",

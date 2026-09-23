@@ -8,7 +8,7 @@ import {
   describeRoles,
   type PrivilegedRole,
 } from '../auth/permissions.ts'
-import { RoleChangeError, roleKeys, useApplyRoleChanges, useMemberRoles } from '../data/useSettings.ts'
+import { roleKeys, useApplyRoleChanges, useMemberRoles } from './useMemberRoles.ts'
 import { Dialog } from '../ui/Dialog.tsx'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
 import { ActionError, ErrorState, LoadingState } from '../ui/states.tsx'
@@ -119,7 +119,6 @@ function RoleEditor({
   const selfDemotion = plan.changes.some(
     (c) => c.role === 'president' && c.action === 'remove' && c.memberId === me.id,
   )
-  const partial = apply.error instanceof RoleChangeError && apply.error.applied > 0 ? apply.error : null
   const nothingToDo = plan.changes.length === 0
   const others = plan.otherTreasurers
 
@@ -275,7 +274,8 @@ function RoleEditor({
             ))}
           </ul>
           <p className="mt-3 text-xs text-slate-600">
-            The database checks each change again. If one is refused, nothing after it is attempted.
+            The database checks this again as one whole change. If it is refused, nothing here is
+            saved.
           </p>
         </div>
       )}
@@ -283,12 +283,6 @@ function RoleEditor({
       {apply.error && (
         <div className="mt-3 space-y-1">
           <ActionError error={apply.error} />
-          {partial && (
-            <p className="text-xs text-slate-600">
-              {partial.applied} of {partial.total} changes were saved before that. The boxes above
-              show what is saved now.
-            </p>
-          )}
         </div>
       )}
 

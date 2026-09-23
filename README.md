@@ -14,11 +14,16 @@ in this code.
 
 | Need | Version | Check with |
 |---|---|---|
-| Node.js | 22 or newer | `node --version` |
-| npm | comes with Node | `npm --version` |
+| Node.js | 22.22.2 or newer (see `.nvmrc`) | `node --version` |
+| npm | 10.9.8 or newer (ships with that Node) | `npm --version` |
 | A Supabase project | free tier is enough | see §6 |
+| Docker | any recent version — **only** for the database tests (§2a) | `docker info` |
 
-Nothing else. No Docker, no database on your laptop.
+The Node and npm versions are enforced, not advisory: `.npmrc` sets
+`engine-strict=true`, so `npm ci` refuses to install on anything older than
+`package.json`'s `engines`.
+
+Running the app itself needs no Docker and no database on your laptop.
 
 ---
 
@@ -27,7 +32,7 @@ Nothing else. No Docker, no database on your laptop.
 ```bash
 git clone <the club's repository URL>
 cd reqon
-npm install
+npm ci                         # clean install, exactly what package-lock.json pins
 cp .env.example .env.local     # then edit .env.local — see §3
 npm run dev
 ```
@@ -38,11 +43,49 @@ club account.
 Other commands:
 
 ```bash
-npm run build     # production build into dist/
-npm run preview   # serve the built dist/ locally, to check it before deploying
-npm test          # run the test suite
-npm run lint      # oxlint
+npm run build         # production build into dist/, then the bundle-size budget check
+npm run preview       # serve the built dist/ locally, to check it before deploying
+npm test              # run the frontend test suite (Vitest)
+npm run test:coverage # the same suite, failing if coverage drops below the floors in vite.config.ts
+npm run typecheck     # tsc, no emit
+npm run lint          # oxlint, scoped to src/, vite.config.ts and scripts/
+npm run check         # typecheck + lint + test, in that order
+npm run test:db       # database tests — needs Docker, see §2a
 ```
+
+### 2a. Verifying a change
+
+Frontend tests alone do not cover the security boundary — that lives in the
+database. Before calling a change done, run both halves:
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm run test:coverage
+npm run build
+npm run test:db
+npm ls --depth=0
+npm audit
+```
+
+`npm run test:db` runs `scripts/verify_db.sh`. It starts a throwaway
+`postgres:17` container (same major version as the hosted project), applies
+`scripts/local_auth_shim.sql` (stand-ins for Supabase's `auth` schema and
+roles), then every migration in order. It then races two real `psql`
+processes against `promote_proposal()` and runs every
+`supabase/tests/*.sql` file. It exits 0 only if everything passed, and it
+removes the container either way. No Supabase account, credentials or
+network access to a real project are involved. The first run pulls the
+`postgres:17` image.
+
+CI (`.github/workflows/ci.yml`) runs the same two halves as separate jobs,
+`frontend` and `database`, so a red job tells you which boundary broke.
+`docs/ARCHITECTURE.md` explains what each gate proves.
+
+The full local Supabase stack (`npx supabase start`) is not part of any
+verified workflow here. The pinned `supabase` CLI is used only by
+`npm run types:gen` (§10).
 
 ---
 
@@ -170,6 +213,16 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260107000000_developer_full_access.sql` | the Developer role becomes full access, for maintenance — see §7 |
 | `20260108000000_proposals_and_meetings.sql` | splits the old "Meetings" screen into task proposals, board tasks and real meetings — see §8 |
 | `20260109000000_section_subtasks.sql` | adds `tasks.section_id`, which is what makes a Gantt subtask a real board task instead of a second copy |
+| `20260110000000_atomic_proposal_promotion.sql` | `promote_proposal()`: promotion as one race-safe transaction, plus a one-task-per-proposal unique index |
+| `20260111000000_atomic_role_plan.sql` | `apply_role_plan()`: a whole role change applies completely or not at all |
+| `20260112000000_title_validation.sql` | task and proposal titles must be 1–200 characters (trimmed), enforced in the database |
+| `20260113000000_idempotent_realtime_publication.sql` | puts exactly the five live-updating tables in the realtime publication, failing loudly if it cannot |
+| `20260114000000_activity_audit_trail.sql` | the `activity` audit trail: written only by database triggers, readable but not writable by members |
+
+Each migration from `20260110` on carries an **implementation note** at the
+top: purpose, existing-data compatibility, locking, authorization, rollback
+and deploy order. Read it before applying. `20260110` and `20260111` must be
+applied **before** deploying a frontend that calls their functions.
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -234,7 +287,7 @@ including giving itself any role — so give it only to the person doing that wo
 and take it back when they are done (`20260107000000_developer_full_access.sql`).
 
 Everyone on the roster keeps the day-to-day work: the register, tasks, meetings,
-topics, the spec sheet and handover notes.
+proposals, the spec sheet and handover notes.
 
 These rules are enforced by Postgres Row Level Security, not by the app. The app
 hides controls you cannot use; a request made any other way — the browser
@@ -384,14 +437,18 @@ This is the feature that makes the app survive a graduating year.
 What happens:
 
 - the new season starts **completely empty** — no clause statuses, no tasks, no
-  topics carried over;
+  proposals carried over;
 - the **rulebook is untouched** — all 1,146 clauses are still there, because they
   are reference data, not team data;
 - last year's work **stays readable**: switch back and it is all still there.
 
 The switch runs inside a single database transaction (`set_current_season()`), so
 the club can never end up with two current seasons — or none. Only the
-President or Vice President can switch.
+President, Vice President or a Developer can switch.
+
+Every season-scoped screen shows a loading, error or "no current season"
+state instead of empty lists while the season is not resolved — a failed
+season lookup never looks like an empty season. Details: `docs/ARCHITECTURE.md` §2.
 
 ---
 
@@ -437,7 +494,14 @@ Regenerate it whenever the schema changes:
 SUPABASE_PROJECT_ID=<your-project-ref> npm run types:gen
 ```
 
-(That runs `supabase gen types typescript --project-id ... > src/lib/database.types.ts`.)
+That runs `scripts/gen-types.mjs`, which calls the `supabase` CLI (a pinned
+`devDependency` — no global install needed). It stages the output in a temp
+file next to the target, checks the output is non-empty and contains
+`export type Database`, and only then renames it over
+`src/lib/database.types.ts`, an atomic replace on the same filesystem. A
+failed, empty or malformed generation exits non-zero and leaves the existing
+file byte-for-byte untouched. It needs a Supabase login with access to that
+project (`npx supabase login`).
 
 Then run `npm run build` — any code that used a column you removed will fail to
 compile, which is the point.
@@ -460,7 +524,7 @@ These were expensive to get right. Please read before changing them.
 - **Permissions live in `member_roles`, never on `members`.** Everyone may edit
   their own `members` row, so a permission stored there can be self-granted —
   that is exactly how the old `is_board` flag could be abused, which migration
-  `20260105000000` removed. Only the president may write `member_roles`.
+  `20260105000000` removed. Only the President or a Developer may write `member_roles` (`can_manage_roles()`).
 - **One place decides what the UI shows.** Components ask `usePermissions()`
   (`src/auth/permissions.ts`), which mirrors the SQL functions `is_admin()`,
   `can_manage_roles()`, `can_view_finances()` and `can_manage_finances()`.
@@ -512,16 +576,25 @@ git push -u origin main
 
 ```
 src/
-  auth/     sign-in, the roster gate (RequireAuth), auth state
-  data/     one hook per entity; season scoping lives in seasonQuery.ts
-  pages/    one file per screen
-  topics/   the topic workspace, shared by Now and Meetings
-  ui/       error boundary and the shared loading/error/empty states
-  lib/      the single Supabase client + generated types
-docs/       now-metrics.sql — the SQL behind every number on the Now screen
-supabase/   migrations
+  auth/        sign-in (Login), the roster gate (RequireAuth), auth state, usePermissions
+  season/      current-season state (SeasonProvider) and the route gate (SeasonGate)
+  data/        one hook module per entity; season scoping in seasonQuery.ts, keys in queryKeys.ts
+  core/        application error contract (DataError, isPermissionError)
+  tasks/ milestones/ proposals/ clauses/ metrics/
+               domain types (and tasks/taskState.ts: the one task-state definition)
+  roles/       role dialog, role-plan logic, and the member_roles hooks
+  pages/       one file per screen; bigger screens split into a folder (settings/, gantt/, …)
+  proposals/ meetings/ finance/ account/ tutorial/
+               feature components shared between screens
+  ui/          app header, error boundary, dialog, shared loading/error/empty states
+  lib/         the single Supabase client + generated types
+docs/          ARCHITECTURE.md (layers, season lifecycle, RPCs, realtime, audit, export, CI)
+               now-metrics.sql — the SQL behind every number on the Now screen
+supabase/      migrations/ and tests/ (the SQL authorization and integrity tests)
+scripts/       verify_db.sh (database tests), gen-types.mjs, check-bundle-budget.mjs
 ```
 
 Two rules that keep it navigable: **one Supabase client** (`src/lib/supabase.ts`
 — never call `createClient` anywhere else), and **`season_id` only appears inside
-`src/data/`** — screens never handle it.
+`src/data/` and `src/season/`** — screens never handle it. The full layer map
+and dependency diagram are in `docs/ARCHITECTURE.md`.

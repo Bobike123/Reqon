@@ -34,6 +34,7 @@ export function SuggestProposalForm({
       <input
         id="proposal-title"
         value={title}
+        maxLength={200}
         onChange={(e) => {
           setTitle(e.target.value)
           setJustRaised(false)

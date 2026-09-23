@@ -1,26 +1,29 @@
-import type { User } from '@supabase/supabase-js'
 import { createContext, useContext } from 'react'
 import type { Database } from '../lib/database.types.ts'
 import type { PrivilegedRole } from './permissions.ts'
+import type { AuthenticatedUser } from './types.ts'
 
 export type Member = Database['public']['Tables']['members']['Row']
 
 // Being signed in is not the same as being allowed in. The club roster is the
 // `members` table, and the database enforces it: is_member() in schema.sql
 // gates every RLS policy. These states mirror what the database will do.
+//
+// `user` is the app's own AuthenticatedUser (auth/types.ts), never Supabase's
+// own `User` — Phase 6 §6.6.
 export type AuthState =
   // Still working out who the caller is. Never render protected UI here.
   | { status: 'loading' }
   // No Supabase session at all.
   | { status: 'signedOut' }
   // Signed in, but no matching `members` row — not on the club roster.
-  | { status: 'notRostered'; user: User }
+  | { status: 'notRostered'; user: AuthenticatedUser }
   // Signed in and on the roster. `member` is the caller's own row.
   // `roles` are the privileged roles from member_roles. Read them through
   // usePermissions(), not directly.
-  | { status: 'member'; user: User; member: Member; roles: PrivilegedRole[] }
+  | { status: 'member'; user: AuthenticatedUser; member: Member; roles: PrivilegedRole[] }
   // We could not find out. Do NOT fall through to either allow or deny.
-  | { status: 'error'; user: User; message: string }
+  | { status: 'error'; user: AuthenticatedUser; message: string }
 
 export type AuthContextValue = AuthState & {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>

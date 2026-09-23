@@ -57,6 +57,7 @@ vi.mock('../auth/context.ts', () => ({
 }))
 
 const { default: Board } = await import('../pages/Board.tsx')
+const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 beforeEach(() => { failReads = true; attempts = 0 })
 
@@ -65,7 +66,9 @@ describe('a screen that fails to load', () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     return render(
       <QueryClientProvider client={qc}>
-        <MemoryRouter><Board /></MemoryRouter>
+        <SeasonProvider>
+          <MemoryRouter><Board /></MemoryRouter>
+        </SeasonProvider>
       </QueryClientProvider>,
     )
   }

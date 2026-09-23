@@ -1,215 +1,26 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { usePermissions } from '../auth/usePermissions.ts'
-import { formatDay, todayIso } from '../lib/dates.ts'
-import { buttonSecondary } from '../ui/buttons.ts'
+import { todayIso } from '../lib/dates.ts'
 import { pageMain } from '../ui/layout.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { ActionError, EmptyState, ErrorState } from '../ui/states.tsx'
 import { useMembers } from '../data/useMembers.ts'
-import {
-  useMilestones,
-  useMilestoneSections,
-  useSetSectionDrafted,
-  type MilestoneSection,
-} from '../data/useMilestones.ts'
-import {
-  useAddSectionTask,
-  useTasks,
-  useUpdateTask,
-  type Task,
-  type TaskState,
-} from '../data/useTasks.ts'
-import { sectionsFor, submissionWindow } from './milestones/milestoneModel.ts'
-import {
-  milestonePercent,
-  milestoneSpan,
-  monthTicks,
-  weekTicks,
-  placeBar,
-  placeDay,
-  progressOf,
-  sectionPercent,
-  sectionSpan,
-  tasksInSection,
-  timelineRange,
-  type Span,
-} from './gantt/ganttModel.ts'
+import { useMilestones, useMilestoneSections, useSetSectionDrafted } from '../data/useMilestones.ts'
+import { useAddSectionTask, useTasks, useUpdateTask, type TaskState } from '../data/useTasks.ts'
+import { GanttToolbar } from './gantt/GanttToolbar.tsx'
+import { MilestoneRow } from './gantt/MilestoneRow.tsx'
+import { monthTicks, placeDay, timelineRange, weekTicks } from './gantt/ganttModel.ts'
 
-// The same six lanes as the Board, because these ARE board tasks. If a seventh
-// state is ever added to the enum it belongs in both places — or, better, the
-// two lists become one.
-const STATES: { state: TaskState; label: string }[] = [
-  { state: 'urgent', label: 'Urgent' },
-  { state: 'todo', label: 'To do' },
-  { state: 'wip', label: 'In progress' },
-  { state: 'blocked', label: 'Blocked' },
-  { state: 'done', label: 'Done' },
-  { state: 'cancelled', label: 'Cancelled' },
-]
-
-const BAR_TONE: Record<TaskState, string> = {
-  urgent: 'bg-red-500',
-  todo: 'bg-slate-400',
-  wip: 'bg-blue-500',
-  blocked: 'bg-amber-500',
-  done: 'bg-green-600',
-  cancelled: 'bg-slate-300',
-}
-
-// Label column, then the timeline. One constant so all three levels and the
-// month ruler share a single left edge — the thing that makes a Gantt readable.
-const ROW = 'grid grid-cols-[minmax(15rem,22rem)_1fr] items-start gap-3'
-
-// The label column stays visible while the timeline scrolls under it — the
-// whole point of the weekly scale is a chart wider than the screen.
-const STICKY_LABEL = 'sticky left-0 z-10 self-stretch'
-
-const selectSmall =
-  'min-h-11 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0'
-
-// The track every bar is drawn in, with the "today" line on top of it. The line
-// is repeated per row rather than laid over the whole chart: it then cannot
-// drift out of alignment when a row changes height.
-function Track({
-  today,
-  children,
-  label,
-}: {
-  today: number | null
-  label?: string
-  children?: ReactNode
-}) {
-  return (
-    <div className="relative h-7 rounded bg-slate-50 ring-1 ring-inset ring-slate-200">
-      {today !== null && (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 w-px bg-red-500/60"
-          style={{ left: `${today}%` }}
-        />
-      )}
-      {label && (
-        <span className="absolute inset-y-0 left-1 flex items-center text-[11px] text-slate-500">
-          {label}
-        </span>
-      )}
-      {children}
-    </div>
-  )
-}
-
-// A bar, with progress filled in from the left. `title` carries the dates: the
-// chart shows roughly when, the tooltip says exactly when.
-function Bar({
-  span,
-  range,
-  percent,
-  tone,
-  title,
-}: {
-  span: Span
-  range: Span
-  percent?: number
-  tone: string
-  title: string
-}) {
-  const box = placeBar(span, range)
-  if (!box) return null
-  return (
-    <span
-      title={title}
-      className={`absolute inset-y-1 min-w-[3px] overflow-hidden rounded ${tone}`}
-      style={{ left: `${box.left}%`, width: `${box.width}%` }}
-    >
-      {percent !== undefined && percent > 0 && (
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-0 bg-slate-900/35"
-          style={{ width: `${percent}%` }}
-        />
-      )}
-    </span>
-  )
-}
-
-// The row under an expanded section: create a board task here, or adopt one
-// that already exists. Both end up as the same thing — a task with section_id
-// set — which is why there is no third option.
-function SubtaskTools({
-  section,
-  unlinked,
-  canCreate,
-  onCreate,
-  onLink,
-  busy,
-}: {
-  section: MilestoneSection
-  unlinked: Task[]
-  canCreate: boolean
-  onCreate: (title: string) => void
-  onLink: (taskId: string) => void
-  busy: boolean
-}) {
-  const [title, setTitle] = useState('')
-
-  return (
-    <div className="sticky left-12 z-10 my-1 ml-12 flex w-fit max-w-md flex-col items-start gap-2 rounded border border-dashed border-slate-300 bg-slate-50 p-2">
-      {canCreate && (
-        <form
-          className="flex items-center gap-1"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const trimmed = title.trim()
-            if (!trimmed) return
-            onCreate(trimmed)
-            setTitle('')
-          }}
-        >
-          <label className="sr-only" htmlFor={`add-${section.id}`}>
-            New subtask for {section.name}
-          </label>
-          <input
-            id={`add-${section.id}`}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="New subtask…"
-            maxLength={200}
-            className="min-h-11 w-48 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-          />
-          <button type="submit" className={`${buttonSecondary} text-xs`} disabled={busy || !title.trim()}>
-            Add to Board
-          </button>
-        </form>
-      )}
-
-      {unlinked.length > 0 && (
-        <>
-          <label className="sr-only" htmlFor={`link-${section.id}`}>
-            Link an existing board task to {section.name}
-          </label>
-          <select
-            id={`link-${section.id}`}
-            value=""
-            onChange={(e) => e.target.value && onLink(e.target.value)}
-            className={selectSmall}
-          >
-            <option value="">Link an existing task…</option>
-            {unlinked.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title}
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-    </div>
-  )
-}
-
+// The composition shell (Phase 6 §6.3): fetches data, holds the open/closed
+// sets and the scale, computes the shared timeline range and today-line
+// position, and renders one MilestoneRow per milestone. Everything about how
+// a single row draws itself — and the section/subtask levels under it — lives
+// in gantt/MilestoneRow.tsx, gantt/SectionRow.tsx and gantt/GanttTaskRow.tsx;
+// this file is interaction orchestration, not rendering detail.
 export default function Gantt() {
   const can = usePermissions()
   const milestones = useMilestones()
-  const sections = useMilestoneSections()
+  const sections = useMilestoneSections(milestones.data?.map((m) => m.key))
   const tasks = useTasks()
   const members = useMembers()
   const setDrafted = useSetSectionDrafted()
@@ -229,6 +40,7 @@ export default function Gantt() {
   }
 
   const today = todayIso()
+  const now = new Date()
   const milestoneRows = milestones.data ?? []
   const sectionRows = sections.data ?? []
   const taskRows = tasks.data ?? []
@@ -287,31 +99,14 @@ export default function Gantt() {
         </EmptyState>
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <button
-              type="button"
-              className={`${buttonSecondary} text-xs`}
-              onClick={() =>
-                setOpenMilestones(allOpen ? new Set() : new Set(milestoneRows.map((m) => m.key)))
-              }
-            >
-              {allOpen ? 'Collapse all' : 'Expand all'}
-            </button>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600">
-              Scale
-              <select
-                value={scale}
-                onChange={(e) => setScale(e.target.value as 'month' | 'week')}
-                className={selectSmall}
-              >
-                <option value="month">Monthly</option>
-                <option value="week">Weekly</option>
-              </select>
-            </label>
-            <p className="text-xs text-slate-500">
-              The red line is today. A bar fills from the left as its subtasks are done.
-            </p>
-          </div>
+          <GanttToolbar
+            allOpen={allOpen}
+            onToggleAll={() =>
+              setOpenMilestones(allOpen ? new Set() : new Set(milestoneRows.map((m) => m.key)))
+            }
+            scale={scale}
+            onScale={setScale}
+          />
 
           {/* The chart keeps its proportions rather than squeezing; on a phone
               it scrolls sideways, which beats months three pixels wide. */}
@@ -319,8 +114,8 @@ export default function Gantt() {
             {/* The padding lives inside the scrolled content, so the sticky
                 label column has no gap for the ruler to show through. */}
             <div className="p-3" style={{ minWidth: chartWidth }} data-tutorial="gantt-chart">
-              <div className={`${ROW} border-b border-slate-200 pb-1`}>
-                <span className={`${STICKY_LABEL} flex items-center bg-white pr-2 text-xs font-medium text-slate-600`}>
+              <div className="grid grid-cols-[minmax(15rem,22rem)_1fr] items-start gap-3 border-b border-slate-200 pb-1">
+                <span className="sticky left-0 z-10 self-stretch flex items-center bg-white pr-2 text-xs font-medium text-slate-600">
                   Submission · section · subtask
                 </span>
                 <div className="relative h-5" data-testid="gantt-months">
@@ -337,230 +132,31 @@ export default function Gantt() {
               </div>
 
               <ul>
-                {milestoneRows.map((milestone) => {
-                  const mySections = sectionsFor(sectionRows, milestone.key)
-                  const span = milestoneSpan(milestone)
-                  const window = submissionWindow(milestone, new Date())
-                  const percent = milestonePercent(mySections, taskRows)
-                  const open = openMilestones.has(milestone.key)
-
-                  return (
-                    <li
-                      key={milestone.key}
-                      className="border-b border-slate-100 py-1.5 last:border-0"
-                      data-testid={`gantt-milestone-${milestone.key}`}
-                    >
-                      <div className={`${ROW} rounded bg-slate-100 py-0.5`}>
-                        <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-slate-100 pr-2`}>
-                          <button
-                            type="button"
-                            aria-expanded={open}
-                            onClick={() => setOpenMilestones(toggle(openMilestones, milestone.key))}
-                            className="flex min-h-11 items-center gap-1.5 text-left text-sm font-semibold text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                          >
-                            <span aria-hidden="true" className="w-3 text-slate-500">
-                              {open ? '▾' : '▸'}
-                            </span>
-                            <span className="font-mono text-xs">{milestone.key}</span>
-                            <span className="font-normal">{milestone.name}</span>
-                          </button>
-                          <span
-                            className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
-                              percent === 100
-                                ? 'bg-green-100 text-green-800'
-                                : window.kind === 'dated' && window.passed
-                                  ? 'bg-red-100 text-red-800'
-                                  : 'bg-slate-200 text-slate-700'
-                            }`}
-                          >
-                            {percent}%
-                          </span>
-                        </div>
-
-                        <Track today={todayLeft}>
-                          {span && (
-                            <Bar
-                              span={span}
-                              range={range}
-                              percent={percent}
-                              tone={
-                                window.kind === 'dated' && window.passed && percent < 100
-                                  ? 'bg-red-600'
-                                  : 'bg-slate-700'
-                              }
-                              title={`${milestone.key}: ${
-                                span.from === span.to ? '' : `${formatDay(span.from)} → `
-                              }${formatDay(span.to)} · ${percent}% done`}
-                            />
-                          )}
-                        </Track>
-                      </div>
-
-                      {open && mySections.length === 0 && (
-                        <p className={`sticky left-0 z-10 w-fit bg-white py-1 pl-6 text-xs text-slate-500`}>
-                          No sections listed for this submission yet.
-                        </p>
-                      )}
-
-                      {open &&
-                        mySections.map((section) => {
-                          const mine = tasksInSection(taskRows, section.id)
-                          const progress = progressOf(mine)
-                          const sectionBar = sectionSpan(taskRows, section.id, span)
-                          const sectionOpen = openSections.has(section.id)
-
-                          return (
-                            <div key={section.id} data-testid={`gantt-section-${section.id}`}>
-                              <div className={`${ROW} group py-1`}>
-                                <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-white pl-6 pr-2 group-hover:bg-slate-100`}>
-                                  <button
-                                    type="button"
-                                    aria-expanded={sectionOpen}
-                                    onClick={() => setOpenSections(toggle(openSections, section.id))}
-                                    className="flex min-h-11 items-center gap-1.5 text-left text-xs text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-                                  >
-                                    <span aria-hidden="true" className="w-3 text-slate-500">
-                                      {sectionOpen ? '▾' : '▸'}
-                                    </span>
-                                    {section.name}
-                                  </button>
-                                  {/* The same tick as Milestones, writing to the
-                                      same row: one checklist, two screens. */}
-                                  <label className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
-                                    <input
-                                      type="checkbox"
-                                      checked={section.is_drafted}
-                                      aria-label={`${section.name} drafted`}
-                                      onChange={(e) =>
-                                        setDrafted.mutate({ id: section.id, isDrafted: e.target.checked })
-                                      }
-                                      className="h-4 w-4 accent-slate-900"
-                                    />
-                                    {progress.total > 0 ? `${progress.done}/${progress.total}` : 'drafted'}
-                                  </label>
-                                </div>
-
-                                <Track today={todayLeft}>
-                                  {sectionBar && (
-                                    <Bar
-                                      span={sectionBar}
-                                      range={range}
-                                      percent={sectionPercent(section, taskRows)}
-                                      tone={mine.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
-                                      title={`${section.name}: ${formatDay(sectionBar.from)} → ${formatDay(
-                                        sectionBar.to,
-                                      )}${mine.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''}`}
-                                    />
-                                  )}
-                                </Track>
-                              </div>
-
-                              {sectionOpen && (
-                                <>
-                                  {mine.map((task) => (
-                                    <div
-                                      key={task.id}
-                                      className={`${ROW} group py-1`}
-                                      data-testid={`gantt-task-${task.id}`}
-                                      data-task-state={task.state}
-                                    >
-                                      <div className={`${STICKY_LABEL} flex flex-wrap items-center gap-1 bg-white pl-12 pr-2 group-hover:bg-slate-100`}>
-                                        <span className="w-full text-xs text-slate-700">{task.title}</span>
-                                        <label className="sr-only" htmlFor={`gantt-state-${task.id}`}>
-                                          Move {task.title} to another lane
-                                        </label>
-                                        <select
-                                          id={`gantt-state-${task.id}`}
-                                          value={task.state}
-                                          onChange={(e) =>
-                                            updateTask.mutate({
-                                              id: task.id,
-                                              state: e.target.value as TaskState,
-                                            })
-                                          }
-                                          className={selectSmall}
-                                        >
-                                          {STATES.map((s) => (
-                                            <option key={s.state} value={s.state}>
-                                              {s.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        <label className="sr-only" htmlFor={`gantt-owner-${task.id}`}>
-                                          Owner for {task.title}
-                                        </label>
-                                        <select
-                                          id={`gantt-owner-${task.id}`}
-                                          value={task.owner_id ?? ''}
-                                          onChange={(e) =>
-                                            updateTask.mutate({
-                                              id: task.id,
-                                              ownerId: e.target.value || null,
-                                            })
-                                          }
-                                          className={selectSmall}
-                                        >
-                                          <option value="">Unassigned</option>
-                                          {(members.data ?? []).map((m) => (
-                                            <option key={m.id} value={m.id}>
-                                              {m.full_name}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        {/* Unlinking leaves the task on the Board.
-                                            Deleting one is still the Board's job. */}
-                                        <button
-                                          type="button"
-                                          onClick={() => updateTask.mutate({ id: task.id, sectionId: null })}
-                                          aria-label={`Unlink ${task.title} from ${section.name}`}
-                                          className="min-h-11 rounded px-1 text-[11px] text-slate-500 underline underline-offset-2 hover:text-slate-800 sm:min-h-0"
-                                        >
-                                          Unlink
-                                        </button>
-                                      </div>
-
-                                      <Track
-                                        today={todayLeft}
-                                        label={task.due_date ? undefined : 'No due date'}
-                                      >
-                                        {task.due_date && (
-                                          <Bar
-                                            span={{ from: task.due_date, to: task.due_date }}
-                                            range={range}
-                                            tone={BAR_TONE[task.state]}
-                                            title={`${task.title}: due ${formatDay(task.due_date)}`}
-                                          />
-                                        )}
-                                      </Track>
-                                    </div>
-                                  ))}
-
-                                  {mine.length === 0 && (
-                                    <p className={`sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-500`}>
-                                      No subtasks yet. Anything added here is a real Board task.
-                                    </p>
-                                  )}
-
-                                  <SubtaskTools
-                                    section={section}
-                                    unlinked={unlinked}
-                                    canCreate={can.canAssignTask}
-                                    busy={addTask.isPending}
-                                    onCreate={(title) =>
-                                      addTask.mutate({ sectionId: section.id, title })
-                                    }
-                                    onLink={(taskId) =>
-                                      updateTask.mutate({ id: taskId, sectionId: section.id })
-                                    }
-                                  />
-                                </>
-                              )}
-                            </div>
-                          )
-                        })}
-                    </li>
-                  )
-                })}
+                {milestoneRows.map((milestone) => (
+                  <MilestoneRow
+                    key={milestone.key}
+                    milestone={milestone}
+                    sections={sectionRows}
+                    tasks={taskRows}
+                    unlinked={unlinked}
+                    range={range}
+                    todayLeft={todayLeft}
+                    open={openMilestones.has(milestone.key)}
+                    onToggle={() => setOpenMilestones(toggle(openMilestones, milestone.key))}
+                    openSections={openSections}
+                    onToggleSection={(sectionId) => setOpenSections(toggle(openSections, sectionId))}
+                    members={members.data ?? []}
+                    onDraftedChange={(id, isDrafted) => setDrafted.mutate({ id, isDrafted })}
+                    canCreateTask={can.canAssignTask}
+                    addingTask={addTask.isPending}
+                    onCreateTask={(sectionId, title) => addTask.mutate({ sectionId, title })}
+                    onLinkTask={(sectionId, taskId) => updateTask.mutate({ id: taskId, sectionId })}
+                    onMoveTask={(taskId, state: TaskState) => updateTask.mutate({ id: taskId, state })}
+                    onOwnerTask={(taskId, ownerId) => updateTask.mutate({ id: taskId, ownerId })}
+                    onUnlinkTask={(taskId) => updateTask.mutate({ id: taskId, sectionId: null })}
+                    now={now}
+                  />
+                ))}
               </ul>
             </div>
           </div>

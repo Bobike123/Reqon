@@ -1,45 +1,11 @@
 import type { PostgrestError } from '@supabase/supabase-js'
+import { DataError } from '../core/errors.ts'
 
-// Postgres's own wording when Row Level Security or a GRANT refuses a request.
-// Accurate, but meaningless to a club member, so it is replaced — while a
-// refusal the database explains itself ("The club must always have a
-// president…") is shown exactly as written.
-const GENERIC_REFUSAL = /row-level security|permission denied|insufficient[_ ]privilege/i
-
-// Every failed read or write becomes one of these, so the UI has exactly one
-// error shape to handle and nothing ever fails silently.
-export class DataError extends Error {
-  code: string | null
-  details: string | null
-  // True when the database refused because of WHO is asking, not because
-  // something broke. The UI words these differently, and re-reads the
-  // caller's roles in case they changed since the screen loaded.
-  permission: boolean
-
-  // `what` names the action so it reads after "You don't have permission to …".
-  constructor(what: string, error: PostgrestError | null, options: { permission?: boolean } = {}) {
-    const permission =
-      options.permission ??
-      (error !== null && (error.code === '42501' || GENERIC_REFUSAL.test(error.message)))
-    super(permission ? refusalMessage(what, error) : error ? `${what}: ${error.message}` : what)
-    this.name = 'DataError'
-    this.code = error?.code ?? null
-    this.details = error?.details ?? null
-    this.permission = permission
-  }
-}
-
-function refusalMessage(what: string, error: PostgrestError | null): string {
-  if (error && !GENERIC_REFUSAL.test(error.message)) return error.message
-  return `You don't have permission to ${what}. Nothing was changed. Ask the President if you need this.`
-}
-
-// A permission refusal, however deeply it has been wrapped.
-export function isPermissionError(error: unknown): boolean {
-  if (error instanceof DataError) return error.permission
-  if (error instanceof Error && error.cause !== undefined) return isPermissionError(error.cause)
-  return false
-}
+// The application error CONTRACT (DataError, isPermissionError) lives in
+// core/errors.ts — a neutral location any feature UI can depend on without
+// pulling in Supabase types (Phase 6 §6.4/§6.6). This file keeps only the
+// data-infrastructure that actually talks to Supabase's PostgrestError/Result
+// shape: unwrapping a response, and paging through one.
 
 type Result<T> = { data: T | null; error: PostgrestError | null }
 
@@ -64,20 +30,46 @@ export function unwrapMaybe<T>(what: string, result: Result<T>): T | null {
 const REQUEST_SIZE = 1000
 const MAX_REQUESTS = 50
 
+// `page()` must be called with a query already ordered deterministically, and
+// that order must end in a column unique across the whole result set (a
+// primary key, or a key unique within whatever this call already filtered
+// by). Without that, OFFSET pagination has no stable window to page through:
+// Postgres owes nothing about row order across two separate requests unless
+// ORDER BY says so, and even with one, a row inserted earlier in that order
+// than the current offset shifts every later row down a place — so the row
+// that was last on one page can legitimately reappear first on the next.
+// `getKey` extracts that same unique column from each row so a reappearance
+// like that is dropped instead of returned twice.
 export async function fetchAllRows<T>(
   what: string,
+  getKey: (row: T) => string | number,
   page: (from: number, to: number) => PromiseLike<Result<T[]>>,
 ): Promise<T[]> {
   const rows: T[] = []
+  const seen = new Set<string | number>()
+  // Tracked separately from rows.length: a dropped duplicate must not shrink
+  // the offset the NEXT request asks for, or the same page would be re-fetched
+  // forever instead of advancing.
+  let offset = 0
 
   for (let request = 0; request < MAX_REQUESTS; request += 1) {
-    const from = rows.length
-    const batch = unwrap(what, await page(from, from + REQUEST_SIZE - 1))
-    rows.push(...batch)
-    // A short page means the server had nothing more to give. Advancing by the
-    // batch length (not by REQUEST_SIZE) keeps this correct even if the server
-    // caps pages lower than we asked for.
-    if (batch.length === 0 || batch.length < REQUEST_SIZE) return rows
+    const batch = unwrap(what, await page(offset, offset + REQUEST_SIZE - 1))
+    offset += batch.length
+    for (const row of batch) {
+      const key = getKey(row)
+      if (seen.has(key)) continue
+      seen.add(key)
+      rows.push(row)
+    }
+    // Only an EMPTY page means the server had nothing more to give. A short
+    // page (fewer rows than REQUEST_SIZE, but more than zero) is NOT the same
+    // thing: the server's own row cap (`max_rows` in supabase/config.toml) can
+    // be lower than REQUEST_SIZE, in which case every page looks "short" while
+    // rows remain. Advancing by the batch length actually received (not by
+    // REQUEST_SIZE) keeps the offset correct either way; this is what keeps
+    // the loop running until that is actually true, at the cost of one
+    // trailing empty request in the ordinary case.
+    if (batch.length === 0) return rows
   }
 
   throw new DataError(

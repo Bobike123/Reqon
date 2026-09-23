@@ -5,6 +5,7 @@ import { ErrorState } from '../ui/states.tsx'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMembers } from '../data/useMembers.ts'
+import { useRealtimeSpecs } from '../data/useRealtimeSpecs.ts'
 import { useSetMeasurement, useSpecs, type SpecVerdict } from '../data/useSpecs.ts'
 
 // Pass / fail is NEVER computed here.
@@ -136,6 +137,7 @@ function SpecRow({
 
 export default function SpecSheet() {
   const specs = useSpecs()
+  const realtime = useRealtimeSpecs()
   const members = useMembers()
   const setMeasurement = useSetMeasurement()
 
@@ -169,7 +171,13 @@ export default function SpecSheet() {
       <PageHeader
         title="Spec sheet"
         description="Measured values checked against the regulation limits. The verdict comes from the rule, never typed in."
-      />
+      >
+        <p className="mt-1 text-xs text-slate-500">
+          <span data-testid="specs-realtime-state" title="Live updates from other people editing">
+            Live updates: {realtime}
+          </span>
+        </p>
+      </PageHeader>
 
       <p className="mb-3 text-sm text-slate-600" data-testid="spec-summary" data-tutorial="spec-summary">
         {measured} of {rows.length} measured

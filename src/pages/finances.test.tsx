@@ -38,11 +38,17 @@ const row = (over: Partial<Row>): Row => ({
 })
 
 function builder() {
-  const ctx = { op: 'select', payload: {} as Partial<Row>, filters: {} as Record<string, unknown> }
+  const ctx = {
+    op: 'select', payload: {} as Partial<Row>, filters: {} as Record<string, unknown>,
+    range: undefined as [number, number] | undefined,
+  }
   const matches = (r: Row) => Object.entries(ctx.filters).every(([k, v]) => r[k as keyof Row] === v)
   const run = () => {
     requests.push(ctx.op)
-    if (ctx.op === 'select') return { data: canView() ? rows.filter(matches) : [], error: null }
+    if (ctx.op === 'select') {
+      const hit = canView() ? rows.filter(matches) : []
+      return { data: ctx.range ? hit.slice(ctx.range[0], ctx.range[1] + 1) : hit, error: null }
+    }
     if (ctx.op === 'insert') {
       if (!canManage()) {
         return { data: null, error: { message: 'new row violates row-level security policy for table "finance_entries"', code: '42501' } }
@@ -57,7 +63,8 @@ function builder() {
     return { data: hit.map((r) => ({ id: r.id })), error: null }
   }
   const b: Record<string, unknown> = {
-    select: () => b, order: () => b, range: () => b,
+    select: () => b, order: () => b,
+    range: (from: number, to: number) => { ctx.range = [from, to]; return b },
     eq: (k: string, v: unknown) => { ctx.filters[k] = v; return b },
     insert: (p: Partial<Row>) => { ctx.op = 'insert'; ctx.payload = p; return b },
     update: (p: Partial<Row>) => { ctx.op = 'update'; ctx.payload = p; return b },
@@ -83,13 +90,16 @@ vi.mock('../data/useCurrentSeason.ts', () => ({
 }))
 
 const { default: Finances } = await import('./Finances.tsx')
+const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 function renderFinances(roles: string[]) {
   who.roles = roles
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter><Finances /></MemoryRouter>
+      <SeasonProvider>
+        <MemoryRouter><Finances /></MemoryRouter>
+      </SeasonProvider>
     </QueryClientProvider>,
   )
 }

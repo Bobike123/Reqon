@@ -1,11 +1,12 @@
+import type { UseQueryResult } from '@tanstack/react-query'
 import { useCallback, useMemo, useState } from 'react'
 import { usePermissions } from '../auth/usePermissions.ts'
+import type { RealtimeState } from '../data/realtime.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useTasks } from '../data/useTasks.ts'
 import {
   usePromoteProposal,
   useSuggestProposal,
-  useProposals,
   useUpdateProposal,
   type Proposal,
   type ProposalState,
@@ -19,11 +20,19 @@ import { PromoteDialog } from './PromoteDialog.tsx'
 // The proposal workspace. BOTH the Now screen and the Proposals screen render
 // this exact component, so suggesting, reviewing and promoting behave the same
 // wherever you are. There is deliberately no second implementation.
+//
+// `proposals` and `realtime` are taken as props, not fetched in here (Phase 6
+// §6.9): Now.tsx also needs the proposals list for its own tile, and used to
+// call useProposals() a second time to get it — two components independently
+// "owning" the same aggregate. The caller (Now.tsx / Proposals.tsx) now loads
+// once and passes it down; this panel is the controlled view of it.
 export function ProposalsPanel({
   heading,
   states,
   emptyHint,
   layout = 'stack',
+  proposals,
+  realtime,
 }: {
   heading: string
   // Which stages to show. Now shows the live ones; the Proposals screen shows
@@ -34,8 +43,9 @@ export function ProposalsPanel({
   // 'wide' is for a meeting on a big screen: the form and a running tally stay
   // in a left-hand column while the cards fill the rest of the width.
   layout?: 'stack' | 'wide'
+  proposals: UseQueryResult<Proposal[], Error>
+  realtime: RealtimeState
 }) {
-  const proposals = useProposals()
   const members = useMembers()
   const tasks = useTasks()
   const createProposal = useSuggestProposal()
@@ -113,7 +123,7 @@ export function ProposalsPanel({
         />
       )}
 
-      {!proposals.isLoading && visible.length === 0 && (
+      {!proposals.error && !proposals.isLoading && visible.length === 0 && (
         <p className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           {emptyHint}
         </p>
@@ -146,6 +156,13 @@ export function ProposalsPanel({
     <section aria-labelledby="proposals-heading" data-tutorial="proposals-panel">
       <h2 id="proposals-heading" className="mb-2 text-sm font-semibold text-slate-900">
         {heading}
+        <span
+          className="ml-2 text-xs font-normal text-slate-500"
+          data-testid="proposals-realtime-state"
+          title="Live updates from other people editing"
+        >
+          · live updates: {realtime}
+        </span>
       </h2>
 
       {wide ? (

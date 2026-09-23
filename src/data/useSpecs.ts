@@ -2,7 +2,9 @@ import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/reac
 import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
 import type { Database } from '../lib/database.types.ts'
-import { DataError, unwrap } from './errors.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
@@ -12,17 +14,22 @@ import { useSeasonScopedQuery } from './seasonQuery.ts'
 // in React.
 export type SpecVerdict = Database['public']['Views']['spec_verdicts']['Row']
 
-export function useSpecs() {
-  return useSeasonScopedQuery<SpecVerdict[]>('spec_verdicts', async (seasonId) =>
-    unwrap(
+export function useSpecsForSeason(seasonId: string | undefined): UseQueryResult<SpecVerdict[], Error> {
+  return useSeasonScopedQuery<SpecVerdict[]>(queryKeys.specVerdicts(seasonId), seasonId, (sid) =>
+    fetchAllRows(
       'load spec verdicts',
-      await supabase
-        .from('spec_verdicts')
-        .select('*')
-        .eq('season_id', seasonId)
-        .order('sort_order'),
+      // The view marks every column nullable, but `id` is the underlying
+      // specs.id and is never actually null for a real row; sort_order is the
+      // fallback only a malformed row could ever need.
+      (row) => row.id ?? `${row.clause_key}:${row.sort_order}`,
+      (from, to) =>
+        supabase.from('spec_verdicts').select('*').eq('season_id', sid).order('sort_order').order('id').range(from, to),
     ),
-  ) as UseQueryResult<SpecVerdict[], Error> & { seasonId: string | undefined }
+  )
+}
+
+export function useSpecs(): UseQueryResult<SpecVerdict[], Error> {
+  return useSpecsForSeason(useSeasonId())
 }
 
 export type Measurement = { id: string; measured: number | null }
@@ -37,7 +44,7 @@ export type Measurement = { id: string; measured: number | null }
 export function useSetMeasurement() {
   const auth = useAuth()
   const queryClient = useQueryClient()
-  const { seasonId } = useSpecs()
+  const seasonId = useSeasonId()
 
   return useMutation<void, Error, Measurement>({
     mutationFn: async ({ id, measured }) => {
@@ -58,9 +65,7 @@ export function useSetMeasurement() {
     },
     onSettled: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.seasonScoped(seasonId, 'spec_verdicts'),
-      })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.specVerdicts(seasonId) })
     },
   })
 }

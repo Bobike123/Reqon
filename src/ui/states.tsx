@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { isPermissionError } from '../data/errors.ts'
+import { isPermissionError } from '../core/errors.ts'
 
 // The three states every screen owes the reader, in one place so no screen
 // invents its own wording or forgets the way out of an error.

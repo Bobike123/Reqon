@@ -71,9 +71,16 @@ function policyAllows(table: string, op: string, filters: Record<string, unknown
 }
 
 function makeBuilder(table: string) {
-  const ctx: { op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean } = {
-    op: 'select', filters: {}, single: false,
-  }
+  const ctx: {
+    op: string
+    payload?: Record<string, unknown>
+    filters: Record<string, unknown>
+    single: boolean
+    selected: boolean
+    count?: string
+    head?: boolean
+    range?: [number, number]
+  } = { op: 'select', filters: {}, single: false, selected: false }
   const matches = (r: Record<string, unknown>) =>
     Object.entries(ctx.filters).every(([k, v]) => r[k] === v)
   const run = () => {
@@ -90,7 +97,7 @@ function makeBuilder(table: string) {
       if (table === 'member_roles') for (const r of doomed) writes.push(`delete member_roles ${r.member_id} ${r.role}`)
       return { data: doomed, error: null }
     }
-    if (ctx.op !== 'select' && !policyAllows(table, ctx.op, ctx.filters)) {
+    if (ctx.op !== 'select' && ctx.op !== 'update' && !policyAllows(table, ctx.op, ctx.filters)) {
       return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
     }
     if (table === 'member_roles' && ctx.op === 'insert') {
@@ -113,14 +120,38 @@ function makeBuilder(table: string) {
       return { data: row, error: null }
     }
     if (ctx.op === 'update') {
+      // As in real Postgres RLS: a policy's USING clause filters which rows
+      // are visible to UPDATE, so a refused update touches no rows — it does
+      // NOT raise an error (that only happens for WITH CHECK, i.e. INSERT).
+      if (!policyAllows(table, 'update', ctx.filters)) return { data: ctx.selected ? [] : null, error: null }
+      const hit = db[table].filter(matches)
       db[table] = db[table].map((r) => (matches(r) ? { ...r, ...ctx.payload } : r))
-      return { data: null, error: null }
+      // As in PostgREST: an UPDATE returns no data unless .select() is
+      // chained, in which case it returns the rows it actually touched — the
+      // shape useUpdateMember/useUpdateSubteam/useUpdateMilestone need to
+      // tell "nothing matched" apart from "matched, and RLS didn't error".
+      return { data: ctx.selected ? hit : null, error: null }
     }
-    const rows = (db[table] ?? []).filter(matches)
+    let rows = (db[table] ?? []).filter(matches)
+    // `{ count: 'exact', head: true }`: mirrors PostgREST's own count contract
+    // (export's independent-count check, Phase 4 §4.4) — head:true returns no
+    // data body, only the count. Count reflects the FULL filtered set, taken
+    // before range() narrows to one page, exactly like PostgREST's own
+    // Content-Range count.
+    if (ctx.count) return { data: ctx.head ? null : rows, count: rows.length, error: null }
+    if (ctx.range) rows = rows.slice(ctx.range[0], ctx.range[1] + 1)
     return { data: ctx.single ? (rows[0] ?? null) : rows, error: null }
   }
   const b: Record<string, unknown> = {
-    select: () => b, order: () => b, in: () => b, range: () => b, limit: () => b,
+    select: (_cols?: string, opts?: { count?: string; head?: boolean }) => {
+      ctx.selected = true
+      ctx.count = opts?.count
+      ctx.head = opts?.head
+      return b
+    },
+    order: () => b, in: () => b,
+    range: (from: number, to: number) => { ctx.range = [from, to]; return b },
+    limit: () => b,
     eq: (c: string, v: unknown) => { ctx.filters[c] = v; return b },
     insert: (p: Record<string, unknown>) => { ctx.op = 'insert'; ctx.payload = p; return b },
     update: (p: Record<string, unknown>) => { ctx.op = 'update'; ctx.payload = p; return b },
@@ -133,6 +164,50 @@ function makeBuilder(table: string) {
   return b
 }
 
+// Mirrors apply_role_plan() (20260111000000_atomic_role_plan.sql): one call,
+// can_manage_roles() checked once for the whole plan, applied in order, ALL
+// or NOTHING — a last-president removal partway through discards every
+// change this SAME call made, not just that one step.
+function applyRolePlan(args: Record<string, unknown>) {
+  if (!canManageRoles(caller)) {
+    return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
+  }
+  const changes = args.p_changes as { member_id: string; role: string; action: 'add' | 'remove' }[]
+  const before = (db.member_roles as RoleRow[]).map((r) => ({ ...r }))
+  const beforeWrites = writes.length
+  for (const change of changes) {
+    if (change.action === 'add') {
+      const already = (db.member_roles as RoleRow[]).some(
+        (r) => r.member_id === change.member_id && r.role === change.role,
+      )
+      if (!already) {
+        db.member_roles.push({ member_id: change.member_id, role: change.role, assigned_by: caller.id })
+        writes.push(`insert member_roles ${change.member_id} ${change.role}`)
+      }
+    } else {
+      const doomed = (db.member_roles as RoleRow[]).filter(
+        (r) => r.member_id === change.member_id && r.role === change.role,
+      )
+      const presidents = (db.member_roles as RoleRow[]).filter((r) => r.role === 'president')
+      if (doomed.length > 0 && presidents.length > 0 && presidents.every((r) => doomed.includes(r))) {
+        // trg_guard_last_president: undo every write THIS call made, matching
+        // "one transaction" — the same reason settings.test.tsx's own writes
+        // assertions never see a partial plan.
+        db.member_roles = before
+        writes.length = beforeWrites
+        return { data: null, error: { message: LAST_PRESIDENT, code: '42501' } }
+      }
+      if (doomed.length > 0) {
+        db.member_roles = (db.member_roles as RoleRow[]).filter(
+          (r) => !(r.member_id === change.member_id && r.role === change.role),
+        )
+        writes.push(`delete member_roles ${change.member_id} ${change.role}`)
+      }
+    }
+  }
+  return { data: null, error: null }
+}
+
 const supabase = {
   from: (t: string) => makeBuilder(t),
   rpc: async (fn: string, args: Record<string, unknown>) => {
@@ -140,8 +215,13 @@ const supabase = {
     if (fn === 'can_manage_roles') return { data: canManageRoles(caller), error: null }
     if (fn === 'can_manage_finances')
       return { data: rolesOf(caller.id).some((r) => r === 'treasurer' || r === 'developer'), error: null }
+    if (fn === 'apply_role_plan') return applyRolePlan(args)
+    // useUpdateMember/useUpdateSubteam/useUpdateMilestone ask this to tell a
+    // refused UPDATE apart from one that simply matched no (renamed/deleted) row.
+    if (fn === 'is_admin') return { data: isAdmin(caller), error: null }
     rpcCalls.push({ fn, args })
-    // The real function refuses anyone but the president or vice-president in SQL.
+    // Everything else here is set_current_season, which the real function
+    // refuses to anyone but the president or vice-president in SQL.
     if (!isAdmin(caller)) {
       return {
         data: null,
@@ -163,15 +243,20 @@ vi.mock('../auth/context.ts', () => ({
 
 const { default: Settings } = await import('./Settings.tsx')
 const { buildSeasonExport } = await import('../data/exportSeason.ts')
-const { useAddMember, useAssignRole, useRemoveRole, useSetCurrentSeason } = await import(
-  '../data/useSettings.ts'
-)
+const { useAddMember, useUpdateMember } = await import('../data/useMembers.ts')
+const { useUpdateSubteam } = await import('../data/useSubteams.ts')
+const { useUpdateMilestone } = await import('../data/useMilestones.ts')
+const { useSetCurrentSeason } = await import('../data/useSeasons.ts')
+const { useApplyRoleChanges } = await import('../roles/useMemberRoles.ts')
+const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 function renderSettings() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter><Settings /></MemoryRouter>
+      <SeasonProvider>
+        <MemoryRouter><Settings /></MemoryRouter>
+      </SeasonProvider>
     </QueryClientProvider>,
   )
 }
@@ -181,7 +266,9 @@ function hook<T>(use: () => T) {
   const qc = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
   return renderHook(use, {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={qc}>
+        <SeasonProvider>{children}</SeasonProvider>
+      </QueryClientProvider>
     ),
   }).result
 }
@@ -412,59 +499,67 @@ describe('role management', () => {
     await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
 
     expect(await dialog.findByRole('alert')).toHaveTextContent(
-      "Not permitted: You don't have permission to give the Developer role. Nothing was changed.",
+      "Not permitted: You don't have permission to change privileged roles. Nothing was changed.",
     )
     expect(rolesOf('m2')).toEqual([])
     expect(dialog.getByRole('checkbox', { name: 'Developer' })).toBeChecked()
   })
 
+  // Every role change goes through apply_role_plan() (useApplyRoleChanges).
+  // These call that supported path directly, as a caller bypassing the dialog
+  // would; the direct member_roles INSERT/DELETE rules themselves are proven
+  // against real Postgres in supabase/tests/roles_rls_test.sql.
+
   it('a stale screen that re-adds a role someone already holds is not an error', async () => {
-    const assign = hook(() => useAssignRole())
-    await expect(assign.current.mutateAsync({ memberId: 'm3', role: 'vicepresident' })).resolves.toBeUndefined()
+    const apply = hook(() => useApplyRoleChanges())
+    await expect(
+      apply.current.mutateAsync([{ memberId: 'm3', memberName: 'Someone', role: 'vicepresident', action: 'add' }]),
+    ).resolves.toBeUndefined()
     expect(rolesOf('m3')).toEqual(['vicepresident'])
   })
 
   it('the DATABASE refuses a vice-president who bypasses the UI to assign a role', async () => {
     caller = VP
-    const assign = hook(() => useAssignRole())
+    const apply = hook(() => useApplyRoleChanges())
     await expect(
-      assign.current.mutateAsync({ memberId: 'm3', role: 'president' }),
-    ).rejects.toThrow(/don't have permission to give the President role/)
+      apply.current.mutateAsync([{ memberId: 'm3', memberName: 'Someone', role: 'president', action: 'add' }]),
+    ).rejects.toThrow(/don't have permission to change privileged roles/)
     expect(rolesOf('m3')).toEqual(['vicepresident'])
   })
 
   it('the DATABASE lets a developer assign a role, exactly like the president', async () => {
     caller = DEV
-    const assign = hook(() => useAssignRole())
-    await expect(assign.current.mutateAsync({ memberId: 'm2', role: 'treasurer' })).resolves.toBeUndefined()
+    const apply = hook(() => useApplyRoleChanges())
+    await expect(
+      apply.current.mutateAsync([{ memberId: 'm2', memberName: 'Someone', role: 'treasurer', action: 'add' }]),
+    ).resolves.toBeUndefined()
     expect(rolesOf('m2')).toEqual(['treasurer'])
   })
 
   for (const [label, who] of [['treasurer', TREAS], ['team member', CREW]] as const) {
     it(`the DATABASE refuses a ${label} who makes themselves president`, async () => {
       caller = who
-      const assign = hook(() => useAssignRole())
+      const apply = hook(() => useApplyRoleChanges())
       await expect(
-        assign.current.mutateAsync({ memberId: who.id, role: 'president' }),
+        apply.current.mutateAsync([{ memberId: who.id, memberName: 'Someone', role: 'president', action: 'add' }]),
       ).rejects.toThrow(/don't have permission/)
       expect(rolesOf(who.id)).not.toContain('president')
     })
   }
 
-  it('a removal the database silently refuses is reported, not treated as done', async () => {
+  it('a removal the database refuses is reported, not treated as done', async () => {
     caller = VP
-    const remove = hook(() => useRemoveRole())
-    // RLS makes this delete match nothing, with no error — the hook must notice.
+    const apply = hook(() => useApplyRoleChanges())
     await expect(
-      remove.current.mutateAsync({ memberId: 'm1', role: 'president' }),
-    ).rejects.toThrow(/don't have permission to take away the President role/)
+      apply.current.mutateAsync([{ memberId: 'm1', memberName: 'Someone', role: 'president', action: 'remove' }]),
+    ).rejects.toThrow(/don't have permission to change privileged roles/)
     expect(rolesOf('m1')).toEqual(['president'])
   })
 
   it('the database guard on the last President is shown in its own words', async () => {
-    const remove = hook(() => useRemoveRole())
+    const apply = hook(() => useApplyRoleChanges())
     await expect(
-      remove.current.mutateAsync({ memberId: 'm1', role: 'president' }),
+      apply.current.mutateAsync([{ memberId: 'm1', memberName: 'Someone', role: 'president', action: 'remove' }]),
     ).rejects.toThrow(/must always have a president/)
     expect(rolesOf('m1')).toEqual(['president'])
   })
@@ -699,8 +794,9 @@ describe('export', () => {
 
   it('is scoped to one season and carries identifying metadata', async () => {
     const out = await buildSeasonExport('sa')
-    expect(out.exportVersion).toBe(1)
+    expect(out.exportVersion).toBe(2)
     expect(typeof out.exportedAt).toBe('string')
+    expect(typeof out.consistency).toBe('string')
     expect(out.season).toMatchObject({ id: 'sa', label: '2026/27' })
     expect(out.tasks).toHaveLength(1)
     expect((out.tasks[0] as { title: string }).title).toBe('Season A task')
@@ -727,5 +823,63 @@ describe('export', () => {
   it('does not export the 1,146-row rulebook', async () => {
     const out = await buildSeasonExport('sa')
     expect(out).not.toHaveProperty('clauses')
+  })
+})
+
+// --- Protected updates that match no row ------------------------------------
+// An UPDATE that RLS refuses touches no rows and reports no error — the same
+// shape as updating a row that was deleted or renamed a moment ago. These
+// three (members, subteams, milestones) ask is_admin() to tell the two apart,
+// the same pattern useFinances.ts / useMeetings.ts / useTasks.ts already use.
+describe('protected updates distinguish forbidden from vanished', () => {
+  it('a non-admin editing someone else is refused, not silently ignored', async () => {
+    caller = CREW // no privileged role
+    const update = hook(() => useUpdateMember())
+    await expect(update.current.mutateAsync({ id: 'm3', fullName: 'Hacked' })).rejects.toThrow(
+      /don't have permission/,
+    )
+    expect(db.members.find((m) => m.id === 'm3')?.full_name).toBe('Cy Deputy')
+  })
+
+  it('an admin editing a member who no longer exists is told so', async () => {
+    caller = PRES
+    const update = hook(() => useUpdateMember())
+    await expect(update.current.mutateAsync({ id: 'nonexistent-member', fullName: 'Ghost' })).rejects.toThrow(
+      /no longer exist/,
+    )
+  })
+
+  it('a non-admin editing a subsystem is refused, not silently ignored', async () => {
+    caller = CREW
+    const update = hook(() => useUpdateSubteam())
+    await expect(update.current.mutateAsync({ key: 'GEOM', description: 'Hacked' })).rejects.toThrow(
+      /don't have permission/,
+    )
+    expect(db.subteams.find((s) => s.key === 'GEOM')?.description).toBeNull()
+  })
+
+  it('an admin editing a subsystem that no longer exists is told so', async () => {
+    caller = PRES
+    const update = hook(() => useUpdateSubteam())
+    await expect(update.current.mutateAsync({ key: 'GHOST', description: 'x' })).rejects.toThrow(
+      /no longer exists/,
+    )
+  })
+
+  it('a non-admin editing a milestone is refused, not silently ignored', async () => {
+    caller = CREW
+    const update = hook(() => useUpdateMilestone())
+    await expect(update.current.mutateAsync({ key: 'MS1-1', maxPoints: 999 })).rejects.toThrow(
+      /don't have permission/,
+    )
+    expect(db.milestones.find((m) => m.key === 'MS1-1')?.max_points).toBe(75)
+  })
+
+  it('an admin editing a milestone that no longer exists is told so', async () => {
+    caller = PRES
+    const update = hook(() => useUpdateMilestone())
+    await expect(update.current.mutateAsync({ key: 'GHOST-MS', maxPoints: 10 })).rejects.toThrow(
+      /no longer exists/,
+    )
   })
 })

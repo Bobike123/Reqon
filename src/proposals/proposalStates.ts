@@ -1,4 +1,4 @@
-import type { ProposalState } from '../data/useProposals.ts'
+import type { ProposalState } from './types.ts'
 
 // A proposal's stages, in the order it moves through them, with the words
 // people see. The stored values are the original topic_state enum, so no row

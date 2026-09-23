@@ -1,5 +1,5 @@
-import type { Milestone, MilestoneSection } from '../../data/useMilestones.ts'
-import type { Task } from '../../data/useTasks.ts'
+import type { Milestone, MilestoneSection } from '../../milestones/types.ts'
+import type { Task } from '../../tasks/types.ts'
 import { draftedCount } from '../milestones/milestoneModel.ts'
 
 // The arithmetic behind the Gantt: where a bar sits and how far along it is.

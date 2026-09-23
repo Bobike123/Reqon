@@ -1153,6 +1153,7 @@ export type Database = {
       }
     }
     Functions: {
+      apply_role_plan: { Args: { p_changes: Json }; Returns: undefined }
       can_delete_records: { Args: never; Returns: boolean }
       can_manage_finances: { Args: never; Returns: boolean }
       can_manage_roles: { Args: never; Returns: boolean }
@@ -1163,6 +1164,16 @@ export type Database = {
       }
       is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
+      promote_proposal: {
+        Args: {
+          p_due_date?: string | null
+          p_owner_id?: string | null
+          p_proposal_id: string
+          p_season_id: string
+          p_state?: Database["public"]["Enums"]["task_state"]
+        }
+        Returns: { created: boolean; task: Database["public"]["Tables"]["tasks"]["Row"] }[]
+      }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }
     }
     Enums: {

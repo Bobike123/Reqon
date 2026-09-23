@@ -1,4 +1,5 @@
-import type { Milestone, MilestoneSection } from '../../data/useMilestones.ts'
+import type { Milestone, MilestoneSection } from '../../milestones/types.ts'
+import { toLocalDateString } from '../../lib/dates.ts'
 
 // A milestone with no published window renders TBC. MS1-7 happens at the Final
 // Event and genuinely has no date yet — an invented deadline is worse than a
@@ -9,7 +10,7 @@ export type Window =
 
 export function submissionWindow(milestone: Milestone, today: Date): Window {
   if (!milestone.due_on) return { kind: 'tbc' }
-  const todayIso = today.toISOString().slice(0, 10)
+  const todayIso = toLocalDateString(today)
   const days = Math.round(
     (Date.parse(`${milestone.due_on}T00:00:00Z`) - Date.parse(`${todayIso}T00:00:00Z`)) / 86_400_000,
   )

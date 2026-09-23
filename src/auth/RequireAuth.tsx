@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import Login from '../pages/Login.tsx'
+import Login from './Login.tsx'
 import { useAuth } from './context.ts'
 
 function Centered({ children }: { children: ReactNode }) {

@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom'
 import { useMilestones } from '../data/useMilestones.ts'
 import { useAttention, useSubteamProgress } from '../data/useNowMetrics.ts'
 import { useProposals } from '../data/useProposals.ts'
+import { useRealtimeProposals } from '../data/useRealtimeProposals.ts'
 import { ProposalsPanel } from '../proposals/ProposalsPanel.tsx'
 import {
   blockedCount,
@@ -66,6 +67,7 @@ export default function Now() {
   const progress = useSubteamProgress()
   const attention = useAttention()
   const proposals = useProposals()
+  const proposalsRealtime = useRealtimeProposals()
 
   const error = milestones.error ?? progress.error ?? attention.error ?? proposals.error
   if (error) {
@@ -238,6 +240,8 @@ export default function Now() {
               // Only 'parked' (the archive) is hidden.
               states={['open', 'agenda', 'decided']}
               emptyHint="Nothing waiting on a decision. Raise a proposal above when something needs one."
+              proposals={proposals}
+              realtime={proposalsRealtime}
             />
           </div>
           </div>

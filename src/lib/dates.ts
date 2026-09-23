@@ -4,10 +4,24 @@
 //
 // `<input type="date">` still wants ISO — use todayIso() for those, never
 // formatDay().
+//
+// Date-only policy (Phase 5 §5.1): a deadline column is a calendar date, not
+// an instant. `date.toISOString().slice(0, 10)` reads a Date's UTC calendar
+// day, which is the WRONG day for part of every 24 hours outside UTC+0 — an
+// evening in a positive-offset time zone is already "tomorrow" in UTC, an
+// early morning in a negative-offset one is still "yesterday". Every
+// calendar-day conversion in this app goes through toLocalDateString (or
+// todayIso, its "right now" convenience) instead, which reads the browser's
+// own local year/month/day.
+
+// A Date, as the LOCAL calendar day it falls on — never through UTC.
+export function toLocalDateString(date: Date): string {
+  return date.toLocaleDateString('en-CA')
+}
 
 // Today in the reader's own time zone, as the YYYY-MM-DD a date input wants.
 export function todayIso(): string {
-  return new Date().toLocaleDateString('en-CA')
+  return toLocalDateString(new Date())
 }
 
 // A stored date as a person reads it: "5 Sept 2026".

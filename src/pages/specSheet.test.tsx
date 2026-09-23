@@ -41,7 +41,10 @@ function deriveVerdict(s: Record<string, unknown>): string {
 }
 
 function makeBuilder(table: string) {
-  const ctx: { op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean } = {
+  const ctx: {
+    op: string; payload?: Record<string, unknown>; filters: Record<string, unknown>; single: boolean
+    range?: [number, number]
+  } = {
     op: 'select', filters: {}, single: false,
   }
   const run = () => {
@@ -59,10 +62,13 @@ function makeBuilder(table: string) {
       : table === 'specs' ? specs
       : []
     for (const [k, v] of Object.entries(ctx.filters)) rows = rows.filter((r) => r[k] === v)
+    if (ctx.range) rows = rows.slice(ctx.range[0], ctx.range[1] + 1)
     return { data: ctx.single ? (rows[0] ?? null) : rows, error: null }
   }
   const b: Record<string, unknown> = {
-    select: () => b, order: () => b, in: () => b, range: () => b, limit: () => b,
+    select: () => b, order: () => b, in: () => b,
+    range: (from: number, to: number) => { ctx.range = [from, to]; return b },
+    limit: () => b,
     eq: (c: string, v: unknown) => { ctx.filters[c] = v; return b },
     update: (p: Record<string, unknown>) => { ctx.op = 'update'; ctx.payload = p; return b },
     insert: (p: Record<string, unknown>) => { ctx.op = 'insert'; ctx.payload = p; return b },
@@ -73,19 +79,28 @@ function makeBuilder(table: string) {
   return b
 }
 
-const supabase = { from: (t: string) => makeBuilder(t) }
+const supabase = {
+  from: (t: string) => makeBuilder(t),
+  // useRealtimeSpecs subscribes on mount; a no-op stub is enough here since
+  // this suite never emits a change through it.
+  channel: () => ({ on: () => ({ subscribe: () => ({}) }), subscribe: () => ({}) }),
+  removeChannel: () => {},
+}
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
   useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: MEMBER, roles: [] }),
 }))
 
 const { default: SpecSheet } = await import('./SpecSheet.tsx')
+const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 function renderSheet() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter><SpecSheet /></MemoryRouter>
+      <SeasonProvider>
+        <MemoryRouter><SpecSheet /></MemoryRouter>
+      </SeasonProvider>
     </QueryClientProvider>,
   )
 }

@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase.ts'
 import type { Database } from '../lib/database.types.ts'
-import { DataError, fetchAllRows } from './errors.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
-import { useCurrentSeason } from './useCurrentSeason.ts'
 
 export type FinanceEntry = Database['public']['Tables']['finance_entries']['Row']
 export type FinanceKind = Database['public']['Enums']['finance_kind']
@@ -19,32 +20,43 @@ export type FinanceDraft = {
 // The season's ledger. Who may read it is decided by finance_read
 // (can_view_finances()); anyone else gets no rows, so the screen does not even
 // ask on their behalf — see Finances.tsx.
-export function useFinanceEntries({ enabled = true }: { enabled?: boolean } = {}) {
+export function useFinanceEntriesForSeason(
+  seasonId: string | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   return useSeasonScopedQuery<FinanceEntry[]>(
-    'finance_entries',
-    (seasonId) =>
-      fetchAllRows('load financial entries', (from, to) =>
-        supabase
-          .from('finance_entries')
-          .select('*')
-          .eq('season_id', seasonId)
-          .order('entry_date', { ascending: false })
-          .order('created_at', { ascending: false })
-          .order('id')
-          .range(from, to),
+    queryKeys.financeEntries(seasonId),
+    seasonId,
+    (sid) =>
+      fetchAllRows(
+        'load financial entries',
+        (row) => row.id,
+        (from, to) =>
+          supabase
+            .from('finance_entries')
+            .select('*')
+            .eq('season_id', sid)
+            .order('entry_date', { ascending: false })
+            .order('created_at', { ascending: false })
+            .order('id')
+            .range(from, to),
       ),
     { enabled },
   )
 }
 
+export function useFinanceEntries({ enabled = true }: { enabled?: boolean } = {}) {
+  return useFinanceEntriesForSeason(useSeasonId(), { enabled })
+}
+
 function useFinanceCache() {
   const queryClient = useQueryClient()
-  const seasonId = useCurrentSeason().data?.id
+  const seasonId = useSeasonId()
   return {
     seasonId,
     invalidate: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'finance_entries') })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.financeEntries(seasonId) })
     },
   }
 }

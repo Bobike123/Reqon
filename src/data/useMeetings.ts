@@ -2,10 +2,11 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import { useAuth } from '../auth/context.ts'
 import { supabase } from '../lib/supabase.ts'
 import type { Database } from '../lib/database.types.ts'
-import { DataError, unwrap } from './errors.ts'
+import { useSeasonId } from '../season/context.ts'
+import { DataError } from '../core/errors.ts'
+import { fetchAllRows, unwrap } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
-import { useCurrentSeason } from './useCurrentSeason.ts'
 
 // Real meetings: a date, a time, a place, an agenda and minutes.
 //
@@ -29,28 +30,36 @@ export type MeetingDraft = {
   attendees: string | null
 }
 
-export function useMeetings() {
-  return useSeasonScopedQuery<Meeting[]>('meetings', async (seasonId) =>
-    unwrap(
+export function useMeetingsForSeason(seasonId: string | undefined): UseQueryResult<Meeting[], Error> {
+  return useSeasonScopedQuery<Meeting[]>(queryKeys.meetings(seasonId), seasonId, (sid) =>
+    fetchAllRows(
       'load meetings',
-      await supabase
-        .from('meetings')
-        .select('*')
-        .eq('season_id', seasonId)
-        .order('held_on', { ascending: false })
-        .order('starts_at', { ascending: false, nullsFirst: false }),
+      (row) => row.id,
+      (from, to) =>
+        supabase
+          .from('meetings')
+          .select('*')
+          .eq('season_id', sid)
+          .order('held_on', { ascending: false })
+          .order('starts_at', { ascending: false, nullsFirst: false })
+          .order('id')
+          .range(from, to),
     ),
-  ) as UseQueryResult<Meeting[], Error> & { seasonId: string | undefined }
+  )
+}
+
+export function useMeetings(): UseQueryResult<Meeting[], Error> {
+  return useMeetingsForSeason(useSeasonId())
 }
 
 function useMeetingCache() {
   const queryClient = useQueryClient()
-  const seasonId = useCurrentSeason().data?.id
+  const seasonId = useSeasonId()
   return {
     seasonId,
     invalidate: () => {
       if (!seasonId) return
-      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonScoped(seasonId, 'meetings') })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.meetings(seasonId) })
     },
   }
 }

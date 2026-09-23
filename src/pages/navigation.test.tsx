@@ -35,8 +35,10 @@ vi.mock('../data/useClauseStatus.ts', () => ({
 vi.mock('../data/useMembers.ts', () => ({
   useMembers: () => ({ data: [{ id: 'm1', full_name: 'Ada Rider' }], isLoading: false, error: null }),
 }))
-vi.mock('../data/useMilestones.ts', () => ({
+vi.mock('../data/useSubteams.ts', () => ({
   useSubteams: () => ({ data: SUBTEAMS, isLoading: false, error: null }),
+}))
+vi.mock('../data/useMilestones.ts', () => ({
   useMilestones: () => ({ data: [{ key: 'MS1-1', name: 'Team Plan', due_on: '2099-11-30', max_points: 75, season_id: 's', ordinal: 1 }], isLoading: false, error: null }),
 }))
 vi.mock('../data/useNowMetrics.ts', () => ({
@@ -49,6 +51,9 @@ vi.mock('../data/useProposals.ts', () => ({
   useSuggestProposal: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
   useUpdateProposal: () => ({ mutate: vi.fn(), isPending: false, error: null }),
   usePromoteProposal: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+}))
+vi.mock('../data/useRealtimeProposals.ts', () => ({
+  useRealtimeProposals: () => 'off',
 }))
 vi.mock('../data/useTasks.ts', () => ({
   useTasks: () => ({ data: [], isLoading: false, error: null, seasonId: 's' }),

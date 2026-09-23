@@ -1,0 +1,73 @@
+# Two independent boundaries, two jobs. A red "frontend" means the React/TS
+# toolchain or the client tests failed; a red "database" means the schema, a
+# migration, RLS, or an RPC failed. Neither job waits on the other.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend (lint, types, tests, coverage, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # .nvmrc is the single source of the Node version; .npmrc's
+      # engine-strict makes `npm ci` refuse anything package.json's engines
+      # does not allow.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (clean, from the lockfile)
+        run: npm ci
+
+      - name: Dependency tree is valid
+        run: npm ls --depth=0
+
+      - name: Known vulnerabilities (high or worse)
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The full Vitest suite, once, with the coverage floors in
+      # vite.config.ts enforced. `npm test` would run the same tests again
+      # without coverage, so it is not repeated here.
+      - name: Tests with coverage gate
+        run: npm run test:coverage
+
+      # Includes scripts/check-bundle-budget.mjs, which fails the build if the
+      # largest JS chunk regresses toward the pre-route-splitting bundle.
+      - name: Production build + bundle budget
+        run: npm run build
+
+  database:
+    name: database (migrations, RLS, RPCs, integrity)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # Needs only Docker (preinstalled on ubuntu-latest) and bash: a
+      # disposable postgres:17 container, scripts/local_auth_shim.sql, every
+      # migration in order, a real two-process race on promote_proposal(),
+      # then every supabase/tests/*.sql file. No Supabase CLI, global or
+      # otherwise, and no hosted project or credentials are involved.
+      - name: Clean database, migrations, SQL tests
+        run: bash scripts/verify_db.sh
