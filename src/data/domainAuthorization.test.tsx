@@ -3,21 +3,27 @@ import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Authorization for proposals, board tasks and meetings — role by role, at the
-// data layer, never by looking at buttons.
+// Authorization for proposals and meetings — who, at the data layer, never by
+// looking at buttons.
 //
-// The fake enforces the policies of
-// 20260108000000_proposals_and_meetings.sql, and behaves like PostgREST does:
-// a refused INSERT is an error (42501), while a refused UPDATE or DELETE simply
+// The fake enforces the rules of 20260108000000_proposals_and_meetings.sql
+// (meetings) and 20260117000000_traceability_and_proposal_commands.sql
+// (proposals: only the proposal's department Head or a Developer may review
+// or promote; President/VP alone may not), and behaves like PostgREST does: a
+// refused command is an error (42501), while a refused UPDATE or DELETE simply
 // matches no rows. supabase/tests/roles_rls_test.sql proves the same matrix
 // against a real Postgres; this file proves the app reacts correctly to it.
 
 type Role = 'president' | 'vicepresident' | 'treasurer' | 'developer'
 
-const caller = { id: 'me', roles: [] as Role[] }
+const caller = { id: 'me', roles: [] as Role[], headOf: [] as string[] }
 const isAdmin = () =>
   caller.roles.some((r) => r === 'president' || r === 'vicepresident' || r === 'developer')
 const canDeleteRecords = () => caller.roles.some((r) => r === 'president' || r === 'developer')
+// can_review_proposal(): the proposal's department Head, or a Developer.
+const canReviewProposal = (proposal?: Record<string, unknown>) =>
+  caller.roles.includes('developer') ||
+  (proposal !== undefined && typeof proposal.subteam_key === 'string' && caller.headOf.includes(proposal.subteam_key))
 
 let db: Record<string, Record<string, unknown>[]>
 // v_current_season returns one row (or none) in real PostgREST, never an
@@ -26,16 +32,11 @@ const CURRENT_SEASON = { id: 'season-a', label: '2026/27' }
 
 function allows(table: string, op: 'insert' | 'update' | 'delete', payload?: Record<string, unknown>) {
   if (table === 'task_proposals') {
-    // is_member() is true for everyone in these tests; the interesting half of
-    // proposal_insert is that raised_by must be the caller.
-    if (op === 'insert') return payload?.raised_by === caller.id
-    if (op === 'update') return isAdmin()
-    return canDeleteRecords()
-  }
-  if (table === 'tasks') {
-    if (op === 'insert') return isAdmin()
-    if (op === 'update') return true
-    return canDeleteRecords()
+    // No INSERT or DELETE policy exists any more: creation is submit_proposal(),
+    // and nothing deletes a proposal. Only the reviewer may UPDATE one.
+    if (op === 'insert' || op === 'delete') return false
+    void payload
+    return canReviewProposal(db.task_proposals[0])
   }
   if (table === 'meetings') {
     if (op === 'delete') return canDeleteRecords()
@@ -111,15 +112,58 @@ function builder(table: string) {
   return b
 }
 
-// Mirrors promote_proposal() (20260110000000_atomic_proposal_promotion.sql):
-// one call, is_admin() checked here exactly as the function checks it itself,
-// idempotent on an already-promoted proposal.
-function promoteProposal(args: Record<string, unknown>) {
-  if (!isAdmin()) {
-    return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
+// Mirrors submit_proposal(): complete input only, author is the caller.
+function submitProposal(args: Record<string, unknown>) {
+  const keys = args.p_clause_keys as string[] | null
+  if (!args.p_title || !args.p_subteam_key || !args.p_due_date || !args.p_milestone_key || !keys?.length) {
+    return { data: null, error: { message: 'A proposal needs every required field.', code: '23514' } }
   }
+  const row = {
+    id: `task_proposals-${db.task_proposals.length + 1}`,
+    season_id: args.p_season_id,
+    title: args.p_title,
+    context: args.p_description ?? null,
+    subteam_key: args.p_subteam_key,
+    due_date: args.p_due_date,
+    milestone_key: args.p_milestone_key,
+    priority: args.p_priority ?? 'normal',
+    state: 'open',
+    outcome: null,
+    archived_at: null,
+    legacy_incomplete: false,
+    raised_by: caller.id,
+  }
+  db.task_proposals.push(row)
+  return { data: row, error: null }
+}
+
+// Mirrors review_proposal(): reviewer only, from the states it allows.
+function reviewProposal(args: Record<string, unknown>) {
   const proposal = db.task_proposals.find((p) => p.id === args.p_proposal_id)
   if (!proposal) return { data: null, error: { message: 'proposal not found', code: '23503' } }
+  if (!canReviewProposal(proposal)) {
+    return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
+  }
+  const next: Record<string, Record<string, unknown>> = {
+    review: { state: 'agenda' },
+    park: { state: 'parked' },
+    reject: { state: 'decided', outcome: 'rejected', archived_at: 'now' },
+    reopen: { state: 'open', outcome: null, archived_at: null },
+  }
+  const change = next[args.p_action as string]
+  if (!change) return { data: null, error: { message: 'unknown action', code: '22023' } }
+  Object.assign(proposal, change)
+  return { data: proposal, error: null }
+}
+
+// Mirrors promote_proposal() (20260117): the proposal's Head or a Developer,
+// idempotent on an already-promoted proposal, copies the proposal's own fields.
+function promoteProposal(args: Record<string, unknown>) {
+  const proposal = db.task_proposals.find((p) => p.id === args.p_proposal_id)
+  if (!proposal) return { data: null, error: { message: 'proposal not found', code: '23503' } }
+  if (!canReviewProposal(proposal)) {
+    return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
+  }
   const existing = db.tasks.find((t) => t.source_proposal === args.p_proposal_id)
   if (existing) return { data: [{ task: existing, created: false }], error: null }
   const task = {
@@ -128,15 +172,15 @@ function promoteProposal(args: Record<string, unknown>) {
     title: proposal.title,
     detail: proposal.context ?? null,
     owner_id: args.p_owner_id ?? proposal.owner_id ?? null,
-    due_date: args.p_due_date ?? null,
-    state: args.p_state ?? 'todo',
+    due_date: proposal.due_date,
+    subteam_key: proposal.subteam_key,
+    milestone_key: proposal.milestone_key,
+    state: 'todo',
     source_proposal: args.p_proposal_id,
     created_by: caller.id,
   }
   db.tasks.push(task)
-  db.task_proposals = db.task_proposals.map((p) =>
-    p.id === args.p_proposal_id ? { ...p, state: 'decided', decided_at: 'now' } : p,
-  )
+  Object.assign(proposal, { state: 'decided', outcome: 'approved', archived_at: 'now' })
   return { data: [{ task, created: true }], error: null }
 }
 
@@ -144,6 +188,12 @@ const supabase = {
   from: (table: string) => builder(table),
   rpc: async (fn: string, args?: Record<string, unknown>) => {
     if (fn === 'promote_proposal') return promoteProposal(args ?? {})
+    if (fn === 'submit_proposal') return submitProposal(args ?? {})
+    if (fn === 'review_proposal') return reviewProposal(args ?? {})
+    if (fn === 'can_review_proposal') {
+      const proposal = db.task_proposals.find((p) => p.id === args?.p_proposal_id)
+      return { data: canReviewProposal(proposal), error: null }
+    }
     return { data: fn === 'can_delete_records' ? canDeleteRecords() : isAdmin(), error: null }
   },
 }
@@ -164,10 +214,9 @@ vi.mock('./useCurrentSeason.ts', () => ({
   useCurrentSeason: () => ({ data: { id: 'season-a', label: '2026/27' } }),
 }))
 
-const { useProposals, usePromoteProposal, useSuggestProposal, useUpdateProposal } = await import(
+const { useProposals, usePromoteProposal, useReviewProposal, useSubmitProposal, useUpdateProposal } = await import(
   './useProposals.ts'
 )
-const { useDeleteTask } = await import('./useTasks.ts')
 const { useCreateMeeting, useDeleteMeeting, useSaveMeetingTemplate, useUpdateMeeting } = await import(
   './useMeetings.ts'
 )
@@ -198,11 +247,19 @@ const PROPOSAL = {
   raised_by: 'someone-else',
   raised_on: '2026-09-01',
   updated_at: '2026-09-01',
+  subteam_key: 'AERO',
+  due_date: '2026-12-01',
+  milestone_key: 'MS1-1',
+  priority: 'normal',
+  outcome: null,
+  archived_at: null,
+  legacy_incomplete: false,
 }
 
 beforeEach(() => {
   caller.id = 'me'
   caller.roles = []
+  caller.headOf = []
   signedIn = true
   db = {
     task_proposals: [{ ...PROPOSAL }],
@@ -213,21 +270,28 @@ beforeEach(() => {
 })
 
 // Every capability, once per role. `true` = the database lets this role do it.
+// Task-level edit/archive/delete authorization moved to its own dedicated
+// suite (useTasks.test.tsx, mirroring supabase/tests/task_authorization_test.sql)
+// once it became actor+resource scoped (ADR-0003) rather than role-only —
+// this file stays focused on proposals and meetings, which are unchanged.
 type Capability =
   | 'suggest'
   | 'review'
   | 'promote'
-  | 'deleteTask'
   | 'createMeeting'
   | 'deleteMeeting'
   | 'editTemplate'
 
+// `head` is an ordinary member who is the Head of the proposal's department
+// (AERO); it is not a role. The President and Vice President keep meeting
+// powers but have NO proposal power of their own (ADR-0003).
 const MATRIX: Record<string, Record<Capability, boolean>> = {
-  member:        { suggest: true, review: false, promote: false, deleteTask: false, createMeeting: false, deleteMeeting: false, editTemplate: false },
-  treasurer:     { suggest: true, review: false, promote: false, deleteTask: false, createMeeting: false, deleteMeeting: false, editTemplate: false },
-  vicepresident: { suggest: true, review: true,  promote: true,  deleteTask: false, createMeeting: true,  deleteMeeting: false, editTemplate: false },
-  president:     { suggest: true, review: true,  promote: true,  deleteTask: true,  createMeeting: true,  deleteMeeting: true,  editTemplate: true },
-  developer:     { suggest: true, review: true,  promote: true,  deleteTask: true,  createMeeting: true,  deleteMeeting: true,  editTemplate: true },
+  member:        { suggest: true, review: false, promote: false, createMeeting: false, deleteMeeting: false, editTemplate: false },
+  head:          { suggest: true, review: true,  promote: true,  createMeeting: false, deleteMeeting: false, editTemplate: false },
+  treasurer:     { suggest: true, review: false, promote: false, createMeeting: false, deleteMeeting: false, editTemplate: false },
+  vicepresident: { suggest: true, review: false, promote: false, createMeeting: true,  deleteMeeting: false, editTemplate: false },
+  president:     { suggest: true, review: false, promote: false, createMeeting: true,  deleteMeeting: true,  editTemplate: true },
+  developer:     { suggest: true, review: true,  promote: true,  createMeeting: true,  deleteMeeting: true,  editTemplate: true },
 }
 
 async function ready() {
@@ -241,25 +305,47 @@ const refusal = /don't have permission/
 for (const [role, may] of Object.entries(MATRIX)) {
   describe(`a ${role}`, () => {
     beforeEach(() => {
-      caller.roles = role === 'member' ? [] : [role as Role]
+      caller.roles = role === 'member' || role === 'head' ? [] : [role as Role]
+      caller.headOf = role === 'head' ? ['AERO'] : []
     })
 
-    it('may suggest a proposal, in their own name only', async () => {
+    it('may raise a complete proposal, in their own name only', async () => {
       await ready()
-      const suggest = hook(() => useSuggestProposal())
-      await expect(suggest.current.mutateAsync({ title: 'New idea' })).resolves.toBeTruthy()
-      // proposal_insert pins raised_by to the caller, so nobody can suggest in
-      // someone else's name.
+      const submit = hook(() => useSubmitProposal())
+      await expect(
+        submit.current.mutateAsync({
+          title: 'New idea',
+          departmentKey: 'AERO',
+          dueDate: '2026-12-01',
+          milestoneKey: 'MS1-1',
+          requirementKeys: ['A.1.1.1'],
+        }),
+      ).resolves.toBeTruthy()
+      // submit_proposal() takes the author from the session, so nobody can
+      // raise one in someone else's name.
       expect(db.task_proposals.at(-1)).toMatchObject({ raised_by: 'me' })
     })
 
-    it(`${may.review ? 'may' : 'may not'} change a proposal's stage or decision`, async () => {
+    it(`${may.review ? 'may' : 'may not'} edit a proposal's note`, async () => {
       await ready()
       const update = hook(() => useUpdateProposal())
-      const run = update.current.mutateAsync({ id: 'p1', state: 'decided' })
+      const run = update.current.mutateAsync({ id: 'p1', decision: 'Worth doing' })
       if (may.review) {
         await expect(run).resolves.not.toThrow()
-        expect(db.task_proposals[0].state).toBe('decided')
+        expect(db.task_proposals[0].decision).toBe('Worth doing')
+      } else {
+        await expect(run).rejects.toThrow(refusal)
+        expect(db.task_proposals[0].decision).toBeNull()
+      }
+    })
+
+    it(`${may.review ? 'may' : 'may not'} reject a proposal`, async () => {
+      await ready()
+      const review = hook(() => useReviewProposal())
+      const run = review.current.mutateAsync({ id: 'p1', action: 'reject' })
+      if (may.review) {
+        await expect(run).resolves.toBeTruthy()
+        expect(db.task_proposals[0]).toMatchObject({ state: 'decided', outcome: 'rejected' })
       } else {
         await expect(run).rejects.toThrow(refusal)
         expect(db.task_proposals[0].state).toBe('open')
@@ -269,31 +355,17 @@ for (const [role, may] of Object.entries(MATRIX)) {
     it(`${may.promote ? 'may' : 'may not'} promote a proposal onto the Board`, async () => {
       await ready()
       const promote = hook(() => usePromoteProposal())
-      const run = promote.current.mutateAsync({
-        proposal: PROPOSAL as never,
-        ownerId: 'someone',
-        dueDate: '2026-10-01',
-      })
+      const run = promote.current.mutateAsync({ proposal: PROPOSAL as never, ownerId: 'someone' })
       if (may.promote) {
         await expect(run).resolves.toBeTruthy()
-        // Assignment and dates are part of promotion, and provenance is kept.
+        // The owner is the promoter's choice; department, deadline and
+        // provenance come from the proposal itself.
         expect(db.tasks.at(-1)).toMatchObject({
           source_proposal: 'p1',
           owner_id: 'someone',
-          due_date: '2026-10-01',
+          due_date: '2026-12-01',
+          subteam_key: 'AERO',
         })
-      } else {
-        await expect(run).rejects.toThrow(refusal)
-        expect(db.tasks).toHaveLength(1)
-      }
-    })
-
-    it(`${may.deleteTask ? 'may' : 'may not'} delete a board task`, async () => {
-      const remove = hook(() => useDeleteTask())
-      const run = remove.current.mutateAsync('t1')
-      if (may.deleteTask) {
-        await expect(run).resolves.not.toThrow()
-        expect(db.tasks).toHaveLength(0)
       } else {
         await expect(run).rejects.toThrow(refusal)
         expect(db.tasks).toHaveLength(1)
@@ -375,20 +447,37 @@ describe('a vice-president, specifically', () => {
   })
 })
 
+describe('two people editing the same meeting', () => {
+  beforeEach(() => {
+    caller.roles = ['vicepresident']
+  })
+
+  it('refuses a save when the meeting changed after it was opened, and says so instead of overwriting', async () => {
+    db.meetings[0] = { ...db.meetings[0], updated_at: '2026-09-10T10:05:00+00:00', notes: 'Theirs.' }
+    const update = hook(() => useUpdateMeeting())
+    const draft = { title: 'Weekly build', heldOn: '2026-09-10', startsAt: null, endsAt: null, location: null, agenda: null, notes: 'Mine.', attendees: null }
+    await expect(update.current.mutateAsync({ id: 'm1', expectedUpdatedAt: '2026-09-10T10:00:00+00:00', ...draft })).rejects.toThrow(/someone else saved it after you opened it/)
+    expect(db.meetings[0]).toMatchObject({ notes: 'Theirs.' })
+    // Opened on the current version: it saves.
+    await expect(update.current.mutateAsync({ id: 'm1', expectedUpdatedAt: '2026-09-10T10:05:00+00:00', ...draft })).resolves.not.toThrow()
+    expect(db.meetings[0]).toMatchObject({ notes: 'Mine.' })
+  })
+})
+
 // A zero-row UPDATE/DELETE is ambiguous on the wire: RLS refused it, OR the row
 // was already gone. The hooks ask the database which one it was. These pin the
 // second half of that mapping — a permitted caller racing someone else's
 // delete must NOT be told "not permitted", and must not be told it saved.
 describe('a row someone else already removed', () => {
   beforeEach(() => {
-    caller.roles = ['president']
+    caller.roles = ['developer']
   })
 
   it('editing a vanished proposal reports it is gone — not a permission refusal, not a save', async () => {
     await ready()
     db.task_proposals = []
     const update = hook(() => useUpdateProposal())
-    const error = await update.current.mutateAsync({ id: 'p1', state: 'decided' }).catch((e: unknown) => e)
+    const error = await update.current.mutateAsync({ id: 'p1', decision: 'too late' }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toMatch(/no longer exists/)
     expect(isPermissionError(error as Error)).toBe(false)
@@ -415,10 +504,8 @@ describe('a row someone else already removed', () => {
     expect(isPermissionError(error as Error)).toBe(false)
   })
 
-  it('deleting a task or meeting that is already gone succeeds — the wanted outcome already holds', async () => {
-    db.tasks = []
+  it('deleting a meeting that is already gone succeeds — the wanted outcome already holds', async () => {
     db.meetings = []
-    await expect(hook(() => useDeleteTask()).current.mutateAsync('t1')).resolves.not.toThrow()
     await expect(hook(() => useDeleteMeeting()).current.mutateAsync('m1')).resolves.not.toThrow()
   })
 })
@@ -434,14 +521,31 @@ describe('signed out', () => {
   it('refuses to promote a proposal', async () => {
     const promote = hook(() => usePromoteProposal())
     await expect(
-      promote.current.mutateAsync({ proposal: PROPOSAL as never, ownerId: 'someone', dueDate: '2026-10-01' }),
+      promote.current.mutateAsync({ proposal: PROPOSAL as never, ownerId: 'someone' }),
     ).rejects.toThrow('not signed in')
     expect(db.tasks).toHaveLength(1)
   })
 
-  it('refuses to suggest a proposal', async () => {
-    const suggest = hook(() => useSuggestProposal())
-    await expect(suggest.current.mutateAsync({ title: 'New idea' })).rejects.toThrow('not signed in')
+  it('refuses to raise a proposal', async () => {
+    const submit = hook(() => useSubmitProposal())
+    await expect(
+      submit.current.mutateAsync({
+        title: 'New idea',
+        departmentKey: 'AERO',
+        dueDate: '2026-12-01',
+        milestoneKey: 'MS1-1',
+        requirementKeys: ['A.1.1.1'],
+      }),
+    ).rejects.toThrow('not signed in')
+    expect(db.task_proposals).toHaveLength(1)
+  })
+
+  it('refuses to send an incomplete proposal at all, before any request', async () => {
+    signedIn = true
+    const submit = hook(() => useSubmitProposal())
+    await expect(
+      submit.current.mutateAsync({ title: 'No details', departmentKey: '', dueDate: '', milestoneKey: '', requirementKeys: [] }),
+    ).rejects.toThrow(/needs a department, a deadline, a milestone, at least one requirement/)
     expect(db.task_proposals).toHaveLength(1)
   })
 })

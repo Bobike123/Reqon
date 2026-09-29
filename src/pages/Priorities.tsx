@@ -2,14 +2,21 @@ import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
 import { Link } from 'react-router-dom'
+import { mergeSearchParams } from '../lib/searchParams.ts'
 import { useSetClauseStatus } from '../data/useClauseStatus.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useAttention, type Attention } from '../data/useNowMetrics.ts'
-import { useUpdateTask } from '../data/useTasks.ts'
+import { canEditTask, canReassignTaskOwner } from '../auth/permissions.ts'
+import { useTaskActor } from '../data/useTaskActor.ts'
+import { useTasks, useUpdateTask } from '../data/useTasks.ts'
+import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
+import { useRealtimeClauseStatus } from '../data/useRealtimeClauseStatus.ts'
+import { useUrlParams } from '../lib/useUrlParams.ts'
 
 // What bites first. The list, the membership rules and the `reason` labels all
-// come from v_attention — the scoring is SQL's job and is not repeated here.
-// See docs/now-metrics.sql, final block.
+// come from attention(p_season, p_today) — the scoring is SQL's job and is not
+// repeated here, and it never lists an archived task. p_today is the reader's
+// own day (see useNowMetrics.ts). See docs/now-metrics.sql, final block.
 
 // Presentation order only. This does not decide WHICH rows appear or WHY they
 // appear (the view does both); it decides what a human should read first.
@@ -17,14 +24,16 @@ const REASON_ORDER: Record<string, number> = {
   blocked: 0,
   'score-killer': 1,
   overdue: 2,
-  penalty: 3,
-  starred: 4,
+  urgent: 3,
+  penalty: 4,
+  starred: 5,
 }
 
 const REASON_STYLE: Record<string, string> = {
   blocked: 'bg-red-700 text-white',
   'score-killer': 'bg-red-700 text-white',
   overdue: 'bg-red-100 text-red-900',
+  urgent: 'bg-red-100 text-red-900',
   penalty: 'bg-amber-500 text-amber-950',
   starred: 'bg-slate-200 text-slate-800',
 }
@@ -33,15 +42,42 @@ const REASON_HELP: Record<string, string> = {
   blocked: 'Waiting on something or someone',
   'score-killer': 'Non-compliance scores NC',
   overdue: 'Past its due date',
+  urgent: 'Marked as urgent priority',
   penalty: 'Risks MP / SP / NP penalty points',
   starred: 'Flagged by the team',
 }
 
+// The reasons a row can be listed for, in reading order — also the filter
+// chips (?reason=…), which is where the Now screen's Overdue and Blocked tiles land.
+const REASONS = Object.keys(REASON_ORDER).sort((a, b) => REASON_ORDER[a] - REASON_ORDER[b])
+
 export default function Priorities() {
+  useRealtimeTasks()
+  useRealtimeClauseStatus()
   const attention = useAttention()
   const members = useMembers()
   const setClauseStatus = useSetClauseStatus()
   const updateTask = useUpdateTask()
+  const tasks = useTasks()
+  const actor = useTaskActor()
+  const taskById = new Map((tasks.data ?? []).map((t) => [t.id, t]))
+  const [params, setParams] = useUrlParams()
+  // New owners are active members only — the database refuses anyone else for a
+  // task, and a retired member is not a sensible owner for a rule either. A
+  // current retired owner stays visible (see ownerChoices).
+  const activeMembers = (members.data ?? []).filter((m) => m.status === 'active')
+  const ownerChoices = (current: string | null) =>
+    current && !activeMembers.some((m) => m.id === current)
+      ? [...activeMembers, ...(members.data ?? []).filter((m) => m.id === current).map((m) => ({ ...m, full_name: `${m.full_name} (no longer active)` }))]
+      : activeMembers
+
+  // The same per-task rule the Board uses: only someone who may reassign THIS
+  // task is offered the owner control. The database refuses everyone else too.
+  const mayAssign = (row: Attention): boolean => {
+    if (row.kind === 'clause') return actor !== null && actor.status === 'active'
+    const task = row.ref ? taskById.get(row.ref) : undefined
+    return actor !== null && task !== undefined && canEditTask(actor, task) && canReassignTaskOwner(actor, task)
+  }
 
   const error = attention.error ?? members.error
   const writeError = setClauseStatus.error ?? updateTask.error
@@ -74,7 +110,10 @@ export default function Priorities() {
     )
   }
 
-  const rows = [...(attention.data ?? [])].sort(
+  const rawReason = params.get('reason')
+  const reason = rawReason && REASONS.includes(rawReason) ? rawReason : null
+  const allRows = attention.data ?? []
+  const rows = [...allRows.filter((row) => reason === null || row.reason === reason)].sort(
     (a, b) =>
       (REASON_ORDER[a.reason ?? ''] ?? 99) - (REASON_ORDER[b.reason ?? ''] ?? 99),
   )
@@ -86,15 +125,43 @@ export default function Priorities() {
         description="Everything that bites first: blocked rules, score-killers, overdue tasks, penalties and starred items."
       />
 
+      <div role="group" aria-label="Show only one reason" className="mb-3 flex flex-wrap gap-1 rounded-md bg-slate-50 p-1" data-testid="priority-reasons">
+        {[null, ...REASONS].map((r) => {
+          const n = r === null ? allRows.length : allRows.filter((row) => row.reason === r).length
+          return (
+            <button
+              key={r ?? 'all'}
+              type="button"
+              aria-pressed={reason === r}
+              onClick={() => setParams((current) => mergeSearchParams(current, { reason: r }), { replace: true })}
+              className={`min-h-11 rounded px-3 py-1.5 text-xs font-medium capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 ${
+                reason === r ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {r ?? 'Everything'} <span className="font-normal opacity-80">({n})</span>
+            </button>
+          )
+        })}
+      </div>
+
       {writeError && (
         <p role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
           Could not save that change: {writeError.message}
         </p>
       )}
 
-      {attention.isLoading && <p className="text-slate-600">Loading…</p>}
+      {attention.isLoading && <p role="status" className="text-slate-600">Loading…</p>}
 
-      {!attention.isLoading && rows.length === 0 && (
+      {!attention.isLoading && rows.length === 0 && reason !== null && allRows.length > 0 && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700" data-testid="priority-reason-empty">
+          Nothing is listed as “{reason}” right now.{' '}
+          <button type="button" className="underline underline-offset-2" onClick={() => setParams((current) => mergeSearchParams(current, { reason: null }), { replace: true })}>
+            Show everything
+          </button>
+        </p>
+      )}
+
+      {!attention.isLoading && allRows.length === 0 && (
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center" data-tutorial="priorities-list">
           <p className="font-medium text-slate-800">Nothing is biting right now.</p>
           <p className="mt-1 text-sm text-slate-600">
@@ -142,7 +209,7 @@ export default function Priorities() {
                 </Link>
               ) : (
                 <Link
-                  to="/board"
+                  to={`/board?task=${encodeURIComponent(row.ref ?? '')}`}
                   className="rounded text-xs font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
                 >
                   Open on Board
@@ -155,25 +222,30 @@ export default function Priorities() {
             </div>
 
             <div className="mt-1.5 flex items-center gap-2 lg:mt-0 lg:shrink-0">
-              <label
-                className="text-xs text-slate-600"
-                htmlFor={`owner-${row.clause_key ?? row.ref}`}
-              >
-                Owner
-              </label>
-              <select
-                id={`owner-${row.clause_key ?? row.ref}`}
-                value={row.owner_id ?? ''}
-                onChange={(e) => assignOwner(row, e.target.value || null)}
-                className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-              >
-                <option value="">Unassigned</option>
-                {(members.data ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.full_name}
-                  </option>
-                ))}
-              </select>
+              {mayAssign(row) ? (
+                <>
+                  <label className="text-xs text-slate-600" htmlFor={`owner-${row.clause_key ?? row.ref}`}>
+                    Owner
+                  </label>
+                  <select
+                    id={`owner-${row.clause_key ?? row.ref}`}
+                    value={row.owner_id ?? ''}
+                    onChange={(e) => assignOwner(row, e.target.value || null)}
+                    className="min-h-11 w-full min-w-0 max-w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 sm:w-auto sm:max-w-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+                  >
+                    <option value="">Unassigned</option>
+                    {ownerChoices(row.owner_id).map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <p className="text-xs text-slate-600" data-testid={`owner-readonly-${row.clause_key ?? row.ref}`}>
+                  Owner: {(members.data ?? []).find((m) => m.id === row.owner_id)?.full_name ?? 'Unassigned'}
+                </p>
+              )}
             </div>
           </li>
         ))}

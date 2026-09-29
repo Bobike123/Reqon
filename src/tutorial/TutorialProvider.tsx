@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { usePermissions } from '../auth/usePermissions.ts'
+import { useTaskActor } from '../data/useTaskActor.ts'
 import { TutorialContext, type TutorialContextValue } from './context.ts'
-import { TUTORIAL_STEPS, type TutorialStep } from './steps.ts'
+import { TUTORIAL_STEPS, type TourViewer, type TutorialStep } from './steps.ts'
 import { readTutorialRecord, writeTutorialRecord, type TutorialRecord } from './storage.ts'
 import { buildTour, tourMenu, type TourSelection } from './tour.ts'
 import { TutorialChooser } from './TutorialChooser.tsx'
@@ -26,6 +27,14 @@ export function TutorialProvider({
   searchTimeoutMs?: number
 }) {
   const can = usePermissions()
+  // Resource-aware Head authority (ADR-0003) does not come from a privileged
+  // role, so it is not in Permissions — headOf is the same derivation Board,
+  // Gantt and Proposals already use.
+  const actor = useTaskActor()
+  const viewer: TourViewer = useMemo(
+    () => ({ ...can, isHeadOfDepartment: (actor?.headOf.length ?? 0) > 0 }),
+    [can, actor],
+  )
   // The running tour, fixed when it starts. Roles refresh in the background; a
   // tour that re-filtered itself half-way through could skip or repeat steps.
   const [tour, setTour] = useState<TutorialStep[] | null>(null)
@@ -73,7 +82,7 @@ export function TutorialProvider({
 
   const start = useCallback(
     (selection: TourSelection = { kind: 'full' }) => {
-      const chosen = buildTour(steps, can, selection)
+      const chosen = buildTour(steps, viewer, selection)
       if (chosen.length === 0) return
       // Started from the chooser, focus later goes back to whatever opened the
       // chooser — not to the chooser's own button, which is about to go.
@@ -81,7 +90,7 @@ export function TutorialProvider({
       setChooserOpen(false)
       show(chosen, 0)
     },
-    [steps, can, chooserOpen, show],
+    [steps, viewer, chooserOpen, show],
   )
 
   const next = useCallback(() => {
@@ -102,7 +111,7 @@ export function TutorialProvider({
   }, [])
 
   const step = tour?.[stepIndex] ?? null
-  const menu = useMemo(() => tourMenu(steps, can), [steps, can])
+  const menu = useMemo(() => tourMenu(steps, viewer), [steps, viewer])
 
   const value = useMemo<TutorialContextValue>(
     () => ({
@@ -128,7 +137,15 @@ export function TutorialProvider({
 
   return (
     <TutorialContext.Provider value={value}>
-      {children}
+      {/* TutorialOffer.tsx claims to "never block the page", but it is a fixed
+          bottom banner — on a short screen (a narrow viewport, or any page
+          with little content) it can sit directly over the only visible
+          control, intercepting real clicks. Reserving bottom space while it
+          is showing keeps that invariant true regardless of page height,
+          instead of only "usually" true. Sized for the offer's own two
+          breakpoints (full-width card on a phone, a smaller corner card from
+          sm: up); real-browser Phase 13 verification caught the mobile case. */}
+      <div className={value.offerVisible ? 'pb-44 sm:pb-32' : undefined}>{children}</div>
       {value.offerVisible && <TutorialOffer />}
       {/* Before the overlay on purpose: when a tour starts from the chooser,
           the chooser hands focus back first and the overlay's card takes it

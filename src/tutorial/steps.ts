@@ -1,5 +1,14 @@
 import type { Permissions } from '../auth/permissions.ts'
 
+// What an audience check needs: the privileged-role permissions everyone
+// already mirrors, plus whether this person heads at least one active
+// department — resource-aware authority (ADR-0003) that does not come from
+// any privileged role. Built once in TutorialProvider.tsx from
+// usePermissions() and useTaskActor()'s `headOf`; a Head of several
+// departments is still just `true` here, since no tour step is specific to
+// one department.
+export type TourViewer = Permissions & { isHeadOfDepartment: boolean }
+
 export type Side = 'bottom' | 'top' | 'right' | 'left'
 
 // The parts of the tour, in the order they run: one per screen, so someone who
@@ -9,10 +18,12 @@ export const CHAPTERS = [
   { id: 'now', label: 'Now' },
   { id: 'priorities', label: 'Priorities' },
   { id: 'register', label: 'Register' },
+  { id: 'book', label: 'Requirements Book' },
   { id: 'milestones', label: 'Milestones' },
   { id: 'gantt', label: 'Gantt' },
   { id: 'board', label: 'Board' },
   { id: 'proposals', label: 'Task proposals' },
+  { id: 'archive', label: 'Archive' },
   { id: 'meetings', label: 'Meetings' },
   { id: 'specs', label: 'Spec sheet' },
   { id: 'finances', label: 'Finances' },
@@ -42,7 +53,15 @@ export const AUDIENCES = {
   // The Developer holds every power in the club, so this is the one audience
   // that asks which role someone holds rather than what they may do.
   developer: { label: 'Developer', includes: (can) => can.hasRole('developer') },
-} satisfies Record<string, { label: string; includes: (can: Permissions) => boolean }>
+  // Resource-aware, not role-aware (ADR-0003): true for anyone who heads at
+  // least one active department, whether or not they also hold a privileged
+  // role. A Head with no privileged role must still see these.
+  head: { label: 'Head of a department', includes: (can) => can.isHeadOfDepartment },
+  headOrDeveloper: {
+    label: 'A department Head, or Developer',
+    includes: (can) => can.isHeadOfDepartment || can.hasRole('developer'),
+  },
+} satisfies Record<string, { label: string; includes: (can: TourViewer) => boolean }>
 
 export type Audience = keyof typeof AUDIENCES
 
@@ -108,23 +127,23 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'now-instruments',
     title: 'Now — today at a glance',
-    body: 'The next deadline, how many obligations are resolved, and what is overdue, blocked or waiting for a meeting. Click any tile to open the screen behind the number.',
+    body: 'Overdue and blocked work, your open tasks, open proposals and the next submission. Each tile opens its list, already filtered. “…” is still loading; “—” could not load — never zero.',
   },
   {
-    id: 'now-subsystems',
+    id: 'now-departments',
     chapter: 'now',
     route: '/',
-    target: 'now-subsystems',
-    title: 'Progress by subsystem',
-    body: 'How many of each subsystem’s duties are resolved, and how many are blocked. Click a row to open the Register already filtered to that subsystem.',
+    target: 'now-departments',
+    title: 'Departments',
+    body: 'Two separate measures: Work (Board tasks done) and Requirements (rules compliant, verified or not applicable). Finishing tasks never marks a rule compliant. Open a row for its work and links.',
   },
   {
-    id: 'now-proposals',
+    id: 'now-actions',
     chapter: 'now',
     route: '/',
-    target: 'now-proposals',
-    title: 'Proposals, right from Now',
-    body: 'Suggested, under-review and decided proposals show here too, so you can suggest one without leaving Now. It is the same list as the Proposals screen.',
+    target: 'now-actions',
+    title: 'What to do next',
+    body: 'Short lists of overdue, blocked and soon-due work, your tasks and your proposals, each with owner, department, date and a link to the card. Proposals are raised on the Proposals screen.',
   },
 
   // ---------------------------------------------------------------- Priorities
@@ -168,7 +187,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/register',
     target: 'register-grouping',
     title: 'The same rules, re-filed',
-    body: 'Group by subsystem, kind of work, milestone, owner, status or book order. “Owner” is the one to use before a meeting.',
+    body: 'Group by department, kind of work, milestone, owner, status or book order. “Owner” is the one to use before a meeting.',
   },
   {
     id: 'register-row',
@@ -176,7 +195,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/register',
     target: 'register-row',
     title: 'One rule',
-    body: 'The bold reference is what the book prints. Red NC RISK means breaking it scores zero; amber PENALTY means points lost. Dimmed rules are parked until the Final Event.',
+    body: 'The bold reference is what the book prints. Tap a label for its meaning: NC RISK scores zero, PENALTY costs points, SPORTING is a kind of rule. PARKED means Final Event work — not an archived department.',
   },
   {
     id: 'register-controls',
@@ -185,6 +204,25 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'register-row-controls',
     title: 'Recording progress',
     body: 'Set the status (Open, In progress, Compliant, Verified, Blocked or Not applicable) and an owner. Evidence saves when you click away. ☆ stars the rule and puts it on Priorities.',
+  },
+
+  {
+    id: 'register-links',
+    chapter: 'register',
+    route: '/register',
+    target: 'register-links',
+    title: 'Linked work and the book',
+    body: '“n / m linked tasks done” counts the Board tasks on a rule; “Assign existing tasks” links yours. Done tasks never make it compliant — you decide. “Open in Requirements Book” shows its page beside the list.',
+  },
+
+  // ---------------------------------------------------------------------- Book
+  {
+    id: 'book',
+    chapter: 'book',
+    route: '/book',
+    target: 'book-header',
+    title: 'The Requirements Book',
+    body: 'This season’s regulations, drawn page by page. A rule’s link opens its recorded page, else the start; Previous, Next and the page box turn pages. “Open the PDF in a new tab” always works.',
   },
 
   // ---------------------------------------------------------------- Milestones
@@ -220,7 +258,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/gantt',
     target: 'gantt-chart',
     title: 'Gantt — the season on one timeline',
-    body: 'Every submission as a bar across the months, with today marked in red. A bar fills from the left as the work under it is finished. “TBC” means no window has been published.',
+    body: 'Every submission as a bar across the months; today is the dashed line. The Legend button explains each shape. A bar fills as linked work is done; “TBC” means no date is published — none is guessed.',
   },
   {
     id: 'gantt-expand',
@@ -228,7 +266,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/gantt',
     target: 'gantt-chart',
     title: 'Three levels',
-    body: 'Open a submission to see its sections, and a section to see its subtasks. A section with no dated subtasks borrows the submission’s window rather than inventing one.',
+    body: 'Open a submission for its sections and its unsectioned work, and a section for its tasks. A task with a start and a deadline is a period; with only a deadline it is a dot. Undated tasks say so.',
   },
   {
     id: 'gantt-tasks',
@@ -243,9 +281,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     chapter: 'gantt',
     route: '/gantt',
     target: 'gantt-chart',
-    audience: 'admins',
-    title: 'Adding work to a section',
-    body: '“Add to Board” creates an ordinary task already linked to that section, and the dropdown beside it adopts a task the Board already has. Unlink leaves the task on the Board.',
+    title: 'Linking work to a section',
+    body: 'The Gantt never creates tasks. Adopt a Board task you own or head, drag it onto a section, or drag its bar to change dates — “Move to” and the date fields in its details do the same by keyboard. Unlink keeps it on the Board.',
   },
 
   // --------------------------------------------------------------------- Board
@@ -255,7 +292,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/board',
     target: 'board-lanes',
     title: 'Board — the team’s tasks',
-    body: 'Six lanes: Urgent, To do, In progress, Blocked, Done and Cancelled. On a wide screen they sit side by side. Nothing is dragged, so it works the same on a phone in the workshop.',
+    body: 'Five lanes: To do, In progress, Blocked, Done and Cancelled. A red “Urgent” badge marks priority separately from the lane — a task can be Blocked and Urgent. Nothing is dragged, so it works the same on a phone in the workshop.',
   },
   {
     id: 'board-card',
@@ -263,7 +300,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/board',
     target: 'board-card',
     title: 'A task',
-    body: 'Move a task with its first dropdown and give it an owner with the second. A red due date means overdue. “From proposal” names the meeting proposal it came from.',
+    body: 'The card shows department, owner, deadline, milestone and requirement count. Move it with the dropdown (if you may); open Details for the description, links and editor. “From proposal” links to where it came from.',
   },
 
   // ------------------------------------------------------------------ Meetings
@@ -273,7 +310,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/proposals',
     target: 'proposal-raise',
     title: 'Task proposals — suggest work',
-    body: 'Anything you think the club should take on. A short title is enough; add context if it helps. Anyone on the roster can suggest, here or on Now.',
+    body: 'Anything the club should take on. Open “Raise a proposal” and give its department, deadline, milestone and requirement so its Head can decide. A folded-away draft is kept.',
   },
   {
     id: 'proposal-flow',
@@ -281,7 +318,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/proposals',
     target: 'proposal-flow',
     title: 'How a proposal moves',
-    body: 'Suggested, then Under review, then Decided, with how many proposals sit at each stage. Parked sets one aside without deleting it.',
+    body: 'Suggested, then Under review, then Decided (approved or rejected), with how many proposals sit at each stage. Parked sets one aside without deleting it.',
   },
   {
     id: 'proposal-card',
@@ -289,35 +326,52 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/proposals',
     target: 'proposal-card',
     title: 'A proposal',
-    body: 'Who suggested it, when, and where it stands. As a member you read it here and watch the stage change; the board does the deciding.',
+    body: 'Who suggested it, its department, deadline and milestone, and where it stands. You read it here and watch the stage change; the Head of its department does the deciding.',
   },
   {
     id: 'proposal-decision',
     chapter: 'proposals',
     route: '/proposals',
     target: 'proposal-decision',
-    audience: 'admins',
-    title: 'Recording the decision',
-    body: 'The stage, the owner and the club’s answer. It saves when you click away and stays editable at every stage, so a decision can be corrected later.',
+    audience: 'headOrDeveloper',
+    title: 'Reviewing a proposal',
+    body: 'Review opens a dialog: fix the details, then Approve, Park or Reject. Rejected work moves to History and can be reopened; parked work stays in the queue, marked. Only the Head of its department, or a Developer, can do this.',
   },
   {
     id: 'proposal-promote',
     chapter: 'proposals',
     route: '/proposals',
     target: 'proposal-promote',
-    audience: 'admins',
+    audience: 'headOrDeveloper',
     title: 'Promoting a proposal',
-    body: '“Promote to task” asks for an owner, a due date and a starting lane, then puts it on the Board. A proposal promotes once, and the task remembers where it came from.',
+    body: 'Approve and create task puts it on the Board with the proposal\'s department, deadline, priority, milestone and requirements. A proposal is approved once, and the task remembers where it came from.',
   },
 
   {
-    id: 'board-delete',
+    id: 'board-edit',
     chapter: 'board',
     route: '/board',
     target: 'board-card',
-    audience: 'president',
-    title: 'Deleting a task',
-    body: 'Only you and a Developer can delete a task, and the confirmation names the one that will go. A deleted task takes its history with it; the proposal it came from stays.',
+    title: 'Who can edit a task',
+    body: 'Its owner, its department’s Head, or a Developer; only the Head or a Developer can reassign it. If a change doesn’t save, that’s why. Nothing is deleted: work is archived, and a Done task left alone archives itself after 24 hours.',
+  },
+
+  // ------------------------------------------------------------------- Archive
+  {
+    id: 'archive',
+    chapter: 'archive',
+    route: '/archive',
+    target: 'archive-filters',
+    title: 'Archive — finished and decided work',
+    body: 'Archived tasks and proposals that were approved or rejected, a page at a time. Search by title and filter by department, owner and status. Everyone can read it; nothing is deleted here.',
+  },
+  {
+    id: 'archive-list',
+    chapter: 'archive',
+    route: '/archive',
+    target: 'archive-list',
+    title: 'Where it came from',
+    body: 'Each task links to the proposal it came from, and each approved proposal to its task. The department Head or a Developer can restore an archived task; restoring a finished one reopens it.',
   },
 
   // ------------------------------------------------------------------ Meetings
@@ -327,7 +381,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/meetings',
     target: 'meeting-list',
     title: 'Meetings — what was decided',
-    body: 'Every club meeting with its date, place, agenda and minutes. Everyone reads these; the board writes them. This screen used to show proposals, which now have their own.',
+    body: 'Every club meeting with its date, place, agenda and minutes, formatted as headings and lists. Everyone reads these; the board writes them. Proposals have their own screen.',
   },
   {
     id: 'meeting-new',
@@ -336,7 +390,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'meeting-new',
     audience: 'admins',
     title: 'Calling a meeting',
-    body: 'A name and a date are required; time, place, agenda and minutes are not. The agenda starts from the club’s template, and you can change it for this meeting only.',
+    body: 'A name and a date are required; the rest is optional. The agenda starts from the default agenda and can change for this meeting only. Preview shows how it will read.',
   },
   {
     id: 'meeting-template',
@@ -345,7 +399,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'meeting-template',
     audience: 'president',
     title: 'The default agenda',
-    body: 'Every new meeting starts from this text. Editing it changes nothing about meetings that already exist, and only you and a Developer can change it.',
+    body: 'Every new meeting starts from this. “Edit default agenda” opens it in a dialog; unsaved text is kept if you close it. Existing meetings never change. Only you and a Developer can edit it.',
   },
 
   // ---------------------------------------------------------------- Spec sheet
@@ -363,7 +417,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/specs',
     target: 'spec-row',
     title: 'Entering a measurement',
-    body: 'Type the measured value and the verdict comes from the rule’s own limit. Nobody types pass or fail by hand, and an empty box means “not measured”, never a pass.',
+    body: 'Each row sets our value against the ideal and the rule’s limit; the outline and its words give the verdict. Open a row to measure: Review, then Save measurement. Nobody types pass or fail by hand.',
   },
 
   // ------------------------------------------------------------------ Finances
@@ -511,13 +565,13 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     body: 'First create their login in the Supabase dashboard (Authentication → Users), then paste its UUID here with their name. The app can’t create logins: that needs a secret key.',
   },
   {
-    id: 'settings-subsystems',
+    id: 'settings-departments',
     chapter: 'settings',
     route: '/settings',
-    target: 'settings-subsystems',
+    target: 'settings-departments',
     audience: 'admins',
-    title: 'Subsystems',
-    body: 'Rename a subsystem, choose its lead and describe what it covers. Each change saves when you click away or pick from the list.',
+    title: 'Departments',
+    body: 'Choose Edit on a department to rename or describe it, appoint its Head or park it, then Save. Reorder, create, or archive one — up to 10 active. Archiving never deletes; restore it from Archived.',
   },
   {
     id: 'settings-milestones',
@@ -534,7 +588,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/settings',
     target: 'settings-handover',
     title: 'Handover notes',
-    body: 'One note per subsystem, for whoever takes it over next year. Anyone can write here, and a note saves when you click away.',
+    body: 'One note per department, for whoever takes it over next year. Anyone can write here, and a note saves when you click away.',
   },
   {
     id: 'settings-seasons',

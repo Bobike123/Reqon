@@ -1,68 +1,64 @@
-import type { Member } from '../../data/useMembers.ts'
 import type { Milestone, MilestoneSection } from '../../data/useMilestones.ts'
-import type { Task, TaskState } from '../../data/useTasks.ts'
+import type { Task } from '../../data/useTasks.ts'
 import { formatDay } from '../../lib/dates.ts'
-import { sectionsFor, submissionWindow } from '../milestones/milestoneModel.ts'
-import { Bar, ROW, STICKY_LABEL, Track } from './GanttChart.tsx'
+import { sectionsFor } from '../milestones/milestoneModel.ts'
+import { Bar, Marker, ROW, STICKY_LABEL, Track } from './GanttChart.tsx'
 import { SectionRow } from './SectionRow.tsx'
-import { milestonePercent, milestoneSpan, type Span } from './ganttModel.ts'
+import { UnsectionedRow } from './UnsectionedRow.tsx'
+import type { GanttEnv } from './ganttEnv.ts'
+import { milestoneMarks, milestoneSummary } from './ganttMarks.ts'
+import { lensProgress, milestoneProgress, progressLabel, type ProgressRow } from './ganttProgress.ts'
 
-// One submission window: its bar, its percent-done badge, and — when open —
-// its sections (Phase 6 §6.3).
+// One submission: its window bar and deadline, TWO progress figures when a
+// department filter is on (the overall one, which never changes with the filter,
+// and the filtered one, labelled with the department), and — when open — its
+// sections and its unsectioned work.
 export function MilestoneRow({
   milestone,
   sections,
   tasks,
-  unlinked,
-  range,
-  todayLeft,
+  progressTasks,
   open,
   onToggle,
   openSections,
   onToggleSection,
-  members,
   onDraftedChange,
-  canCreateTask,
-  addingTask,
-  onCreateTask,
-  onLinkTask,
-  onMoveTask,
-  onOwnerTask,
-  onUnlinkTask,
-  now,
+  env,
 }: {
   milestone: Milestone
   sections: MilestoneSection[]
+  // Active tasks: the rows that are listed.
   tasks: Task[]
-  unlinked: Task[]
-  range: Span
-  todayLeft: number | null
+  // Active AND archived tasks: what progress is counted from.
+  progressTasks: ProgressRow[]
   open: boolean
   onToggle: () => void
   openSections: ReadonlySet<string>
-  onToggleSection: (sectionId: string) => void
-  members: Member[]
+  onToggleSection: (key: string) => void
   onDraftedChange: (sectionId: string, isDrafted: boolean) => void
-  canCreateTask: boolean
-  addingTask: boolean
-  onCreateTask: (sectionId: string, title: string) => void
-  onLinkTask: (sectionId: string, taskId: string) => void
-  onMoveTask: (taskId: string, state: TaskState) => void
-  onOwnerTask: (taskId: string, ownerId: string | null) => void
-  onUnlinkTask: (taskId: string) => void
-  // Passed in rather than read with `new Date()` here, so this component
-  // stays deterministic under a test that pins the moment (Phase 5 §5.1).
-  now: Date
+  env: GanttEnv
 }) {
   const mySections = sectionsFor(sections, milestone.key)
-  const span = milestoneSpan(milestone)
-  const window = submissionWindow(milestone, now)
-  const percent = milestonePercent(mySections, tasks)
+  const marks = milestoneMarks(milestone, env.today)
+  const progress = milestoneProgress(mySections, progressTasks, milestone.key)
+  const words = progressLabel(progress)
+  const lens = env.lens.active
+    ? lensProgress(mySections, progressTasks.filter(env.lens.matches), milestone.key)
+    : null
+  const late = marks.passed && (progress.percent ?? 0) < 100
+  const unsectionedKey = `unsectioned:${milestone.key}`
+
+  const badge =
+    progress.basis === 'tasks'
+      ? `Overall ${progress.percent}%`
+      : progress.basis === 'drafted'
+        ? `${progress.done}/${progress.total} drafted`
+        : 'No linked work'
 
   return (
     <li className="border-b border-slate-100 py-1.5 last:border-0" data-testid={`gantt-milestone-${milestone.key}`}>
       <div className={`${ROW} rounded bg-slate-100 py-0.5`}>
-        <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-slate-100 pr-2`}>
+        <div className={`${STICKY_LABEL} flex flex-wrap items-center gap-1.5 bg-slate-100 pr-2`}>
           <button
             type="button"
             aria-expanded={open}
@@ -75,36 +71,60 @@ export function MilestoneRow({
             <span className="font-mono text-xs">{milestone.key}</span>
             <span className="font-normal">{milestone.name}</span>
           </button>
-          <span
-            className={`ml-auto shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
-              percent === 100
-                ? 'bg-green-100 text-green-800'
-                : window.kind === 'dated' && window.passed
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-slate-200 text-slate-700'
-            }`}
-          >
-            {percent}%
+          <span className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">
+            <span
+              data-testid={`gantt-overall-${milestone.key}`}
+              title={words}
+              className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                progress.percent === 100 ? 'bg-green-100 text-green-800' : late ? 'bg-red-100 text-red-800' : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {badge}
+              {late ? ' · deadline passed' : ''}
+            </span>
+            {lens && (
+              <span
+                data-testid={`gantt-lens-${milestone.key}`}
+                className="rounded border border-slate-400 bg-white px-1.5 py-0.5 text-xs text-slate-800"
+              >
+                {lens.basis === 'tasks' ? `${env.lens.name}: ${lens.done} of ${lens.total} done` : `${env.lens.name}: no linked work`}
+              </span>
+            )}
           </span>
         </div>
 
-        <Track today={todayLeft}>
-          {span && (
+        <Track
+          today={env.todayLeft}
+          label={marks.deadline === null ? (marks.opensOnly ? `Opens ${formatDay(marks.opensOnly)} · deadline TBC` : 'Deadline TBC') : undefined}
+          summary={milestoneSummary(milestone, env.today, words)}
+        >
+          {marks.window && (
             <Bar
-              span={span}
-              range={range}
-              percent={percent}
-              tone={window.kind === 'dated' && window.passed && percent < 100 ? 'bg-red-600' : 'bg-slate-700'}
-              title={`${milestone.key}: ${span.from === span.to ? '' : `${formatDay(span.from)} → `}${formatDay(
-                span.to,
-              )} · ${percent}% done`}
+              span={marks.window}
+              range={env.range}
+              percent={progress.percent ?? 0}
+              tone={late ? 'bg-red-600' : 'bg-slate-700'}
+              title={`${milestone.key}: ${
+                marks.window.from === marks.window.to ? '' : `${formatDay(marks.window.from)} → `
+              }${formatDay(marks.window.to)} · ${words}`}
+            />
+          )}
+          {marks.deadline && (
+            <Marker
+              day={marks.deadline}
+              range={env.range}
+              kind="milestone-deadline"
+              overdue={late}
+              title={`${milestone.key} deadline: ${formatDay(marks.deadline)}${marks.passed ? ' (passed)' : ''}${
+                marks.window ? '' : ' — no opening date published'
+              }`}
             />
           )}
         </Track>
       </div>
 
       {open && mySections.length === 0 && (
-        <p className="sticky left-0 z-10 w-fit bg-white py-1 pl-6 text-xs text-slate-500">
+        <p className="sticky left-0 z-10 w-fit bg-white py-1 pl-6 text-xs text-slate-600">
           No sections listed for this submission yet.
         </p>
       )}
@@ -114,24 +134,27 @@ export function MilestoneRow({
           <SectionRow
             key={section.id}
             section={section}
+            milestoneKey={milestone.key}
             tasks={tasks}
-            unlinked={unlinked}
-            fallbackSpan={span}
-            range={range}
-            todayLeft={todayLeft}
+            progressTasks={progressTasks}
+            fallbackSpan={marks.window ?? (marks.deadline ? { from: marks.deadline, to: marks.deadline } : null)}
             open={openSections.has(section.id)}
             onToggle={() => onToggleSection(section.id)}
-            members={members}
             onDraftedChange={(isDrafted) => onDraftedChange(section.id, isDrafted)}
-            canCreateTask={canCreateTask}
-            addingTask={addingTask}
-            onCreateTask={(title) => onCreateTask(section.id, title)}
-            onLinkTask={(taskId) => onLinkTask(section.id, taskId)}
-            onMoveTask={onMoveTask}
-            onOwnerTask={onOwnerTask}
-            onUnlinkTask={onUnlinkTask}
+            env={env}
           />
         ))}
+
+      {open && (
+        <UnsectionedRow
+          milestone={milestone}
+          tasks={tasks}
+          progressTasks={progressTasks}
+          open={openSections.has(unsectionedKey)}
+          onToggle={() => onToggleSection(unsectionedKey)}
+          env={env}
+        />
+      )}
     </li>
   )
 }

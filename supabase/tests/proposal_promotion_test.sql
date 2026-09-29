@@ -64,39 +64,74 @@ declare
   task2_id  uuid;
   task2_created boolean;
   bad_row_count int;
+  hd      uuid := gen_random_uuid();  -- Head of the proposal's department
+  hd2     uuid := gen_random_uuid();  -- Head of a different department
+  dept    text;
+  dept2   text;
+  clause  text;
+  ms      text := 'PROMO-MS1';
   lines    text[] := '{}';
   failures text[] := '{}';
 begin
   insert into auth.users (id, email) values
-    (pre, 'promo-pre@roles.test'), (mem, 'promo-mem@roles.test');
+    (pre, 'promo-pre@roles.test'), (mem, 'promo-mem@roles.test'),
+    (hd, 'promo-hd@roles.test'), (hd2, 'promo-hd2@roles.test');
   insert into members (id, full_name, role) values
-    (pre, 'Promo President', 'President'), (mem, 'Promo Member', 'Chassis');
+    (pre, 'Promo President', 'President'), (mem, 'Promo Member', 'Chassis'),
+    (hd, 'Promo Head', 'Chassis'), (hd2, 'Promo Head Two', 'Chassis');
   insert into member_roles (member_id, role) values (pre, 'president');
 
   insert into seasons (label, is_current) values ('PROMO-TEST-A', false) returning id into season;
   insert into seasons (label, is_current) values ('PROMO-TEST-B', false) returning id into season2;
+  insert into milestones (key, season_id, ordinal, name) values (ms, season, 1, 'Promo milestone');
 
-  insert into task_proposals (season_id, title, context, raised_by)
-    values (season, 'Promote me', 'why it matters', mem) returning id into prop;
-  insert into task_proposals (season_id, title, raised_by)
-    values (season, 'Promote me too', mem) returning id into prop2;
+  select key into dept from subteams where archived_at is null order by sort_order, key limit 1;
+  select key into dept2 from subteams where archived_at is null and key <> dept order by sort_order, key limit 1;
+  update subteams set lead_id = hd where key = dept;
+  update subteams set lead_id = hd2 where key = dept2;
+  select clause_key into clause from clauses order by clause_key limit 1;
 
-  -- ----------------------------------------------- a member may not promote
+  insert into task_proposals (season_id, title, context, raised_by, owner_id, subteam_key, due_date, priority, milestone_key)
+    values (season, 'Promote me', 'why it matters', mem, mem, dept, '2026-12-01', 'urgent', ms) returning id into prop;
+  insert into proposal_requirements (proposal_id, clause_key) values (prop, clause);
+  insert into task_proposals (season_id, title, raised_by) values (season, 'Promote me too', mem) returning id into prop2;
+
+  -- ------------------------------- only the department Head (or a Developer)
   perform pg_temp.as_user(mem);
   begin
     perform promote_proposal(prop, season);
-    select * into lines, failures from pg_temp.note(lines, failures, 'member cannot promote', false, 'no exception was raised');
+    select * into lines, failures from pg_temp.note(lines, failures, 'a member cannot promote', false, 'no exception was raised');
   exception
     when insufficient_privilege then
-      select * into lines, failures from pg_temp.note(lines, failures, 'member cannot promote', true);
+      select * into lines, failures from pg_temp.note(lines, failures, 'a member cannot promote', true);
     when others then
-      select * into lines, failures from pg_temp.note(lines, failures, 'member cannot promote', false, format('wrong error: %s %s', sqlstate, sqlerrm));
+      select * into lines, failures from pg_temp.note(lines, failures, 'a member cannot promote', false, format('wrong error: %s %s', sqlstate, sqlerrm));
+  end;
+  perform pg_temp.as_user(pre);
+  begin
+    perform promote_proposal(prop, season);
+    select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', false, 'no exception was raised');
+  exception
+    when insufficient_privilege then
+      select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', true);
+    when others then
+      select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', false, format('wrong error: %s %s', sqlstate, sqlerrm));
+  end;
+  perform pg_temp.as_user(hd2);
+  begin
+    perform promote_proposal(prop, season);
+    select * into lines, failures from pg_temp.note(lines, failures, 'the Head of another department cannot promote', false, 'no exception was raised');
+  exception
+    when insufficient_privilege then
+      select * into lines, failures from pg_temp.note(lines, failures, 'the Head of another department cannot promote', true);
+    when others then
+      select * into lines, failures from pg_temp.note(lines, failures, 'the Head of another department cannot promote', false, format('wrong error: %s %s', sqlstate, sqlerrm));
   end;
   perform 1 from tasks where source_proposal = prop;
-  select * into lines, failures from pg_temp.note(lines, failures, 'member''s refused attempt created nothing', not found);
+  select * into lines, failures from pg_temp.note(lines, failures, 'the three refused attempts created nothing', not found);
 
   -- ------------------------------------------ cross-season promotion refused
-  perform pg_temp.as_user(pre);
+  perform pg_temp.as_user(hd);
   begin
     perform promote_proposal(prop, season2);
     select * into lines, failures from pg_temp.note(lines, failures, 'cross-season promotion is refused', false, 'no exception was raised');
@@ -105,38 +140,65 @@ begin
       select * into lines, failures from pg_temp.note(lines, failures, 'cross-season promotion is refused', sqlstate = '22023',
         format('got %s %s', sqlstate, sqlerrm));
   end;
-  perform 1 from tasks where source_proposal = prop;
-  select * into lines, failures from pg_temp.note(lines, failures, 'refused cross-season attempt created nothing', not found);
 
   -- --------------------------------------------------- a normal, one-shot promotion
   select (t.task).id, t.created into task1_id, task1_created
-    from promote_proposal(prop, season, mem, '2026-12-01'::date, 'wip') as t;
+    from promote_proposal(prop, season, mem) as t;
   select * into lines, failures from pg_temp.note(lines, failures, 'promotion returns created = true', task1_created is true);
-  select * into lines, failures from pg_temp.note(lines, failures, 'promotion returns the new task id', task1_id is not null);
-
   select count(*) into bad_row_count from tasks where source_proposal = prop;
   select * into lines, failures from pg_temp.note(lines, failures, 'exactly one task exists for the proposal', bad_row_count = 1, format('found %s', bad_row_count));
 
   perform 1 from tasks
     where id = task1_id and season_id = season and title = 'Promote me'
       and detail = 'why it matters' and owner_id = mem and due_date = '2026-12-01'
-      and state = 'wip' and created_by = pre;
-  select * into lines, failures from pg_temp.note(lines, failures, 'the task carries the fields the promoter chose', found);
+      and state = 'todo' and priority = 'urgent' and subteam_key = dept and milestone_key = ms
+      and created_by = hd and links_required and source_proposal = prop;
+  select * into lines, failures from pg_temp.note(lines, failures, 'the task carries the proposal''s title, detail, department, owner, deadline, priority and milestone', found);
 
-  perform 1 from task_proposals where id = prop and state = 'decided' and decided_at is not null;
-  select * into lines, failures from pg_temp.note(lines, failures, 'the proposal is marked decided with a timestamp', found);
+  select count(*) into bad_row_count from task_requirements where task_id = task1_id and clause_key = clause;
+  select * into lines, failures from pg_temp.note(lines, failures, 'the requirement link was copied to the task', bad_row_count = 1);
 
-  -- ---------------------------------------- retry is idempotent, not a duplicate
+  perform 1 from task_proposals
+    where id = prop and state = 'decided' and outcome = 'approved' and decided_at is not null
+      and archived_at is not null and archive_reason = 'promoted' and archived_by = hd;
+  select * into lines, failures from pg_temp.note(lines, failures, 'the proposal is decided, approved and archived as promoted', found);
+
+  -- ---------------------------------------- retry is idempotent, not a rewrite
+  update tasks set title = 'Renamed after promotion' where id = task1_id;
   select (t.task).id, t.created into task2_id, task2_created
     from promote_proposal(prop, season) as t;
   select * into lines, failures from pg_temp.note(lines, failures, 'retrying promotion returns created = false', task2_created is false);
   select * into lines, failures from pg_temp.note(lines, failures, 'retrying promotion returns the SAME task id', task2_id = task1_id,
     format('first %s, second %s', task1_id, task2_id));
-
+  perform 1 from tasks where id = task1_id and title = 'Renamed after promotion';
+  select * into lines, failures from pg_temp.note(lines, failures, 'a retry does not rewrite the task from the old proposal snapshot', found);
   select count(*) into bad_row_count from tasks where source_proposal = prop;
   select * into lines, failures from pg_temp.note(lines, failures, 'retry did not create a second task', bad_row_count = 1, format('found %s', bad_row_count));
 
+  -- authorization is re-checked on the idempotent path
+  perform set_config('role', 'none', true);
+  update subteams set lead_id = hd2 where key = dept;
+  perform pg_temp.as_user(hd);
+  begin
+    perform promote_proposal(prop, season);
+    select * into lines, failures from pg_temp.note(lines, failures, 'a former Head is refused even on a retry', false, 'no exception was raised');
+  exception
+    when insufficient_privilege then
+      select * into lines, failures from pg_temp.note(lines, failures, 'a former Head is refused even on a retry', true);
+    when others then
+      select * into lines, failures from pg_temp.note(lines, failures, 'a former Head is refused even on a retry', false, format('wrong error: %s %s', sqlstate, sqlerrm));
+  end;
+
   -- ------------------- the unique index refuses a bypass even outside the function
+  -- 20260116 (task_lifecycle_and_authorization) removed task_insert
+  -- entirely, so no RLS-governed caller — pre included — can reach this
+  -- INSERT at all any more; only a superuser/service-role connection can, in
+  -- which case this backstop is the only thing left to matter. Reset to that
+  -- (unset role/claims) before proving it, rather than testing it as `pre`
+  -- and hitting an RLS refusal that has nothing to do with the unique index.
+  perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
+  perform set_config('request.jwt.claim.sub', '', true);
   insert into tasks (season_id, title, source_proposal) values (season, 'Sneaky duplicate', prop2);
   begin
     insert into tasks (season_id, title, source_proposal) values (season, 'Sneaky duplicate 2', prop2);

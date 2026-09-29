@@ -14,12 +14,15 @@ import { fetchAllRows, unwrap } from './errors.ts'
 // best-effort snapshot, not a transactional point-in-time backup. Each
 // collection is fetched page by page and then independently recounted in the
 // database; if the two disagree — truncation, a dropped page, or a genuine
-// edit landing mid-export — buildSeasonExport THROWS instead of returning a
-// manifest that silently under-reports. There is no server-side snapshot
+// insert/delete landing mid-export — buildSeasonExport THROWS instead of
+// returning a manifest that silently under-reports. Equal-count edits can
+// still span pages undetected. There is no server-side snapshot
 // mechanism in this schema, and building one has not been demonstrated as
 // needed for a once-a-year handover file; if that changes, this is the place
 // to revisit it.
-export const EXPORT_VERSION = 2
+// 4: archived work stays included; adds requirement junctions, Book source
+// metadata, and clearly separated relevant global department history.
+export const EXPORT_VERSION = 4
 
 export type SeasonExport = {
   exportVersion: number
@@ -32,24 +35,33 @@ export type SeasonExport = {
   clauseStatus: unknown[]
   tasks: unknown[]
   proposals: unknown[]
+  taskRequirements: unknown[]
+  proposalRequirements: unknown[]
   meetings: unknown[]
   milestones: unknown[]
   milestoneSections: unknown[]
   specs: unknown[]
+  // Every accepted and superseded observation, so a correction's old value and
+  // its reason survive in the handover file.
+  specMeasurements: unknown[]
   handoverNotes: unknown[]
   activity: unknown[]
+  globalDepartmentActivity: unknown[]
+  regulationDocument: unknown | null
+  bookClauses: unknown[]
 }
 
 const CONSISTENCY_NOTE =
   'Best-effort paginated export, not a transactional snapshot. Every collection below was recounted ' +
   'independently in the database after fetching; the export would have failed rather than be produced ' +
-  'if any count disagreed with the rows actually received.'
+  'if any count disagreed with the rows actually received. Recounts detect truncation and count-changing ' +
+  'concurrent edits, but not equal-count replacements or edits; collections may therefore reflect different instants.'
 
 // Only tables that actually carry a season_id. Typed as a union rather than
 // `string` so a typo cannot compile.
 type ScopedTable =
-  | 'clause_status' | 'tasks' | 'task_proposals' | 'meetings'
-  | 'milestones' | 'specs' | 'handover_notes' | 'activity'
+  | 'clause_status' | 'tasks' | 'task_proposals' | 'task_requirements' | 'proposal_requirements' | 'meetings'
+  | 'milestones' | 'specs' | 'spec_measurements' | 'handover_notes' | 'activity'
 
 // Retention (Phase 5 §5.6): `activity` rows are kept indefinitely — there is
 // no scheduled deletion or archival job. The only thing that removes them is
@@ -65,9 +77,11 @@ type ScopedTable =
 // Every ScopedTable's own primary key, used both as the paging tie-breaker
 // and as fetchAllRows's duplicate guard. `milestones` is keyed by `key`, not
 // `id` — every other scoped table has a real `id` column.
-const KEY_COLUMN: Record<ScopedTable, string> = {
-  clause_status: 'id', tasks: 'id', task_proposals: 'id', meetings: 'id',
-  milestones: 'key', specs: 'id', handover_notes: 'id', activity: 'id',
+const KEY_COLUMNS: Record<ScopedTable, readonly string[]> = {
+  clause_status: ['id'], tasks: ['id'], task_proposals: ['id'], meetings: ['id'],
+  milestones: ['key'], specs: ['id'], spec_measurements: ['id'], handover_notes: ['id'], activity: ['id'],
+  task_requirements: ['task_id', 'clause_key'],
+  proposal_requirements: ['proposal_id', 'clause_key'],
 }
 
 type CountResult = { count: number | null; error: PostgrestError | null }
@@ -87,13 +101,13 @@ async function verifiedCount(what: string, result: PromiseLike<CountResult>): Pr
 // detectable instead of trusted.
 async function pagedAndVerified(
   what: string,
-  keyColumn: string,
+  keyColumns: readonly string[],
   page: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: PostgrestError | null }>,
   count: PromiseLike<CountResult>,
 ): Promise<unknown[]> {
   const rows = await fetchAllRows<unknown>(
     what,
-    (row) => (row as Record<string, unknown>)[keyColumn] as string | number,
+    (row) => JSON.stringify(keyColumns.map((column) => (row as Record<string, unknown>)[column])),
     page,
   )
   const expected = await verifiedCount(`count ${what}`, count)
@@ -109,11 +123,15 @@ async function pagedAndVerified(
 
 export async function buildSeasonExport(seasonId: string): Promise<SeasonExport> {
   const scoped = (table: ScopedTable) => {
-    const keyColumn = KEY_COLUMN[table]
+    const keyColumns = KEY_COLUMNS[table]
     return pagedAndVerified(
       `export ${table}`,
-      keyColumn,
-      (from, to) => supabase.from(table).select('*').eq('season_id', seasonId).order(keyColumn).range(from, to),
+      keyColumns,
+      (from, to) => {
+        let query = supabase.from(table).select('*').eq('season_id', seasonId)
+        for (const column of keyColumns) query = query.order(column)
+        return query.range(from, to)
+      },
       supabase.from(table).select('*', { count: 'exact', head: true }).eq('season_id', seasonId),
     )
   }
@@ -131,21 +149,25 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
   // only need a name to resolve, so that is all that leaves the database.
   const members = await pagedAndVerified(
     'export members',
-    'id',
+    ['id'],
     (from, to) => supabase.from('members').select('id, full_name, role, status').order('id').range(from, to),
     supabase.from('members').select('*', { count: 'exact', head: true }),
   )
   const subteams = await pagedAndVerified(
     'export subteams',
-    'key',
+    ['key'],
     (from, to) => supabase.from('subteams').select('*').order('key').range(from, to),
     supabase.from('subteams').select('*', { count: 'exact', head: true }),
   )
 
-  const [clauseStatus, tasks, proposals, meetings, milestones, specs, handoverNotes, activity] =
+  const [
+    clauseStatus, tasks, proposals, taskRequirements, proposalRequirements,
+    meetings, milestones, specs, specMeasurements, handoverNotes, activity,
+  ] =
     await Promise.all([
-      scoped('clause_status'), scoped('tasks'), scoped('task_proposals'), scoped('meetings'),
-      scoped('milestones'), scoped('specs'), scoped('handover_notes'), scoped('activity'),
+      scoped('clause_status'), scoped('tasks'), scoped('task_proposals'),
+      scoped('task_requirements'), scoped('proposal_requirements'), scoped('meetings'),
+      scoped('milestones'), scoped('specs'), scoped('spec_measurements'), scoped('handover_notes'), scoped('activity'),
     ])
 
   // milestone_sections has no season_id — it hangs off its milestone.
@@ -153,15 +175,72 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
   const milestoneSections = keys.length
     ? await pagedAndVerified(
         'export milestone sections',
-        'id',
+        ['id'],
         (from, to) => supabase.from('milestone_sections').select('*').in('milestone_key', keys).order('id').range(from, to),
         supabase.from('milestone_sections').select('*', { count: 'exact', head: true }).in('milestone_key', keys),
       )
     : []
 
-  // The regulations book is NOT exported: it is 1,146 rows of reference data
-  // that belong to the edition, not to the team, and re-importing it is a
-  // separate documented step.
+  // Book provenance, not the PDF bytes: enough source metadata to resolve a
+  // link and its printed/PDF page after handover. Clause body text and the
+  // signed/private object contents are not copied into this JSON.
+  const regsRef = typeof season.regs_ref === 'string' ? season.regs_ref : null
+  const regulationDocuments = regsRef
+    ? await pagedAndVerified(
+        'export regulation document metadata',
+        ['regs_ref'],
+        (from, to) => supabase
+          .from('regulation_documents')
+          .select('regs_ref, edition, title, url, storage_path, page_offset, page_count, updated_at, updated_by')
+          .eq('regs_ref', regsRef)
+          .order('regs_ref')
+          .range(from, to),
+        supabase.from('regulation_documents').select('*', { count: 'exact', head: true }).eq('regs_ref', regsRef),
+      )
+    : []
+  const bookClauses = regsRef
+    ? await pagedAndVerified(
+        'export Book clause metadata',
+        ['clause_key'],
+        (from, to) => supabase
+          .from('clauses')
+          .select('clause_key, printed_ref, regs_ref, source_page, subteam_key, milestone_key')
+          .eq('regs_ref', regsRef)
+          .order('clause_key')
+          .range(from, to),
+        supabase.from('clauses').select('*', { count: 'exact', head: true }).eq('regs_ref', regsRef),
+      )
+    : []
+
+  // Department rows and their lifecycle are global. Export only the global
+  // events for departments this season actually references, and keep them in
+  // a separate collection so nobody mistakes them for season-owned events.
+  const relevantDepartments = new Set<string>()
+  for (const row of [...tasks, ...proposals, ...specs, ...handoverNotes, ...bookClauses] as Record<string, unknown>[]) {
+    if (typeof row.subteam_key === 'string') relevantDepartments.add(row.subteam_key)
+  }
+  const departmentKeys = [...relevantDepartments].sort()
+  const globalDepartmentActivity = departmentKeys.length
+    ? await pagedAndVerified(
+        'export relevant global department history',
+        ['id'],
+        (from, to) => supabase
+          .from('activity')
+          .select('*')
+          .is('season_id', null)
+          .eq('entity', 'department')
+          .in('entity_id', departmentKeys)
+          .order('id')
+          .range(from, to),
+        supabase
+          .from('activity')
+          .select('*', { count: 'exact', head: true })
+          .is('season_id', null)
+          .eq('entity', 'department')
+          .in('entity_id', departmentKeys),
+      )
+    : []
+
   return {
     exportVersion: EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
@@ -173,15 +252,22 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       clauseStatus: clauseStatus.length,
       tasks: tasks.length,
       proposals: proposals.length,
+      taskRequirements: taskRequirements.length,
+      proposalRequirements: proposalRequirements.length,
       meetings: meetings.length,
       milestones: milestones.length,
       milestoneSections: milestoneSections.length,
       specs: specs.length,
+      specMeasurements: specMeasurements.length,
       handoverNotes: handoverNotes.length,
       activity: activity.length,
+      globalDepartmentActivity: globalDepartmentActivity.length,
+      regulationDocument: regulationDocuments.length,
+      bookClauses: bookClauses.length,
     },
-    members, subteams, clauseStatus, tasks, proposals, meetings,
-    milestones, milestoneSections, specs, handoverNotes, activity,
+    members, subteams, clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, meetings,
+    milestones, milestoneSections, specs, specMeasurements, handoverNotes, activity,
+    globalDepartmentActivity, regulationDocument: regulationDocuments[0] ?? null, bookClauses,
   }
 }
 

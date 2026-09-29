@@ -1,8 +1,9 @@
 import type { UseQueryResult } from '@tanstack/react-query'
+import { todayIso } from '../lib/dates.ts'
 import { supabase } from '../lib/supabase.ts'
 import type { Attention, SubteamProgress } from '../metrics/types.ts'
 import { useSeasonId } from '../season/context.ts'
-import { fetchAllRows, unwrap } from './errors.ts'
+import { unwrap } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
@@ -14,7 +15,7 @@ export type { Attention, SubteamProgress } from '../metrics/types.ts'
 export function useSubteamProgressForSeason(seasonId: string | undefined): UseQueryResult<SubteamProgress[], Error> {
   return useSeasonScopedQuery<SubteamProgress[]>(queryKeys.subteamProgress(seasonId), seasonId, async (sid) =>
     unwrap(
-      'load subteam progress',
+      'load department progress',
       await supabase.from('v_subteam_progress').select('*').eq('season_id', sid).order('duties', { ascending: false }),
     ),
   )
@@ -25,27 +26,23 @@ export function useSubteamProgress(): UseQueryResult<SubteamProgress[], Error> {
 }
 
 // The attention list. `reason` (blocked / score-killer / penalty / overdue /
-// starred) is computed by the view — never re-derived here. See
-// docs/now-metrics.sql, final block.
+// starred) is computed by attention(p_season, p_today) — never re-derived
+// here. See docs/now-metrics.sql, final block.
 //
-// v_attention is a UNION ALL of clause rows (unique by clause_key, kind =
+// attention() is a UNION ALL of clause rows (unique by clause_key, kind =
 // 'clause') and task rows (unique by ref = task id, kind = 'task'; clause_key
-// null) — see supabase/migrations/20260103000000_attention_clause_key.sql. No
-// single column is unique across the whole view, hence the composite key.
+// null) — see 20260103000000_attention_clause_key.sql. No single column is
+// unique across the whole result, hence the composite key.
+//
+// p_today is the READER's local day (todayIso()), not the database
+// session's current_date — this is ADR-0007's fix for bug D2 (the Board's
+// overdue check used to disagree with the SQL side of this exact list near
+// local midnight, outside UTC).
 export function useAttentionForSeason(seasonId: string | undefined): UseQueryResult<Attention[], Error> {
-  return useSeasonScopedQuery<Attention[]>(queryKeys.attention(seasonId), seasonId, (sid) =>
-    fetchAllRows(
+  return useSeasonScopedQuery<Attention[]>(queryKeys.attention(seasonId), seasonId, async (sid) =>
+    unwrap(
       'load priorities',
-      (row) => `${row.kind}:${row.clause_key ?? row.ref}`,
-      (from, to) =>
-        supabase
-          .from('v_attention')
-          .select('*')
-          .eq('season_id', sid)
-          .order('kind')
-          .order('clause_key', { nullsFirst: false })
-          .order('ref')
-          .range(from, to),
+      await supabase.rpc('attention', { p_season: sid, p_today: todayIso() }),
     ),
   )
 }

@@ -1,5 +1,6 @@
 import { useProposals } from '../data/useProposals.ts'
 import { useRealtimeProposals } from '../data/useRealtimeProposals.ts'
+import { useRealtimeProposalRequirements } from '../data/useRealtimeProposalRequirements.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
 import { ProposalsPanel } from '../proposals/ProposalsPanel.tsx'
@@ -14,12 +15,13 @@ import { ProposalsPanel } from '../proposals/ProposalsPanel.tsx'
 export default function Proposals() {
   const proposals = useProposals()
   const realtime = useRealtimeProposals()
+  useRealtimeProposalRequirements()
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Task proposals"
-        description="Work anyone can suggest. The President, Vice President or a Developer decides what becomes an official board task."
+        description="Work anyone can suggest. The Head of the proposal's department, or a Developer, decides what becomes an official board task."
       />
 
       <ProposalsPanel

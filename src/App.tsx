@@ -9,6 +9,7 @@ import { AppHeader } from './ui/AppHeader.tsx'
 import { ErrorBoundary } from './ui/ErrorBoundary.tsx'
 import { pageMain } from './ui/layout.ts'
 import { LoadingState } from './ui/states.tsx'
+import { useRealtimeSubteams } from './data/useRealtimeSubteams.ts'
 
 // Route-level code splitting (Phase 7 §7.1): the authenticated shell — auth
 // gate, season handling, the tutorial overlay, the header, navigation and the
@@ -19,10 +20,12 @@ import { LoadingState } from './ui/states.tsx'
 const Now = lazy(() => import('./pages/Now.tsx'))
 const Priorities = lazy(() => import('./pages/Priorities.tsx'))
 const Register = lazy(() => import('./pages/Register.tsx'))
+const Book = lazy(() => import('./pages/Book.tsx'))
 const Milestones = lazy(() => import('./pages/Milestones.tsx'))
 const Gantt = lazy(() => import('./pages/Gantt.tsx'))
 const Board = lazy(() => import('./pages/Board.tsx'))
 const Proposals = lazy(() => import('./pages/Proposals.tsx'))
+const Archive = lazy(() => import('./pages/Archive.tsx'))
 const Meetings = lazy(() => import('./pages/Meetings.tsx'))
 const SpecSheet = lazy(() => import('./pages/SpecSheet.tsx'))
 const Finances = lazy(() => import('./pages/Finances.tsx'))
@@ -53,6 +56,14 @@ function SeasonScopedLayout() {
   )
 }
 
+// Departments and Heads are global reference/authorization data. Keep exactly
+// one channel for the authenticated shell so every screen learns about a Head
+// replacement, including screens that do not themselves render departments.
+function GlobalRealtime() {
+  useRealtimeSubteams()
+  return null
+}
+
 // Every route lives inside <RequireAuth>, so there is no URL an unauthenticated
 // visitor can type to reach a screen. Signed out, the only thing that renders
 // is the login form.
@@ -62,6 +73,7 @@ export default function App() {
     <RequireAuth>
       <SeasonProvider>
         <TutorialProvider>
+          <GlobalRealtime />
           {/* WCAG 2.4.1. The Register puts ~2,000 controls after the navigation;
               without this a keyboard user tabs through all of them to reach the
               content. Off-screen until focused, then visible. */}
@@ -85,10 +97,12 @@ export default function App() {
                   <Route path="/" element={<Now />} />
                   <Route path="/priorities" element={<Priorities />} />
                   <Route path="/register" element={<Register />} />
+                  <Route path="/book" element={<Book />} />
                   <Route path="/milestones" element={<Milestones />} />
                   <Route path="/gantt" element={<Gantt />} />
                   <Route path="/board" element={<Board />} />
                   <Route path="/proposals" element={<Proposals />} />
+                  <Route path="/archive" element={<Archive />} />
                   <Route path="/meetings" element={<Meetings />} />
                   <Route path="/specs" element={<SpecSheet />} />
                   <Route path="/finances" element={<Finances />} />

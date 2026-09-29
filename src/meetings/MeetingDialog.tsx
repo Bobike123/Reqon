@@ -9,6 +9,7 @@ import {
 import { Dialog } from '../ui/Dialog.tsx'
 import { buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
 import { ActionError } from '../ui/states.tsx'
+import { MarkdownField } from './MarkdownField.tsx'
 
 // Calling a meeting, or editing one that has happened.
 //
@@ -64,7 +65,7 @@ export function MeetingDialog({
         onSubmit={async (draft) => {
           try {
             if (meeting) {
-              await update.mutateAsync({ id: meeting.id, ...draft })
+              await update.mutateAsync({ id: meeting.id, expectedUpdatedAt: meeting.updated_at, ...draft })
               onSaved('Meeting updated.')
             } else {
               await create.mutateAsync(draft)
@@ -246,39 +247,23 @@ function Form({
           />
         </div>
 
-        <div>
-          <label className={label} htmlFor={fieldId('agenda')}>
-            Agenda
-          </label>
-          <textarea
-            id={fieldId('agenda')}
-            name="agenda"
-            rows={8}
-            value={agenda}
-            onChange={(e) => setAgenda(e.target.value)}
-            className={`${field} min-h-0 font-mono text-xs`}
-          />
-          {!meeting && (
-            <p className="mt-1 text-xs text-slate-500">
-              Started from the club&apos;s template. Change it here for this meeting only.
-            </p>
-          )}
-        </div>
+        <MarkdownField
+          id={fieldId('agenda')}
+          label="Agenda"
+          value={agenda}
+          onChange={setAgenda}
+          rows={8}
+          note={meeting ? undefined : 'Started from the club’s default agenda; changes here are for this meeting only.'}
+        />
 
-        <div>
-          <label className={label} htmlFor={fieldId('notes')}>
-            Minutes (optional)
-          </label>
-          <textarea
-            id={fieldId('notes')}
-            name="notes"
-            rows={4}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="What was decided, and who took what away."
-            className={`${field} min-h-0`}
-          />
-        </div>
+        <MarkdownField
+          id={fieldId('notes')}
+          label="Minutes (optional)"
+          value={notes}
+          onChange={setNotes}
+          rows={5}
+          placeholder="What was decided, and who took what away."
+        />
 
         <div>
           <label className={label} htmlFor={fieldId('attendees')}>

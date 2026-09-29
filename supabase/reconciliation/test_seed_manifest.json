@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "label": "test_fixture-2026-09-29",
+  "purpose": "test_fixture",
+  "departments": [
+    { "key": "SWDATA", "action": "keep" },
+    { "key": "MECH", "action": "keep" },
+    { "key": "ELEC", "action": "keep" },
+    { "key": "BUILD", "action": "keep" },
+    { "key": "OPS", "action": "keep" },
+    { "key": "VERIFY_FILL_1", "action": "create", "name": "Verify Fill 1" },
+    { "key": "VERIFY_FILL_2", "action": "create", "name": "Verify Fill 2" },
+    { "key": "VERIFY_FILL_3", "action": "create", "name": "Verify Fill 3" },
+    { "key": "VERIFY_FILL_4", "action": "create", "name": "Verify Fill 4" },
+    { "key": "VERIFY_FILL_5", "action": "create", "name": "Verify Fill 5" }
+  ]
+}

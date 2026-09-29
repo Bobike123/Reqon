@@ -83,9 +83,58 @@ CI (`.github/workflows/ci.yml`) runs the same two halves as separate jobs,
 `frontend` and `database`, so a red job tells you which boundary broke.
 `docs/ARCHITECTURE.md` explains what each gate proves.
 
-The full local Supabase stack (`npx supabase start`) is not part of any
-verified workflow here. The pinned `supabase` CLI is used only by
-`npm run types:gen` (§10).
+### 2b. Against a local Supabase stack (development)
+
+Development can run entirely on your machine, against the local Supabase stack
+the pinned CLI starts in Docker. Nothing here touches a hosted project.
+
+```bash
+npm run local:setup   # start the local stack if needed, apply pending migrations
+                      # (forward only, never a reset), then set up the Requirements Book
+npm run dev           # when .env.development.local points at http://127.0.0.1:54321,
+                      # `predev` first checks the stack is up and migrated and syncs the Book
+```
+
+`.env.development.local` (git-ignored) holds the local URL and the local
+**anon** key from `npx supabase status`. When the dev server points at a
+hosted project instead, `predev` says so and does nothing.
+
+**The Requirements Book is set up automatically** by
+`npm run book:sync:local` (`scripts/book/sync-local.mjs`), which `local:setup`
+and `predev` run for you:
+
+- The source file is described, with its SHA-256, in `supabase/book/editions.json`
+  (MS2627 Rev.01: `static/book/MS2627_MotoStudent.pdf`, 234 pages, printed page =
+  PDF page). A different file under that name is refused, never silently used.
+- It is uploaded through the local Storage API to the **private** `regulations`
+  bucket at `editions/<edition>/<sha256 prefix>.pdf`, read back and compared.
+  Then the edition's existing `regulation_documents` row is pointed at it.
+- Each clause's printed page (`clauses.source_page`) is derived from the PDF
+  text: its reference must open a paragraph whose words match the clause's own
+  text. Tables of contents and cross-references are ignored. Two clauses that
+  print the same reference are told apart by their content. A page already
+  recorded is never overwritten; a disagreement is reported. The derivation
+  is written to `supabase/book/ms2627-rev-01.pages.json`, tied to the PDF and
+  clause fingerprints.
+- It only ever talks to this checkout's own local stack. It reads the service-role
+  key from `npx supabase status` into its own process, and never prints or stores it.
+- A second run changes nothing. An interrupted run leaves the old source in
+  place and can simply be run again. Two runs at once are serialised by an
+  advisory lock.
+
+```bash
+npm run book:sync:local -- --dry-run    # what would change, writing nothing
+npm run book:sync:local -- --rederive   # read the PDF again even if the manifest matches
+```
+
+If it reports a **conflict**, it has changed nothing. Conflicts are: another
+source is already configured, the configured object is missing or different,
+or a recorded page disagrees. Fix the named row in **Settings → Requirements
+Book**, or clear it, then run it again. If it says the stack is not running,
+run `npm run local:setup`.
+
+`npm run test:e2e` (Playwright) runs against this same local stack and dev
+server.
 
 ---
 
@@ -218,11 +267,23 @@ against a new project (SQL Editor → paste → Run), then load the reference da
 | `20260112000000_title_validation.sql` | task and proposal titles must be 1–200 characters (trimmed), enforced in the database |
 | `20260113000000_idempotent_realtime_publication.sql` | puts exactly the five live-updating tables in the realtime publication, failing loudly if it cannot |
 | `20260114000000_activity_audit_trail.sql` | the `activity` audit trail: written only by database triggers, readable but not writable by members |
+| `20260115000000_department_lifecycle.sql` | Departments: `subteams.lead_id` as Head, the 10-active cap (trigger, race-tested), reconciliation preflight/apply — see §7a |
+| `20260116000000_task_lifecycle_and_authorization.sql` | task states/priority rework, `can_edit_task`/`guard_task_edit`, department-scoped Head task authority — see §7b |
+| `20260117000000_traceability_and_proposal_commands.sql` | `task_requirements`/`proposal_requirements`, `submit_proposal`/`review_proposal`/`promote_proposal` rewritten around Head authority — see §7b |
+| `20260118000000_phase4_authorization_hardening.sql` | an independent security review's fixes: permissive-policy ORs, stale grants, old function overloads |
+| `20260119000000_attention_urgent_reason.sql` | the Now/Priorities attention query learns the `urgent` priority |
+| `20260120000000_requirements_book.sql` | `regulation_documents` (Book edition/page metadata), a private storage bucket for the PDF |
+| `20260121000000_gantt_link_audit.sql` | Gantt link/unlink of **existing** tasks only, milestone/section audit events |
+| `20260122000000_spec_targets_and_measurements.sql` | `specs` targets (regulatory + internal), `spec_measurements` append-only history, `spec_verdicts` view — see §7c |
+| `20260123000000_automation_audit_realtime_export.sql` | the no-argument `archive_stale_done_tasks()` scheduler target, full task/proposal audit coverage, checked `season_id` on the requirement junctions, `milestones`/`proposal_requirements` added to realtime — see §7d |
 
 Each migration from `20260110` on carries an **implementation note** at the
 top: purpose, existing-data compatibility, locking, authorization, rollback
 and deploy order. Read it before applying. `20260110` and `20260111` must be
-applied **before** deploying a frontend that calls their functions.
+applied **before** deploying a frontend that calls their functions, and every
+migration from `20260115` on must deploy together with the matching client
+build — this repository has not yet deployed any of `20260115`–`20260123` to
+its own hosted project (see `docs/redesign/STATUS.md` for the exact gap).
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -272,7 +333,7 @@ Four privileged roles, stored one row per role in the `member_roles` table — a
 person can hold several (treasurer *and* developer, say). The job title on the
 roster ("Chassis lead") is only a label and grants nothing.
 
-| | Read everything, incl. money | Roster, subsystems, rulebook, milestones, seasons | Change money | Give / take away roles |
+| | Read everything, incl. money | Roster, departments, rulebook, milestones, seasons | Change money | Give / take away roles |
 |---|---|---|---|---|
 | **President** | yes | yes | no | yes |
 | **Vice President** | yes | yes | no | no |
@@ -288,6 +349,34 @@ and take it back when they are done (`20260107000000_developer_full_access.sql`)
 
 Everyone on the roster keeps the day-to-day work: the register, tasks, meetings,
 proposals, the spec sheet and handover notes.
+
+### 7a. Departments and Heads — a second, separate kind of authority
+
+A **Department** is a division of work (a row of `subteams` — the table
+keeps its old name, but every screen and message says "Department"). Its
+**Head** (`subteams.lead_id`) is a plain member the President/Vice
+President/Developer appoints, with no privileged role required or implied.
+
+This matters because Head authority is **scoped to that one department**,
+and it is checked from the resource, not from a role:
+
+- a Head may edit any task, and review/promote any proposal, **in their own
+  department only**; a Head who also owns a task in another department may
+  edit it as its owner, which is a different rule;
+- a member may head several departments at once, or none;
+- **holding President or Vice President grants no task-edit or
+  proposal-promotion power by itself** — those two roles configure
+  *departments* (create, rename, appoint Head, archive/restore, up to 10
+  active at once), never a department's day-to-day work. A President who is
+  not also a Head cannot approve a proposal.
+
+Everything above is `can_manage_departments()` for configuration versus
+`can_edit_task`/`can_review_proposal` for a specific task or proposal
+(`20260115000000_department_lifecycle.sql`,
+`20260116000000_task_lifecycle_and_authorization.sql`); see
+`docs/redesign/adr/0003-permission-model.md` for the full reasoning.
+`supabase/tests/department_lifecycle_test.sql` and
+`task_authorization_test.sql` check both halves.
 
 These rules are enforced by Postgres Row Level Security, not by the app. The app
 hides controls you cannot use; a request made any other way — the browser
@@ -333,68 +422,165 @@ every test row back. Run it after any change to a policy.
 (28 checks), and `supabase/tests/proposals_meetings_rls_test.sql` for proposals,
 board tasks and meetings (42 checks).
 
-### Proposals, board tasks and meetings
+### 7b. Proposals, board tasks and meetings
 
-Three separate things, which used to be two screens wearing the wrong names:
+Three separate things:
 
-| | Member | Treasurer | Vice President | President | Developer |
+| | Member | The proposal's own department Head | Any other Head | President / VP (alone) | Developer |
 |---|---:|---:|---:|---:|---:|
-| Suggest a task proposal | yes | yes | yes | yes | yes |
-| Review / decide a proposal | no | no | yes | yes | yes |
-| Promote it to a board task, with owner and dates | no | no | yes | yes | yes |
-| Move a task, set its owner | yes | yes | yes | yes | yes |
-| Delete a board task | no | no | **no** | yes | yes |
+| Suggest a task proposal, for any active department | yes | yes | yes | yes | yes |
+| Review / park / reject / reopen that proposal | no | yes | **no** | **no** | yes |
+| Promote it to a board task | no | yes | **no** | **no** | yes |
+| Move a task, set its owner, in that department | owner only | yes | **no** | **no** | yes |
+| Archive / restore a task, in that department | **no** | yes | **no** | **no** | yes |
+| Create, rename, archive a department; appoint its Head | no | no | no | yes | yes |
 | Read meetings | yes | yes | yes | yes | yes |
-| Call a meeting, write its agenda and minutes | no | no | yes | yes | yes |
-| Delete a meeting | no | no | **no** | yes | yes |
-| Edit the global agenda template | no | no | **no** | yes | yes |
+| Call a meeting, write its agenda and minutes | no | — | — | yes | yes |
+| Delete a meeting / edit the agenda template | no | — | — | President only | yes |
 
-**Proposals** (`/proposals`) are suggested work. Anyone on the roster suggests
-one — the database pins `raised_by` to the caller, so nobody suggests in
-someone else's name. Only an administrator changes a proposal's stage, owner or
-decision, which is what stops a member approving their own suggestion through
-the API. Stages read Suggested → Under review → Decided, with Parked as a side
-exit; they are the original `topic_state` values, so no row changed when the
-concept was renamed.
+The key point this table makes on purpose: **holding President or Vice
+President, by itself, grants no task or proposal power** — see §7a. Those two
+roles configure departments; a department's day-to-day work is its Head's.
 
-**Promotion** asks for an owner, an optional due date and a starting lane, then
-inserts the board task and marks the proposal decided. The task keeps
-`source_proposal`, so the Board can always answer "where did this come from?".
-Dates stay nullable: the club often does not know one, and an invented date
-would make the Board cry overdue.
+**Proposals** (`/proposals`) are suggested work. Any active member suggests
+one, into exactly one active department — the database pins `raised_by` to
+the caller, so nobody suggests in someone else's name, and requires a title,
+deadline, milestone and at least one requirement link
+(`submit_proposal`). Only that department's Head, or a Developer, may
+review, park, reject, reopen or promote it (`review_proposal`,
+`can_review_proposal`) — never the author of their own suggestion, and never
+a Head of a *different* department. "My proposals" means proposals **you
+suggested** (`raised_by`), not proposals you might end up owning. Stages
+read Suggested → Under review → Decided (Approved/Rejected), with Parked as
+a side exit; an old proposal missing required data is marked
+`legacy_incomplete` and stays readable but cannot be promoted until a
+Head/Developer repairs it.
 
-**Meetings** (`/meetings`) are real meetings: a required date, optional start
-and end times, a place, an agenda and minutes. A new meeting starts from the
-club's agenda template (`meeting_template`, one row). Editing *that* template is
-President or Developer only; writing any single meeting's agenda and minutes is
-ordinary administrator work, a Vice President included.
+**Promotion** (`promote_proposal(proposal_id, season_id)`) takes **no**
+owner/due-date/state arguments — it copies the proposal's own department,
+deadline, priority, milestone and requirement links onto the new task in one
+transaction, and archives the proposal (`archive_reason = 'promoted'`). A
+retry, sequential or two genuinely concurrent Heads both clicking Approve,
+returns the same task the second time (`created: false`) — nothing is
+duplicated. The task keeps `source_proposal`, so the Board can always answer
+"where did this come from?".
 
-Deleting is the one thing a Vice President may not do: a deleted task or meeting
-takes its history with it, and there is no undo. Both confirmations name what
-will disappear.
+**Nothing is deleted.** A finished or rejected task/proposal is *archived*,
+never removed — the Archive screen (`/archive`) lists it, still readable,
+still linked to its provenance, and a Head/Developer can restore it. A
+finished (Done) task also archives itself automatically 24 hours after
+completion, through a server-side scheduler — see §7d. There is no delete
+control anywhere in this workflow; the "delete" behaviour described in older
+docs no longer exists.
+
+**Meetings** (`/meetings`) are unaffected by the redesign above: a required
+date, optional start/end times, a place, an agenda and minutes. A new
+meeting starts from the club's agenda template (`meeting_template`, one row).
+Editing *that* template is President or Developer only; writing any single
+meeting's agenda and minutes is ordinary administrator work, a Vice
+President included. Deleting a meeting is the one thing a Vice President
+still may not do.
 
 ### The Gantt
 
 **Gantt** (`/gantt`) puts the season on one timeline: each submission as a bar
-across the months, with today marked. Open a submission for its sections, and a
-section for its subtasks.
+across the months, with today marked, a legend for every shape, and a
+department lens that filters the tasks shown while keeping the whole
+milestone → section structure visible. Open a submission for its sections
+and its unsectioned work, and a section for its tasks.
 
-The third level is the point. A subtask is **not** a new kind of row — it is an
-ordinary board task with `section_id` pointing at a `milestone_sections` row, so
-status, owner and due date exist once and the Board and the Gantt read the same
-task. Move a card on the Board and the Gantt moves with it.
+The third level is the point. A subtask is **not** a new kind of row — it is
+an ordinary board task with `milestone_key` and, optionally, `section_id`
+pointing at a `milestone_sections` row, so status, owner and due date exist
+once and the Board and the Gantt read the same task. Move a card on the
+Board and the Gantt moves with it.
 
-“Add to Board” creates such a task (administrators, because `task_insert` is
-`is_admin()`); the dropdown beside it adopts a task the Board already has, and
-**Unlink** detaches one without deleting it. `section_id` is nullable and
-`on delete set null`: most tasks belong to no section, and unpicking a section
-from a checklist must never take the team's work with it.
+**The Gantt cannot create tasks — that would be a second way for a task to
+come into existence, and there is only one: promotion (§7b).** The link
+control adopts an *existing* Board task this viewer may edit (owner, that
+department's Head, or a Developer); linking a task that already belongs to
+another submission asks for confirmation first, since both its milestone and
+section change together. Unlink detaches a task from its section (or from
+its submission entirely, refused for a promoted task, which must always
+keep a milestone) without deleting it or its history. Every link, unlink and
+milestone/section change is audited (`milestone_changed`, `section_linked`,
+`section_unlinked`, `section_changed`).
 
-Percentages roll up from those subtasks — cancelled ones leave the count
-entirely — and fall back to the drafted ticks on Milestones where a section has
-no subtasks yet, so a team that never uses this screen sees what it saw before.
-A section with no dated subtasks borrows its submission's window rather than
-inventing dates, and a milestone with no published window still reads TBC.
+Percentages roll up from linked tasks under the one progress rule shared
+everywhere (§4 of `docs/ARCHITECTURE.md`): distinct tasks, cancelled
+excluded, archived Done still counted — and fall back to the drafted ticks
+on Milestones where a section has no linked tasks yet. A section or
+submission with no dated tasks borrows its submission's published window
+rather than inventing dates, and a milestone with no published window still
+reads TBC.
+
+### 7c. Specifications and measurements
+
+**Spec sheet** (`/specs`) is the measured engineering side of compliance —
+mass, dimensions, anything with a number or a yes/no, checked against a
+regulatory limit *and*, separately, the project's own internal target.
+
+Two different rights, easy to conflate:
+
+- **Recording a measurement** is any active member's right (Review, then
+  Save measurement — nothing is written while typing or on blur).
+- **Editing the rule itself** — the regulatory limit, the acceptable
+  threshold, the project's goal/ideal, plausibility bounds — is President,
+  Vice President or Developer only. A department Head has **no** special
+  authority here just from heading a department; measuring and rule-editing
+  are unrelated to department structure.
+
+History is append-only: a wrong value is never edited or deleted, only
+corrected (a new observation, the old one kept with the reason) or
+withdrawn. Pass/fail (and the amber/green "meets project goal" status) is
+never typed by a person or computed in the browser — it comes from the
+`spec_verdicts` view, computed in SQL from the rule's own comparator and
+target, so it can never go stale relative to a limit someone just changed.
+
+### 7d. Automatic archival, audit history and realtime
+
+A **Done** task that nobody reopens archives itself 24 hours after
+completion — no one has to remember to tidy the Board. This runs as a
+server-side scheduler, **never** a browser timer (an idle tab cannot be
+trusted to run anything, and a client-supplied clock would let someone
+archive work early by lying about the time).
+
+Two deployment paths exist; pick the one your Supabase project supports:
+
+1. **`pg_cron` (preferred).** Enable it in the Supabase dashboard
+   (**Database → Extensions → pg_cron**), then run
+   `supabase/scheduler/install_archive_job.sql` in the SQL Editor. It
+   installs one job, named `paddock-control-archive-stale-done`, running
+   every 5 minutes; running the file again updates the same job instead of
+   creating a second one. It refuses to install if the archive function is
+   ever exposed to `anon`/`authenticated` — that would mean anyone could
+   trigger it directly, which the migration deliberately prevents.
+   `supabase/scheduler/uninstall_archive_job.sql` removes the schedule
+   without touching the function itself.
+2. **Trusted-server fallback**, if `pg_cron` is not available. Run
+   `npm run archive:sweep` (`scripts/run-archive-sweep.mjs`) every 5 minutes
+   from a server you control, with `ARCHIVE_SCHEDULER_SUPABASE_URL` and
+   `ARCHIVE_SCHEDULER_SERVICE_ROLE_KEY` (the `service_role` key — this
+   script must run **only** on a server you trust, never in the browser)
+   set in that server's own environment, never in `.env.local` or a hosting
+   dashboard's client-side variables.
+
+Neither path is active until you set it up — a fresh Supabase project
+archives nothing automatically until you run one of the two above.
+
+**Everything that changes gets a readable history.** Task and proposal
+edits, department Head changes, milestone date changes and spec
+measurements all write to the `activity` table through database triggers —
+no member, and as of `20260123`, no API role at all, can write to it
+directly, so it cannot be faked or tampered with from the outside. It shows
+up as history on the Archive screen and on individual tasks/proposals; it is
+never keystroke-level and never contains a password, phone number or
+private roster note.
+
+**Realtime.** Ten tables stay live across every open browser without a
+reload: tasks, proposals, clause status, both requirement-link junctions,
+milestones, milestone sections, specs, spec measurements and the department
+list. `docs/ARCHITECTURE.md` §9 has the exact table.
 
 ### Finances
 
@@ -467,9 +653,24 @@ When MotoStudent publishes a new edition, the clause data is regenerated
 
    That produces a new `seed_clauses.csv`.
 
-2. Regenerate the reference-data migration and apply it, or import the CSV
-   directly: **Table Editor → clauses → Insert → Import data from CSV**.
-   Subteams must exist first — clauses reference them.
+2. **Add** the new edition; never replace the current one.
+   - Register the edition first: a `regulation_documents` row whose `regs_ref`
+     is the new edition's reference (Settings → Requirements Book does this for
+     the current season; the clause rows below point at it).
+   - Load the new clauses as NEW rows, each carrying that `regs_ref` and its own
+     `clause_key`s (a forward migration, or **Table Editor → clauses → Insert →
+     Import data from CSV**). Subteams must exist first — clauses reference them.
+   - **Never truncate or bulk-replace `clauses`.** `clause_status`,
+     `task_requirements` and `proposal_requirements` all point at `clause_key`;
+     a replacement erases or orphans the team's work (the database now refuses
+     to delete a clause that has status or links). An edition's pages are stored
+     with the edition (`clauses.regs_ref`, `clauses.source_page`) and cannot be
+     re-pointed at another one.
+   - `source_page` is the PRINTED page number, and stays empty until it is read
+     from the real book — never estimated. Locally, `npm run book:sync:local`
+     derives it from the PDF text once the new edition is described in
+     `supabase/book/editions.json` (its file, SHA-256, page count and running
+     footer). Clauses it cannot match stay empty and are listed for review.
 
 3. Create the new season (§8) and set the new milestone dates and points in
    **Settings → Milestone dates and points**. A milestone with no date is
@@ -506,6 +707,14 @@ project (`npx supabase login`).
 Then run `npm run build` — any code that used a column you removed will fail to
 compile, which is the point.
 
+**While the redesign is uncommitted and unapplied to the hosted project**
+(`docs/redesign/STATUS.md`), generate types from the **local** schema
+instead — `npm run types:gen:local` (`scripts/gen-types-local.sh`), which
+spins up a disposable local Postgres, applies every migration, generates
+types against it, and tears the container down. Never point `types:gen` at
+production while local migrations haven't been deployed there yet; the two
+would silently disagree.
+
 ---
 
 ## 11. Things a maintainer must not break
@@ -538,6 +747,35 @@ These were expensive to get right. Please read before changing them.
 - **Pass/fail is never stored.** The spec sheet reads `verdict` from the
   `spec_verdicts` view, which derives it in SQL from the rule's own comparator
   and target. Recomputing it in React would go stale the moment a limit changes.
+- **A measurement is history, never an overwrite.** Save one with
+  `record_spec_measurement` (the Save measurement button); it appends an
+  observation, refreshes `specs.measured` and writes the audit event in one
+  transaction. Never write `specs.measured` (or its actor/time) directly: the
+  database refuses it for every signed-in role. Fix a wrong value with
+  `correct_spec_measurement` or `invalidate_spec_measurement`; the old
+  observation stays, with the reason. Editing limits and targets is a separate
+  right (President, Vice President, Developer), not part of measuring.
+- **Department Head authority is scoped to one department and is resource-aware,
+  not a role.** It comes from `subteams.lead_id`, checked together with the
+  task/proposal in question (`can_edit_task`, `can_review_proposal`).
+  President/Vice President configure departments; they get **no** task-edit
+  or proposal-promotion power from that role alone (ADR-0003). Never fold
+  Head authority into `is_admin()` or any other blanket flag.
+- **A task is created only by `promote_proposal()`.** There is no direct
+  insert path anywhere, including the Gantt. A second path would need its
+  own unique-per-proposal guard and audit event, and would break "where did
+  this task come from" for every task created through it.
+- **`task_requirements`/`proposal_requirements` derive their own `season_id`
+  from a trigger — never accept one from the client.** It exists purely so
+  Realtime can filter DELETE events on these junctions server-side, without
+  a parent-row lookup that a deleted parent has already made impossible.
+- **Never expose a timestamp-accepting archive function to any API role.**
+  `archive_stale_done_tasks()` (the one `pg_cron`/the fallback script call)
+  takes no arguments and reads the server clock; the deterministic seam,
+  `archive_stale_done_tasks_at(timestamptz)`, is for database tests only and
+  is revoked from `anon`, `authenticated` and `service_role`. Reintroducing
+  a client-reachable clock argument lets someone archive work early by lying
+  about the time.
 - **Don't store derived values.** No cached `resolved_count` column. Progress and
   the attention list are views.
 - **Read more than 1,000 rows by paging.** Supabase silently truncates a response
@@ -576,22 +814,32 @@ git push -u origin main
 
 ```
 src/
-  auth/        sign-in (Login), the roster gate (RequireAuth), auth state, usePermissions
+  auth/        sign-in (Login), the roster gate (RequireAuth), auth state, usePermissions,
+               TaskActor-based resource checks (canEditTask, canReviewProposal, …)
   season/      current-season state (SeasonProvider) and the route gate (SeasonGate)
   data/        one hook module per entity; season scoping in seasonQuery.ts, keys in queryKeys.ts
   core/        application error contract (DataError, isPermissionError)
-  tasks/ milestones/ proposals/ clauses/ metrics/
-               domain types (and tasks/taskState.ts: the one task-state definition)
+  departments/ tasks/ proposals/ specs/ book/ activity/ milestones/ clauses/ metrics/
+               small domain modules: each owns its own types.ts (generated row aliases) and
+               any pure presentation/validation logic (progress.ts, priority.ts, lifecycle.ts,
+               scope.ts, presentation.ts, …) — never a data/ import or a use*() hook (ADR-0011)
   roles/       role dialog, role-plan logic, and the member_roles hooks
-  pages/       one file per screen; bigger screens split into a folder (settings/, gantt/, …)
+  pages/       one file per screen; bigger screens split into a folder (settings/, gantt/,
+               specSheet/, archive/, …)
   proposals/ meetings/ finance/ account/ tutorial/
-               feature components shared between screens
+               feature components shared between screens (proposals/ and tutorial/ also hold
+               the domain module above — components and pure logic side by side by design)
   ui/          app header, error boundary, dialog, shared loading/error/empty states
   lib/         the single Supabase client + generated types
-docs/          ARCHITECTURE.md (layers, season lifecycle, RPCs, realtime, audit, export, CI)
+docs/          ARCHITECTURE.md (layers, departments, tasks/proposals, specs, Book, scheduler,
+               realtime, audit, export, CI); redesign/ (phase-by-phase design record, ADRs)
                now-metrics.sql — the SQL behind every number on the Now screen
-supabase/      migrations/ and tests/ (the SQL authorization and integrity tests)
-scripts/       verify_db.sh (database tests), gen-types.mjs, check-bundle-budget.mjs
+supabase/      migrations/ and tests/ (the SQL authorization and integrity tests);
+               scheduler/ (pg_cron install/uninstall, deployment-time, not migrations);
+               reconciliation/ (the department-manifest test fixture)
+scripts/       verify_db.sh (database tests), gen-types.mjs / gen-types-local.sh,
+               check-bundle-budget.mjs, check-boundaries.mjs (the lint-time boundary check),
+               run-archive-sweep.mjs (the trusted-server scheduler fallback)
 ```
 
 Two rules that keep it navigable: **one Supabase client** (`src/lib/supabase.ts`

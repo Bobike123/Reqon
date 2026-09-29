@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { permissionsFor, type PrivilegedRole } from '../auth/permissions.ts'
 import { NAV_ITEMS } from '../ui/navItems.ts'
 import { useTutorial } from './context.ts'
-import { CHAPTERS, TUTORIAL_STEPS, type TutorialStep } from './steps.ts'
+import { CHAPTERS, TUTORIAL_STEPS, type TourViewer, type TutorialStep } from './steps.ts'
 import { readTutorialRecord } from './storage.ts'
 import { buildTour, tourMenu } from './tour.ts'
 import { TutorialProvider } from './TutorialProvider.tsx'
 
-// Who is signed in. Which steps the tour shows follows from these roles.
-const { who } = vi.hoisted(() => ({ who: { roles: [] as string[] } }))
+// Who is signed in and which departments they head. Which steps the tour
+// shows follows from these.
+const { who } = vi.hoisted(() => ({ who: { roles: [] as string[], headOf: [] as string[] } }))
 vi.mock('../auth/context.ts', () => ({
   useAuth: () => ({
     status: 'member',
@@ -19,6 +20,13 @@ vi.mock('../auth/context.ts', () => ({
     member: { id: 'm1', full_name: 'Ada Rider' },
     roles: who.roles,
   }),
+}))
+// Head authority is resource-aware (ADR-0003), not a privileged role — the
+// tour learns it from useTaskActor(), the same hook Board/Gantt/Proposals
+// use, kept out of these tests via a direct mock rather than wiring
+// useSubteams()'s real Supabase-backed query through a QueryClientProvider.
+vi.mock('../data/useTaskActor.ts', () => ({
+  useTaskActor: () => ({ id: 'm1', status: 'active', isDeveloper: who.roles.includes('developer'), headOf: who.headOf }),
 }))
 
 const STEPS: TutorialStep[] = [
@@ -80,6 +88,7 @@ const card = () => screen.queryByTestId('tutorial-card')
 
 beforeEach(() => {
   who.roles = []
+  who.headOf = []
   window.localStorage.clear()
   saveSomething.mockClear()
   // jsdom lays nothing out; give every element a real-looking box.
@@ -310,19 +319,47 @@ describe('the tour never changes data', () => {
 })
 
 // What each role is taught, on the REAL tour. Pure: no rendering needed.
-const ids = (roles: PrivilegedRole[], kind: 'full' | 'role' = 'full') =>
-  buildTour(TUTORIAL_STEPS, permissionsFor(roles), { kind }).map((s) => s.id)
+const viewerFor = (roles: PrivilegedRole[], isHeadOfDepartment = false): TourViewer => ({
+  ...permissionsFor(roles),
+  isHeadOfDepartment,
+})
+const ids = (roles: PrivilegedRole[], kind: 'full' | 'role' = 'full', isHeadOfDepartment = false) =>
+  buildTour(TUTORIAL_STEPS, viewerFor(roles, isHeadOfDepartment), { kind }).map((s) => s.id)
 
 describe('what each role is taught', () => {
   it('members get every screen in depth, and nothing that needs a role', () => {
-    const steps = buildTour(TUTORIAL_STEPS, permissionsFor([]), { kind: 'full' })
+    const steps = buildTour(TUTORIAL_STEPS, viewerFor([]), { kind: 'full' })
     expect(steps.length).toBeGreaterThanOrEqual(30)
     expect(steps.filter((s) => s.audience)).toEqual([])
     const chapters = new Set(steps.map((s) => s.chapter))
     for (const chapter of CHAPTERS) {
       expect(chapters.has(chapter.id), chapter.id).toBe(chapter.id !== 'finances')
     }
-    expect(tourMenu(TUTORIAL_STEPS, permissionsFor([])).role).toBeNull()
+    expect(tourMenu(TUTORIAL_STEPS, viewerFor([])).role).toBeNull()
+  })
+
+  it('a Head with no privileged role is taught how to review and promote — resource-aware authority, not a role check', () => {
+    expect(ids(['president']).filter((id) => id.startsWith('proposal-'))).not.toContain('proposal-decision')
+    expect(ids([], 'full', true)).toEqual(
+      expect.arrayContaining(['proposal-decision', 'proposal-promote']),
+    )
+    // 'role' also appends the closing step (buildTour's own contract), so
+    // two Head-only steps plus "finish" is 3, not 2.
+    const menu = tourMenu(TUTORIAL_STEPS, viewerFor([], true))
+    expect(menu.role).toEqual({ label: 'Head of a department', count: 3 })
+  })
+
+  it('a plain member who heads no department never sees Head-only instruction', () => {
+    expect(ids([], 'full', false)).not.toEqual(
+      expect.arrayContaining(['proposal-decision', 'proposal-promote']),
+    )
+  })
+
+  it('a Head who also holds a privileged role is named as both, and sees each audience once', () => {
+    const menu = tourMenu(TUTORIAL_STEPS, viewerFor(['president'], true))
+    expect(menu.role?.label).toBe('President and Head of a department')
+    const all = ids(['president'], 'full', true)
+    expect(all.filter((id) => id === 'proposal-decision')).toHaveLength(1)
   })
 
   it('the Treasurer also learns to add, correct and hand over the money', () => {
@@ -349,7 +386,7 @@ describe('what each role is taught', () => {
         'role-hand-over',
         'roster-controls',
         'add-member',
-        'settings-subsystems',
+        'settings-departments',
         'settings-milestones',
         'new-season',
         'finance-read-only',
@@ -393,9 +430,9 @@ describe('what each role is taught', () => {
   })
 
   it('offers the Finances part only to people who can see finances', () => {
-    expect(tourMenu(TUTORIAL_STEPS, permissionsFor([])).chapters.map((c) => c.id)).not.toContain('finances')
+    expect(tourMenu(TUTORIAL_STEPS, viewerFor([])).chapters.map((c) => c.id)).not.toContain('finances')
     for (const role of ['president', 'vicepresident', 'treasurer', 'developer'] as const) {
-      expect(tourMenu(TUTORIAL_STEPS, permissionsFor([role])).chapters.map((c) => c.id), role).toContain('finances')
+      expect(tourMenu(TUTORIAL_STEPS, viewerFor([role])).chapters.map((c) => c.id), role).toContain('finances')
     }
   })
 })
@@ -419,6 +456,11 @@ describe('the real tour', () => {
         new RegExp(`data-tutorial="[^"]*\\b${step.target}\\b`).test(app)
       expect(found, `step "${step.id}" targets data-tutorial="${step.target}", which no screen renders`).toBe(true)
     }
+  })
+
+  it('gates reviewing and promoting a proposal to a department Head or a Developer, never Developer alone', () => {
+    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-decision')?.audience).toBe('headOrDeveloper')
+    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-promote')?.audience).toBe('headOrDeveloper')
   })
 
   it('visits every screen in the menu', () => {

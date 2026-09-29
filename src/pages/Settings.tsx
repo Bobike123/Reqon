@@ -5,9 +5,10 @@ import { usePermissions } from '../auth/usePermissions.ts'
 import { pageMain } from '../ui/layout.ts'
 import { AccountSettings } from './settings/AccountSettings.tsx'
 import { RosterSettings } from './settings/RosterSettings.tsx'
-import { SubsystemSettings } from './settings/SubsystemSettings.tsx'
+import { DepartmentSettings } from './settings/DepartmentSettings.tsx'
 import { MilestoneSettings } from './settings/MilestoneSettings.tsx'
 import { HandoverSettings } from './settings/HandoverSettings.tsx'
+import { BookSettings } from './settings/BookSettings.tsx'
 import { SeasonSettings } from './settings/SeasonSettings.tsx'
 import { SeasonExport } from './settings/SeasonExport.tsx'
 
@@ -25,7 +26,8 @@ import { SeasonExport } from './settings/SeasonExport.tsx'
 //   members      INSERT  -> admin_roster_insert (is_admin(): president, vice-president, developer)
 //   members      UPDATE  -> member_self_update  (own row, or is_admin())
 //   members      DELETE  -> no policy at all: people cannot be deleted, ever
-//   subteams     ALL     -> admin_write         (is_admin())
+//   subteams     INSERT  -> department_insert   (can_manage_departments(): president, vice-president, developer)
+//   subteams     UPDATE  -> department_update   (can_manage_departments()) — no DELETE policy: archive, never delete
 //   milestones   ALL     -> admin_write         (is_admin())
 //   seasons      ALL     -> admin_write         (is_admin())
 //   season switch        -> set_current_season() raises unless is_admin()
@@ -69,13 +71,13 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 export default function Settings() {
-  const { canAdminister, canManageRoles, roles: myRoles } = usePermissions()
+  const { canAdminister, canManageRoles, canManageDepartments, roles: myRoles } = usePermissions()
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain('reading')}>
       <PageHeader
         title="Settings"
-        description="The roster, subsystems, milestone dates, handover notes and seasons."
+        description="The roster, departments, milestone dates, handover notes and seasons."
         tutorialId="settings-overview"
       />
 
@@ -87,7 +89,7 @@ export default function Settings() {
           ? 'You can change everything on this page, including who holds which role.'
           : canAdminister
             ? 'You can change everything on this page except roles, which only the President or a Developer can give or take away.'
-            : 'Roster, subsystem, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
+            : 'Roster, department, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
 
       <Section title="Your account" tutorialId="settings-account">
@@ -98,15 +100,21 @@ export default function Settings() {
         <RosterSettings />
       </Section>
 
-      {canAdminister && (
-        <Section title="Subsystems" tutorialId="settings-subsystems">
-          <SubsystemSettings />
+      {canManageDepartments && (
+        <Section title="Departments" tutorialId="settings-departments">
+          <DepartmentSettings />
         </Section>
       )}
 
       {canAdminister && (
         <Section title="Milestone dates and points" tutorialId="settings-milestones">
           <MilestoneSettings />
+        </Section>
+      )}
+
+      {canAdminister && (
+        <Section title="Requirements Book">
+          <BookSettings />
         </Section>
       )}
 

@@ -1,3 +1,4 @@
+import { criticalityInfo, type LabelInfo } from '../../clauses/labels.ts'
 import type { Clause, ClauseState, ClauseStatus } from '../../clauses/types.ts'
 
 // One rule, joined to what the team did about it this season.
@@ -117,7 +118,7 @@ export type GroupingId =
   | 'book'
 
 export const GROUPINGS: { id: GroupingId; label: string; hint: string }[] = [
-  { id: 'subsystem', label: 'Subsystem', hint: 'Maps to a person' },
+  { id: 'subsystem', label: 'Department', hint: 'Maps to a person' },
   { id: 'kind', label: 'Kind of work', hint: 'What type of thing to do' },
   { id: 'milestone', label: 'Milestone', hint: 'What it blocks' },
   { id: 'owner', label: 'Owner', hint: 'Most useful before a meeting' },
@@ -209,25 +210,19 @@ export function groupRows(
 // --- Presentation helpers ---------------------------------------------------
 
 // criticality = 'blocking' means non-compliance scores NC. 'penalty' means
-// MP/SP/NP risk. Both must read at a glance.
+// MP/SP/NP risk. Both must read at a glance. The words live in
+// clauses/labels.ts so the badge, its explanation and the tutorial agree.
 export function criticalityBadge(
   criticality: string,
-): { label: string; title: string; className: string } | null {
-  if (criticality === 'blocking') {
-    return {
-      label: 'NC RISK',
-      title: 'Non-compliance scores NC — the bike does not run',
-      className: 'bg-red-700 text-white',
-    }
+): { label: string; title: string; className: string; info: LabelInfo } | null {
+  const info = criticalityInfo(criticality)
+  if (!info) return null
+  return {
+    label: info.label,
+    title: info.summary,
+    info,
+    className: criticality === 'blocking' ? 'bg-red-700 text-white' : 'bg-amber-500 text-amber-950',
   }
-  if (criticality === 'penalty') {
-    return {
-      label: 'PENALTY',
-      title: 'Non-compliance risks MP / SP / NP penalty points',
-      className: 'bg-amber-500 text-amber-950',
-    }
-  }
-  return null
 }
 
 type SpecEntry = { op?: string; unit?: string; value?: number }

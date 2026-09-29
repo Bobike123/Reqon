@@ -48,6 +48,9 @@ vi.mock('../tutorial/TutorialProvider.tsx', () => ({
   TutorialProvider: ({ children }: { children: unknown }) => children,
 }))
 vi.mock('../ui/AppHeader.tsx', () => ({ AppHeader: () => null }))
+// App.tsx subscribes to department/Head changes at the shell level, above
+// every route; this test is only about route-to-SeasonGate wiring.
+vi.mock('../data/useRealtimeSubteams.ts', () => ({ useRealtimeSubteams: () => 'off' }))
 
 // Every page stubbed to one marker each — what renders (the page, or
 // SeasonGate's fallback in front of it) is exactly what this test checks.

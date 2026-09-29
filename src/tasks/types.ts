@@ -7,3 +7,4 @@ import type { Database } from '../lib/database.types.ts'
 // name this type. data/useTasks.ts re-exports these for its own consumers.
 export type Task = Database['public']['Tables']['tasks']['Row']
 export type TaskState = Database['public']['Enums']['task_state']
+export type TaskPriority = Database['public']['Enums']['task_priority']

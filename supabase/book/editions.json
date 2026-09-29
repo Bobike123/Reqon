@@ -1,0 +1,15 @@
+{
+  "$comment": "Local Requirements Book sources, read by scripts/book/sync-local.mjs (npm run book:sync:local). One entry per regulations edition (regulation_documents.regs_ref). The sha256 pins the exact file: a different file under the same name is refused, never silently used. footer is the running footer that carries each page's PRINTED number (one capture group). identity is text the document's opening pages must contain. Local development only: nothing here reaches a hosted project.",
+  "bucket": "regulations",
+  "editions": [
+    {
+      "regs_ref": "MS2627 Rev.01",
+      "source": "static/book/MS2627_MotoStudent.pdf",
+      "sha256": "53013ec6dd272c81379dd5f709f8a76f84c5b453b265ee8f7661ecc6d8bf7669",
+      "page_count": 234,
+      "identity": ["MS2627 IX MotoStudent International Competition", "Rev. 01 – 04/2026"],
+      "footer": "Rev\\. 01 – 04/2026\\s+(\\d+)",
+      "min_match_ratio": 0.95
+    }
+  ]
+}

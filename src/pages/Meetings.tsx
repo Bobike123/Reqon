@@ -8,7 +8,9 @@ import {
   type Meeting,
 } from '../data/useMeetings.ts'
 import { formatDay } from '../lib/dates.ts'
+import { MarkdownField } from '../meetings/MarkdownField.tsx'
 import { MeetingDialog } from '../meetings/MeetingDialog.tsx'
+import { MeetingText } from '../meetings/MeetingText.tsx'
 import { Dialog } from '../ui/Dialog.tsx'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
@@ -126,14 +128,18 @@ export default function Meetings() {
 
                 {meeting.agenda && (
                   <div className="mt-2">
-                    <h4 className="text-xs font-medium text-slate-600">Agenda</h4>
-                    <p className="mt-0.5 text-sm whitespace-pre-line text-slate-800">{meeting.agenda}</p>
+                    <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Agenda</p>
+                    <div className="mt-1">
+                      <MeetingText text={meeting.agenda} testId={`meeting-agenda-${meeting.id}`} />
+                    </div>
                   </div>
                 )}
                 {meeting.notes && (
-                  <div className="mt-2">
-                    <h4 className="text-xs font-medium text-slate-600">Minutes</h4>
-                    <p className="mt-0.5 text-sm whitespace-pre-line text-slate-800">{meeting.notes}</p>
+                  <div className="mt-3 border-t border-slate-100 pt-2">
+                    <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">Minutes</p>
+                    <div className="mt-1">
+                      <MeetingText text={meeting.notes} testId={`meeting-notes-${meeting.id}`} />
+                    </div>
                   </div>
                 )}
                 {meeting.attendees && (
@@ -177,8 +183,11 @@ export default function Meetings() {
       </div>
 
       {/* The global agenda template. Editing THIS is president or developer
-          only; a vice-president still writes each meeting's own agenda above. */}
-      {can.canEditMeetingTemplate && <TemplateEditor />}
+          only (template_write: can_delete_records()); a vice-president still
+          writes each meeting's own agenda above. */}
+      {(can.canCreateMeeting || can.canEditMeetingTemplate) && (
+        <DefaultAgenda canEdit={can.canEditMeetingTemplate} onSaved={setMessage} />
+      )}
 
       <MeetingDialog
         open={editing !== null}
@@ -233,60 +242,123 @@ export default function Meetings() {
 }
 
 // The default agenda every new meeting starts from. Separate from any one
-// meeting's content on purpose: this is club configuration.
-function TemplateEditor() {
+// meeting's content on purpose: this is club configuration. Readable by
+// whoever calls meetings; edited in a dialog by the President or a Developer.
+//
+// The draft lives here, outside the dialog, so closing the dialog by accident
+// (Escape, a click outside) or a failed save never loses what was typed; only
+// "Discard changes" or a successful save clears it.
+function DefaultAgenda({ canEdit, onSaved }: { canEdit: boolean; onSaved: (message: string) => void }) {
   const template = useMeetingTemplate()
   const save = useSaveMeetingTemplate()
-  const [body, setBody] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [open, setOpen] = useState(false)
+  // The text being edited, and the saved text it started from.
+  const [draft, setDraft] = useState<{ body: string; base: string } | null>(null)
   const id = useId()
-  const value = body ?? template.data ?? ''
+  const current = template.data ?? ''
+  const dirty = draft !== null && draft.body !== draft.base
+  // Someone else saved a different default agenda after this draft began.
+  const movedOn = draft !== null && template.data !== undefined && draft.base !== current
+
+  const openEditor = () => {
+    save.reset()
+    if (draft === null) setDraft({ body: current, base: current })
+    setOpen(true)
+  }
+  const discard = () => {
+    setDraft(null)
+    save.reset()
+    setOpen(false)
+  }
+  async function submit() {
+    if (!draft) return
+    try {
+      await save.mutateAsync(draft.body)
+      setDraft(null)
+      setOpen(false)
+      onSaved('Default agenda saved. Meetings that already exist are unchanged.')
+    } catch {
+      // Shown in the dialog; the draft stays.
+    }
+  }
 
   return (
-    <section className="mt-8" aria-labelledby={`${id}-heading`} data-tutorial="meeting-template">
-      <h2 id={`${id}-heading`} className="text-sm font-semibold text-slate-900">
-        Default agenda for new meetings
-      </h2>
-      <p className="mt-0.5 text-xs text-slate-600">
-        Every new meeting starts from this. Changing it here changes nothing about meetings that
-        already exist. Only the President and a Developer can edit it.
-      </p>
-      <label className="sr-only" htmlFor={`${id}-body`}>
-        Default agenda template
-      </label>
-      <textarea
-        id={`${id}-body`}
-        rows={10}
-        value={value}
-        disabled={save.isPending || template.isPending}
-        onChange={(e) => {
-          setBody(e.target.value)
-          setSaved(false)
-        }}
-        className="mt-2 w-full rounded border border-slate-300 px-2 py-1.5 font-mono text-xs text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-      />
-      <ActionError error={save.error} className="mt-2" />
-      <div className="mt-2 flex items-center gap-3">
-        <button
-          type="button"
-          className={buttonSecondary}
-          disabled={save.isPending || body === null}
-          onClick={async () => {
-            try {
-              await save.mutateAsync(value)
-              setBody(null)
-              setSaved(true)
-            } catch {
-              // Shown by ActionError above.
-            }
-          }}
-        >
-          {save.isPending ? 'Saving…' : 'Save template'}
-        </button>
-        <p role="status" className="text-xs text-emerald-800">
-          {saved ? 'Template saved.' : ''}
-        </p>
+    <section className="mt-8 rounded-lg border border-slate-200 bg-white p-3" aria-labelledby={`${id}-heading`} data-tutorial="meeting-template">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 id={`${id}-heading`} className="text-sm font-semibold text-slate-900">
+            Default agenda for new meetings
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-600">
+            Every new meeting starts from this. Changing it changes nothing about meetings that already exist.
+            {canEdit ? '' : ' The President or a Developer edits it.'}
+          </p>
+        </div>
+        {canEdit && (
+          <button type="button" className={buttonSecondary} onClick={openEditor} disabled={template.isPending} data-testid="template-edit">
+            Edit default agenda
+          </button>
+        )}
       </div>
+      {dirty && !open && (
+        <p className="mt-2 text-xs text-amber-900" data-testid="template-draft-kept">
+          You have unsaved changes to the default agenda. Open “Edit default agenda” to save or discard them.
+        </p>
+      )}
+      <details className="mt-2">
+        <summary className="cursor-pointer text-xs font-medium text-slate-700 underline-offset-2 hover:underline">Show the default agenda</summary>
+        <div className="mt-2 rounded border border-slate-100 bg-slate-50 p-2">
+          {template.error ? (
+            <ActionError error={template.error} />
+          ) : template.isPending ? (
+            <p className="text-sm text-slate-600">Loading…</p>
+          ) : current.trim() ? (
+            <MeetingText text={current} testId="template-view" />
+          ) : (
+            <p className="text-sm text-slate-600">The default agenda is empty.</p>
+          )}
+        </div>
+      </details>
+
+      <Dialog open={open} onClose={() => setOpen(false)} labelledBy={`${id}-dialog`} dismissible={!save.isPending}>
+        {draft && (
+          <div>
+            <h2 id={`${id}-dialog`} className="text-base font-semibold text-balance text-slate-900">
+              Edit default agenda
+            </h2>
+            {movedOn && (
+              <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-950">
+                Someone saved a different default agenda after you started. Saving replaces it with yours.{' '}
+                <button type="button" className="underline underline-offset-2" onClick={() => setDraft({ body: current, base: current })}>
+                  Start again from theirs
+                </button>
+              </p>
+            )}
+            <div className="mt-3">
+              <MarkdownField
+                id={`${id}-body`}
+                label="Default agenda"
+                value={draft.body}
+                onChange={(body) => setDraft({ ...draft, body })}
+                rows={12}
+                disabled={save.isPending}
+              />
+            </div>
+            <ActionError error={save.error} className="mt-3" />
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className={buttonSecondary} disabled={save.isPending || !dirty} onClick={discard}>
+                Discard changes
+              </button>
+              <button type="button" className={buttonSecondary} disabled={save.isPending} onClick={() => setOpen(false)}>
+                Close
+              </button>
+              <button type="button" className={buttonPrimary} disabled={save.isPending || !dirty} onClick={() => void submit()}>
+                {save.isPending ? 'Saving…' : 'Save default agenda'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Dialog>
     </section>
   )
 }

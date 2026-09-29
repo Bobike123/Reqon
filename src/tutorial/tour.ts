@@ -1,5 +1,5 @@
-import { describeRoles, type Permissions } from '../auth/permissions.ts'
-import { AUDIENCES, CHAPTERS, type ChapterId, type TutorialStep } from './steps.ts'
+import { describeRoles } from '../auth/permissions.ts'
+import { AUDIENCES, CHAPTERS, type ChapterId, type TourViewer, type TutorialStep } from './steps.ts'
 
 // Which tour to run: everything for this person, only the steps their role
 // adds, or one screen on its own.
@@ -19,7 +19,7 @@ export function chapterLabel(id: ChapterId): string {
 
 // A step is for everyone unless it names an audience, and then only for the
 // people that audience includes.
-export function isFor(step: TutorialStep, can: Permissions): boolean {
+export function isFor(step: TutorialStep, can: TourViewer): boolean {
   return !step.audience || AUDIENCES[step.audience].includes(can)
 }
 
@@ -27,7 +27,7 @@ export function isFor(step: TutorialStep, can: Permissions): boolean {
 // without rendering anything (tutorial.test.tsx).
 export function buildTour(
   steps: readonly TutorialStep[],
-  can: Permissions,
+  can: TourViewer,
   selection: TourSelection,
 ): TutorialStep[] {
   const mine = steps.filter((step) => isFor(step, can))
@@ -44,12 +44,22 @@ export function buildTour(
   }
 }
 
-export function tourMenu(steps: readonly TutorialStep[], can: Permissions): TourMenu {
+// The role tour's label: the privileged roles held, Head of a department
+// added on if it applies, in one readable phrase — "President and Head of a
+// department", or just "Head of a department" for someone with no privileged
+// role at all.
+function roleLabel(can: TourViewer): string {
+  if (!can.isHeadOfDepartment) return describeRoles(can.roles)
+  if (can.roles.length === 0) return 'Head of a department'
+  return `${describeRoles(can.roles)} and Head of a department`
+}
+
+export function tourMenu(steps: readonly TutorialStep[], can: TourViewer): TourMenu {
   const full = buildTour(steps, can, { kind: 'full' })
   const role = buildTour(steps, can, { kind: 'role' })
   return {
     full: full.length,
-    role: role.length > 0 ? { label: describeRoles(can.roles), count: role.length } : null,
+    role: role.length > 0 ? { label: roleLabel(can), count: role.length } : null,
     chapters: CHAPTERS.filter((c) => c.id !== 'end')
       .map((c) => ({ id: c.id, label: c.label, count: full.filter((s) => s.chapter === c.id).length }))
       .filter((c) => c.count > 0),

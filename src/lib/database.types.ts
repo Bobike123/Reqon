@@ -163,7 +163,10 @@ export type Database = {
           obligation: string
           phase: string | null
           printed_ref: string
+          regs_ref: string | null
           section: string
+          source_page: number | null
+          source_subject_key: string | null
           specs: Json
           subteam_key: string | null
         }
@@ -179,7 +182,10 @@ export type Database = {
           obligation: string
           phase?: string | null
           printed_ref: string
+          regs_ref?: string | null
           section: string
+          source_page?: number | null
+          source_subject_key?: string | null
           specs?: Json
           subteam_key?: string | null
         }
@@ -195,11 +201,28 @@ export type Database = {
           obligation?: string
           phase?: string | null
           printed_ref?: string
+          regs_ref?: string | null
           section?: string
+          source_page?: number | null
+          source_subject_key?: string | null
           specs?: Json
           subteam_key?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "clauses_regs_ref_fkey"
+            columns: ["regs_ref"]
+            isOneToOne: false
+            referencedRelation: "regulation_documents"
+            referencedColumns: ["regs_ref"]
+          },
+          {
+            foreignKeyName: "clauses_source_subject_key_fkey"
+            columns: ["source_subject_key"]
+            isOneToOne: false
+            referencedRelation: "regulation_subjects"
+            referencedColumns: ["key"]
+          },
           {
             foreignKeyName: "clauses_subteam_key_fkey"
             columns: ["subteam_key"]
@@ -434,6 +457,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "meetings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "meetings_season_id_fkey"
             columns: ["season_id"]
             isOneToOne: false
@@ -643,6 +673,144 @@ export type Database = {
           },
         ]
       }
+      proposal_requirements: {
+        Row: {
+          clause_key: string
+          created_at: string
+          created_by: string | null
+          proposal_id: string
+          season_id: string
+        }
+        Insert: {
+          clause_key: string
+          created_at?: string
+          created_by?: string | null
+          proposal_id: string
+          season_id: string
+        }
+        Update: {
+          clause_key?: string
+          created_at?: string
+          created_by?: string | null
+          proposal_id?: string
+          season_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_requirements_clause_key_fkey"
+            columns: ["clause_key"]
+            isOneToOne: false
+            referencedRelation: "clauses"
+            referencedColumns: ["clause_key"]
+          },
+          {
+            foreignKeyName: "proposal_requirements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_requirements_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "task_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+        ]
+      }
+      regulation_documents: {
+        Row: {
+          edition: string | null
+          page_count: number | null
+          page_offset: number
+          regs_ref: string
+          storage_path: string | null
+          title: string | null
+          updated_at: string
+          updated_by: string | null
+          url: string | null
+        }
+        Insert: {
+          edition?: string | null
+          page_count?: number | null
+          page_offset?: number
+          regs_ref: string
+          storage_path?: string | null
+          title?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          url?: string | null
+        }
+        Update: {
+          edition?: string | null
+          page_count?: number | null
+          page_offset?: number
+          regs_ref?: string
+          storage_path?: string | null
+          title?: string | null
+          updated_at?: string
+          updated_by?: string | null
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "regulation_documents_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      regulation_subjects: {
+        Row: {
+          book_section: string | null
+          description: string | null
+          is_parked: boolean
+          key: string
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          book_section?: string | null
+          description?: string | null
+          is_parked?: boolean
+          key: string
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          book_section?: string | null
+          description?: string | null
+          is_parked?: boolean
+          key?: string
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
       seasons: {
         Row: {
           bike_number: number | null
@@ -682,50 +850,215 @@ export type Database = {
         }
         Relationships: []
       }
+      spec_measurements: {
+        Row: {
+          corrects_id: string | null
+          id: string
+          invalidated_at: string | null
+          invalidated_by: string | null
+          invalidation_reason: string | null
+          measured_at: string | null
+          measured_by: string | null
+          note: string | null
+          origin: string
+          recorded_at: string
+          request_id: string
+          season_id: string
+          source: string | null
+          spec_id: string
+          value_bool: boolean | null
+          value_numeric: number | null
+        }
+        Insert: {
+          corrects_id?: string | null
+          id?: string
+          invalidated_at?: string | null
+          invalidated_by?: string | null
+          invalidation_reason?: string | null
+          measured_at?: string | null
+          measured_by?: string | null
+          note?: string | null
+          origin?: string
+          recorded_at?: string
+          request_id?: string
+          season_id: string
+          source?: string | null
+          spec_id: string
+          value_bool?: boolean | null
+          value_numeric?: number | null
+        }
+        Update: {
+          corrects_id?: string | null
+          id?: string
+          invalidated_at?: string | null
+          invalidated_by?: string | null
+          invalidation_reason?: string | null
+          measured_at?: string | null
+          measured_by?: string | null
+          note?: string | null
+          origin?: string
+          recorded_at?: string
+          request_id?: string
+          season_id?: string
+          source?: string | null
+          spec_id?: string
+          value_bool?: boolean | null
+          value_numeric?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "spec_measurements_corrects_id_fkey"
+            columns: ["corrects_id"]
+            isOneToOne: false
+            referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_invalidated_by_fkey"
+            columns: ["invalidated_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_measured_by_fkey"
+            columns: ["measured_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "specs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       specs: {
         Row: {
+          acceptable: number | null
           clause_key: string | null
           comparator: string
           condition: string | null
+          current_measurement_id: string | null
+          direction: string
+          goal: number | null
+          goal_bool: boolean | null
+          goal_max: number | null
+          goal_tolerance: number | null
           id: string
+          ideal: number | null
+          measure_kind: string | null
           measured: number | null
           measured_at: string | null
+          measured_bool: boolean | null
           measured_by: string | null
           parameter: string
+          plausible_max: number | null
+          plausible_min: number | null
           season_id: string
           sort_order: number
           target: number | null
+          target_bool: boolean | null
+          target_max: number | null
+          target_max_inclusive: boolean
+          target_min_inclusive: boolean
           target_text: string | null
+          target_tolerance: number | null
           unit: string | null
         }
         Insert: {
+          acceptable?: number | null
           clause_key?: string | null
           comparator: string
           condition?: string | null
+          current_measurement_id?: string | null
+          direction: string
+          goal?: number | null
+          goal_bool?: boolean | null
+          goal_max?: number | null
+          goal_tolerance?: number | null
           id?: string
+          ideal?: number | null
+          measure_kind?: string | null
           measured?: number | null
           measured_at?: string | null
+          measured_bool?: boolean | null
           measured_by?: string | null
           parameter: string
+          plausible_max?: number | null
+          plausible_min?: number | null
           season_id: string
           sort_order?: number
           target?: number | null
+          target_bool?: boolean | null
+          target_max?: number | null
+          target_max_inclusive?: boolean
+          target_min_inclusive?: boolean
           target_text?: string | null
+          target_tolerance?: number | null
           unit?: string | null
         }
         Update: {
+          acceptable?: number | null
           clause_key?: string | null
           comparator?: string
           condition?: string | null
+          current_measurement_id?: string | null
+          direction?: string
+          goal?: number | null
+          goal_bool?: boolean | null
+          goal_max?: number | null
+          goal_tolerance?: number | null
           id?: string
+          ideal?: number | null
+          measure_kind?: string | null
           measured?: number | null
           measured_at?: string | null
+          measured_bool?: boolean | null
           measured_by?: string | null
           parameter?: string
+          plausible_max?: number | null
+          plausible_min?: number | null
           season_id?: string
           sort_order?: number
           target?: number | null
+          target_bool?: boolean | null
+          target_max?: number | null
+          target_max_inclusive?: boolean
+          target_min_inclusive?: boolean
           target_text?: string | null
+          target_tolerance?: number | null
           unit?: string | null
         }
         Relationships: [
@@ -735,6 +1068,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "clauses"
             referencedColumns: ["clause_key"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "specs_measured_by_fkey"
@@ -768,7 +1108,10 @@ export type Database = {
       }
       subteams: {
         Row: {
-          book_section: string
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          book_section: string | null
           description: string | null
           is_parked: boolean
           key: string
@@ -777,7 +1120,10 @@ export type Database = {
           sort_order: number
         }
         Insert: {
-          book_section: string
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          book_section?: string | null
           description?: string | null
           is_parked?: boolean
           key: string
@@ -786,7 +1132,10 @@ export type Database = {
           sort_order?: number
         }
         Update: {
-          book_section?: string
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          book_section?: string | null
           description?: string | null
           is_parked?: boolean
           key?: string
@@ -796,6 +1145,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "subteams_archived_by_fkey"
+            columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "subteams_lead_id_fkey"
             columns: ["lead_id"]
             isOneToOne: false
@@ -804,50 +1160,290 @@ export type Database = {
           },
         ]
       }
+      task_proposals: {
+        Row: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          context?: string | null
+          decided_at?: string | null
+          decision?: string | null
+          due_date?: string | null
+          id?: string
+          legacy_incomplete?: boolean
+          meeting_id?: string | null
+          milestone_key?: string | null
+          outcome?: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id?: string | null
+          priority?: Database["public"]["Enums"]["task_priority"]
+          raised_by?: string | null
+          raised_on?: string
+          season_id: string
+          starred?: boolean
+          state?: Database["public"]["Enums"]["topic_state"]
+          subteam_key?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          context?: string | null
+          decided_at?: string | null
+          decision?: string | null
+          due_date?: string | null
+          id?: string
+          legacy_incomplete?: boolean
+          meeting_id?: string | null
+          milestone_key?: string | null
+          outcome?: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id?: string | null
+          priority?: Database["public"]["Enums"]["task_priority"]
+          raised_by?: string | null
+          raised_on?: string
+          season_id?: string
+          starred?: boolean
+          state?: Database["public"]["Enums"]["topic_state"]
+          subteam_key?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_proposals_archived_by_fkey"
+            columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_proposals_milestone_key_fkey"
+            columns: ["milestone_key"]
+            isOneToOne: false
+            referencedRelation: "milestones"
+            referencedColumns: ["key"]
+          },
+          {
+            foreignKeyName: "task_proposals_subteam_key_fkey"
+            columns: ["subteam_key"]
+            isOneToOne: false
+            referencedRelation: "subteams"
+            referencedColumns: ["key"]
+          },
+          {
+            foreignKeyName: "task_proposals_subteam_key_fkey"
+            columns: ["subteam_key"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["key"]
+          },
+          {
+            foreignKeyName: "topics_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_raised_by_fkey"
+            columns: ["raised_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topics_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+        ]
+      }
+      task_requirements: {
+        Row: {
+          clause_key: string
+          created_at: string
+          created_by: string | null
+          season_id: string
+          task_id: string
+        }
+        Insert: {
+          clause_key: string
+          created_at?: string
+          created_by?: string | null
+          season_id: string
+          task_id: string
+        }
+        Update: {
+          clause_key?: string
+          created_at?: string
+          created_by?: string | null
+          season_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_requirements_clause_key_fkey"
+            columns: ["clause_key"]
+            isOneToOne: false
+            referencedRelation: "clauses"
+            referencedColumns: ["clause_key"]
+          },
+          {
+            foreignKeyName: "task_requirements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_requirements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "task_requirements_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tasks: {
         Row: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
           created_at: string
           created_by: string | null
           detail: string | null
           due_date: string | null
           id: string
+          links_required: boolean
+          milestone_key: string | null
           owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
           season_id: string
           section_id: string | null
           source_proposal: string | null
           starred: boolean
+          starts_on: string | null
           state: Database["public"]["Enums"]["task_state"]
           subteam_key: string | null
           title: string
           updated_at: string
         }
         Insert: {
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          completed_at?: string | null
+          completion_source?: string | null
           created_at?: string
           created_by?: string | null
           detail?: string | null
           due_date?: string | null
           id?: string
+          links_required?: boolean
+          milestone_key?: string | null
           owner_id?: string | null
+          priority?: Database["public"]["Enums"]["task_priority"]
           season_id: string
           section_id?: string | null
           source_proposal?: string | null
           starred?: boolean
+          starts_on?: string | null
           state?: Database["public"]["Enums"]["task_state"]
           subteam_key?: string | null
           title: string
           updated_at?: string
         }
         Update: {
+          archive_reason?: string | null
+          archived_at?: string | null
+          archived_by?: string | null
+          completed_at?: string | null
+          completion_source?: string | null
           created_at?: string
           created_by?: string | null
           detail?: string | null
           due_date?: string | null
           id?: string
+          links_required?: boolean
+          milestone_key?: string | null
           owner_id?: string | null
+          priority?: Database["public"]["Enums"]["task_priority"]
           season_id?: string
           section_id?: string | null
           source_proposal?: string | null
           starred?: boolean
+          starts_on?: string | null
           state?: Database["public"]["Enums"]["task_state"]
           subteam_key?: string | null
           title?: string
@@ -855,11 +1451,25 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "tasks_archived_by_fkey"
+            columns: ["archived_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "tasks_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "members"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_milestone_key_fkey"
+            columns: ["milestone_key"]
+            isOneToOne: false
+            referencedRelation: "milestones"
+            referencedColumns: ["key"]
           },
           {
             foreignKeyName: "tasks_owner_id_fkey"
@@ -897,7 +1507,7 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "tasks_source_proposal_fkey"
+            foreignKeyName: "tasks_source_topic_fkey"
             columns: ["source_proposal"]
             isOneToOne: false
             referencedRelation: "task_proposals"
@@ -919,147 +1529,43 @@ export type Database = {
           },
         ]
       }
-      task_proposals: {
-        Row: {
-          context: string | null
-          decided_at: string | null
-          decision: string | null
-          id: string
-          meeting_id: string | null
-          owner_id: string | null
-          raised_by: string | null
-          raised_on: string
-          season_id: string
-          starred: boolean
-          state: Database["public"]["Enums"]["topic_state"]
-          title: string
-          updated_at: string
-        }
-        Insert: {
-          context?: string | null
-          decided_at?: string | null
-          decision?: string | null
-          id?: string
-          meeting_id?: string | null
-          owner_id?: string | null
-          raised_by?: string | null
-          raised_on?: string
-          season_id: string
-          starred?: boolean
-          state?: Database["public"]["Enums"]["topic_state"]
-          title: string
-          updated_at?: string
-        }
-        Update: {
-          context?: string | null
-          decided_at?: string | null
-          decision?: string | null
-          id?: string
-          meeting_id?: string | null
-          owner_id?: string | null
-          raised_by?: string | null
-          raised_on?: string
-          season_id?: string
-          starred?: boolean
-          state?: Database["public"]["Enums"]["topic_state"]
-          title?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "task_proposals_meeting_id_fkey"
-            columns: ["meeting_id"]
-            isOneToOne: false
-            referencedRelation: "meetings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "task_proposals_owner_id_fkey"
-            columns: ["owner_id"]
-            isOneToOne: false
-            referencedRelation: "members"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "task_proposals_raised_by_fkey"
-            columns: ["raised_by"]
-            isOneToOne: false
-            referencedRelation: "members"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "task_proposals_season_id_fkey"
-            columns: ["season_id"]
-            isOneToOne: false
-            referencedRelation: "seasons"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "task_proposals_season_id_fkey"
-            columns: ["season_id"]
-            isOneToOne: false
-            referencedRelation: "v_current_season"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "task_proposals_season_id_fkey"
-            columns: ["season_id"]
-            isOneToOne: false
-            referencedRelation: "v_subteam_progress"
-            referencedColumns: ["season_id"]
-          },
-        ]
-      }
     }
     Views: {
       spec_verdicts: {
         Row: {
+          acceptable: number | null
           clause_key: string | null
           comparator: string | null
           condition: string | null
+          current_measurement_id: string | null
+          direction: string | null
+          goal: number | null
+          goal_bool: boolean | null
+          goal_max: number | null
+          goal_status: string | null
+          goal_tolerance: number | null
           id: string | null
+          ideal: number | null
+          measure_kind: string | null
           measured: number | null
           measured_at: string | null
+          measured_bool: boolean | null
           measured_by: string | null
           parameter: string | null
+          plausible_max: number | null
+          plausible_min: number | null
           season_id: string | null
           sort_order: number | null
           target: number | null
+          target_bool: boolean | null
+          target_max: number | null
+          target_max_inclusive: boolean | null
+          target_min_inclusive: boolean | null
           target_text: string | null
+          target_tolerance: number | null
           unit: string | null
           verdict: string | null
-        }
-        Insert: {
-          clause_key?: string | null
-          comparator?: string | null
-          condition?: string | null
-          id?: string | null
-          measured?: number | null
-          measured_at?: string | null
-          measured_by?: string | null
-          parameter?: string | null
-          season_id?: string | null
-          sort_order?: number | null
-          target?: number | null
-          target_text?: string | null
-          unit?: string | null
-          verdict?: never
-        }
-        Update: {
-          clause_key?: string | null
-          comparator?: string | null
-          condition?: string | null
-          id?: string | null
-          measured?: number | null
-          measured_at?: string | null
-          measured_by?: string | null
-          parameter?: string | null
-          season_id?: string | null
-          sort_order?: number | null
-          target?: number | null
-          target_text?: string | null
-          unit?: string | null
-          verdict?: never
+          zone: string | null
         }
         Relationships: [
           {
@@ -1068,6 +1574,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "clauses"
             referencedColumns: ["clause_key"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "specs_measured_by_fkey"
@@ -1098,19 +1611,6 @@ export type Database = {
             referencedColumns: ["season_id"]
           },
         ]
-      }
-      v_attention: {
-        Row: {
-          clause_key: string | null
-          kind: string | null
-          owner_id: string | null
-          reason: string | null
-          ref: string | null
-          season_id: string | null
-          starred: boolean | null
-          title: string | null
-        }
-        Relationships: []
       }
       v_current_season: {
         Row: {
@@ -1154,38 +1654,488 @@ export type Database = {
     }
     Functions: {
       apply_role_plan: { Args: { p_changes: Json }; Returns: undefined }
+      archive_stale_done_tasks: {
+        Args: never
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          due_date: string | null
+          id: string
+          links_required: boolean
+          milestone_key: string | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          season_id: string
+          section_id: string | null
+          source_proposal: string | null
+          starred: boolean
+          starts_on: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      archive_stale_done_tasks_at: {
+        Args: { p_now: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          due_date: string | null
+          id: string
+          links_required: boolean
+          milestone_key: string | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          season_id: string
+          section_id: string | null
+          source_proposal: string | null
+          starred: boolean
+          starts_on: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      archive_task: {
+        Args: { p_reason?: string; p_task_id: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          due_date: string | null
+          id: string
+          links_required: boolean
+          milestone_key: string | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          season_id: string
+          section_id: string | null
+          source_proposal: string | null
+          starred: boolean
+          starts_on: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      assert_task_links: { Args: { p_task_id: string }; Returns: undefined }
+      attention: {
+        Args: { p_season: string; p_today: string }
+        Returns: {
+          clause_key: string
+          kind: string
+          owner_id: string
+          reason: string
+          ref: string
+          season_id: string
+          starred: boolean
+          title: string
+        }[]
+      }
       can_delete_records: { Args: never; Returns: boolean }
+      can_edit_spec_targets: { Args: never; Returns: boolean }
+      can_edit_task: { Args: { p_task_id: string }; Returns: boolean }
+      can_manage_departments: { Args: never; Returns: boolean }
       can_manage_finances: { Args: never; Returns: boolean }
       can_manage_roles: { Args: never; Returns: boolean }
+      can_review_proposal: { Args: { p_proposal_id: string }; Returns: boolean }
       can_view_finances: { Args: never; Returns: boolean }
+      correct_spec_measurement: {
+        Args: {
+          p_measured_at?: string
+          p_measurement_id: string
+          p_reason: string
+          p_request_id: string
+          p_value_bool?: boolean
+          p_value_numeric?: number
+        }
+        Returns: {
+          corrects_id: string | null
+          id: string
+          invalidated_at: string | null
+          invalidated_by: string | null
+          invalidation_reason: string | null
+          measured_at: string | null
+          measured_by: string | null
+          note: string | null
+          origin: string
+          recorded_at: string
+          request_id: string
+          season_id: string
+          source: string | null
+          spec_id: string
+          value_bool: boolean | null
+          value_numeric: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "spec_measurements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      dearmor: { Args: { "": string }; Returns: string }
+      gen_random_uuid: { Args: never; Returns: string }
+      gen_salt: { Args: { "": string }; Returns: string }
       has_role: {
         Args: { wanted: Database["public"]["Enums"]["privileged_role"] }
         Returns: boolean
       }
+      invalidate_spec_measurement: {
+        Args: { p_measurement_id: string; p_reason: string }
+        Returns: {
+          corrects_id: string | null
+          id: string
+          invalidated_at: string | null
+          invalidated_by: string | null
+          invalidation_reason: string | null
+          measured_at: string | null
+          measured_by: string | null
+          note: string | null
+          origin: string
+          recorded_at: string
+          request_id: string
+          season_id: string
+          source: string | null
+          spec_id: string
+          value_bool: boolean | null
+          value_numeric: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "spec_measurements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      is_active_member: { Args: never; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
+      is_department_head: { Args: { p_key: string }; Returns: boolean }
+      is_developer: { Args: never; Returns: boolean }
+      is_finite_number: { Args: { n: number }; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
+      link_task_requirement: {
+        Args: { p_clause_key: string; p_task_id: string }
+        Returns: boolean
+      }
+      lock_proposal_for_command: {
+        Args: { p_proposal_id: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      pgp_armor_headers: {
+        Args: { "": string }
+        Returns: Record<string, unknown>[]
+      }
       promote_proposal: {
         Args: {
-          p_due_date?: string | null
-          p_owner_id?: string | null
+          p_owner_id?: string
           p_proposal_id: string
           p_season_id: string
-          p_state?: Database["public"]["Enums"]["task_state"]
         }
-        Returns: { created: boolean; task: Database["public"]["Tables"]["tasks"]["Row"] }[]
+        Returns: {
+          created: boolean
+          task: Database["public"]["Tables"]["tasks"]["Row"]
+        }[]
+      }
+      reconciliation_apply: { Args: { p_manifest: Json }; Returns: Json }
+      reconciliation_preflight: {
+        Args: { p_manifest: Json }
+        Returns: {
+          action: string
+          active_tasks: number
+          archived_tasks: number
+          clauses: number
+          duties: number
+          handovers: number
+          head_id: string
+          head_status: string
+          key: string
+          ok: boolean
+          problem: string
+          unresolved_proposals: number
+        }[]
+      }
+      record_spec_measurement: {
+        Args: {
+          p_measured_at?: string
+          p_note?: string
+          p_request_id: string
+          p_season_id: string
+          p_source?: string
+          p_spec_id: string
+          p_value_bool?: boolean
+          p_value_numeric?: number
+        }
+        Returns: {
+          corrects_id: string | null
+          id: string
+          invalidated_at: string | null
+          invalidated_by: string | null
+          invalidation_reason: string | null
+          measured_at: string | null
+          measured_by: string | null
+          note: string | null
+          origin: string
+          recorded_at: string
+          request_id: string
+          season_id: string
+          source: string | null
+          spec_id: string
+          value_bool: boolean | null
+          value_numeric: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "spec_measurements"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      refresh_spec_current: { Args: { p_spec_id: string }; Returns: undefined }
+      reorder_departments: {
+        Args: { p_ordered_keys: string[] }
+        Returns: undefined
+      }
+      restore_task: {
+        Args: { p_task_id: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          due_date: string | null
+          id: string
+          links_required: boolean
+          milestone_key: string | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          season_id: string
+          section_id: string | null
+          source_proposal: string | null
+          starred: boolean
+          starts_on: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      review_proposal: {
+        Args: { p_action: string; p_proposal_id: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }
+      set_proposal_requirements: {
+        Args: { p_clause_keys: string[]; p_proposal_id: string }
+        Returns: undefined
+      }
+      spec_goal_status: {
+        Args: {
+          p_acceptable: number
+          p_bool: boolean
+          p_direction: string
+          p_goal: number
+          p_goal_bool: boolean
+          p_goal_max: number
+          p_goal_tolerance: number
+          p_num: number
+        }
+        Returns: string
+      }
+      spec_measurement_json: {
+        Args: { m: Database["public"]["Tables"]["spec_measurements"]["Row"] }
+        Returns: Json
+      }
+      spec_regulatory_verdict: {
+        Args: {
+          p_bool: boolean
+          p_comparator: string
+          p_max_inclusive: boolean
+          p_min_inclusive: boolean
+          p_num: number
+          p_target: number
+          p_target_bool: boolean
+          p_target_max: number
+          p_tolerance: number
+        }
+        Returns: string
+      }
+      spec_zone: {
+        Args: { p_goal_status: string; p_verdict: string }
+        Returns: string
+      }
+      submit_proposal: {
+        Args: {
+          p_clause_keys: string[]
+          p_description?: string
+          p_due_date: string
+          p_milestone_key: string
+          p_owner_id?: string
+          p_priority?: Database["public"]["Enums"]["task_priority"]
+          p_season_id: string
+          p_subteam_key: string
+          p_title: string
+        }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      unlink_task_requirement: {
+        Args: { p_clause_key: string; p_task_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       clause_state: "open" | "wip" | "compliant" | "verified" | "blocked" | "na"
       finance_kind: "income" | "expense"
       member_state: "active" | "alumni"
       privileged_role: "developer" | "treasurer" | "president" | "vicepresident"
-      task_state: "urgent" | "todo" | "wip" | "blocked" | "done" | "cancelled"
+      proposal_outcome: "approved" | "rejected"
+      task_priority: "normal" | "urgent"
+      task_state: "todo" | "wip" | "blocked" | "done" | "cancelled"
       topic_state: "open" | "agenda" | "decided" | "parked"
     }
     CompositeTypes: {
-      [_ in never]: never
+      department_reconciliation_entry: {
+        key: string | null
+        action: string | null
+        name: string | null
+        reason: string | null
+        sort_order: number | null
+      }
     }
   }
 }
@@ -1314,7 +2264,9 @@ export const Constants = {
       finance_kind: ["income", "expense"],
       member_state: ["active", "alumni"],
       privileged_role: ["developer", "treasurer", "president", "vicepresident"],
-      task_state: ["urgent", "todo", "wip", "blocked", "done", "cancelled"],
+      proposal_outcome: ["approved", "rejected"],
+      task_priority: ["normal", "urgent"],
+      task_state: ["todo", "wip", "blocked", "done", "cancelled"],
       topic_state: ["open", "agenda", "decided", "parked"],
     },
   },

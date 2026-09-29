@@ -36,7 +36,7 @@ const supabase = {
   from: () => {
     const ctx: { single: boolean } = { single: false }
     const b: Record<string, unknown> = {
-      select: () => b, order: () => b, eq: () => b, in: () => b, range: () => b, limit: () => b,
+      select: () => b, order: () => b, eq: () => b, is: () => b, in: () => b, range: () => b, limit: () => b,
       single: () => { ctx.single = true; return b },
       maybeSingle: () => { ctx.single = true; return b },
       then: (resolve: (v: unknown) => void) => {

@@ -1,147 +1,44 @@
-import { PageHeader } from '../ui/PageHeader.tsx'
-import { formatDay } from '../lib/dates.ts'
-import { pageMain } from '../ui/layout.ts'
-import { ErrorState } from '../ui/states.tsx'
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { useAuth } from '../auth/context.ts'
+import { usePermissions } from '../auth/usePermissions.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useRealtimeSpecs } from '../data/useRealtimeSpecs.ts'
-import { useSetMeasurement, useSpecs, type SpecVerdict } from '../data/useSpecs.ts'
+import { useRecordMeasurement, useSpecs } from '../data/useSpecs.ts'
+import { mergeSearchParams, readSetParam, writeSetParam } from '../lib/searchParams.ts'
+import { pageMain } from '../ui/layout.ts'
+import { PageHeader } from '../ui/PageHeader.tsx'
+import { ErrorState, LoadingState } from '../ui/states.tsx'
+import { SPEC_COLUMNS, SpecRow } from './specSheet/SpecRow.tsx'
+import { useUrlParams } from '../lib/useUrlParams.ts'
 
-// Pass / fail is NEVER computed here.
-//
-// `verdict` arrives from the spec_verdicts view, which derives it in SQL from
-// the rule's own comparator and target. That is the whole point: the rule is
-// the source of truth, and a stored or client-computed verdict goes stale the
-// moment a target changes. If you are tempted to write `measured > target`
-// anywhere in this file, stop — the database already answered.
-function VerdictBadge({ verdict }: { verdict: string | null }) {
-  if (verdict === 'fail') {
-    return (
-      <span
-        className="rounded bg-red-700 px-2 py-0.5 text-xs font-bold tracking-wide text-white"
-        data-testid="verdict-fail"
-      >
-        FAILS RULE
-      </span>
-    )
-  }
-  if (verdict === 'pass') {
-    return (
-      <span className="rounded bg-green-700 px-2 py-0.5 text-xs font-bold tracking-wide text-white">
-        PASS
-      </span>
-    )
-  }
-  // Anything else — including a value the rule cannot judge, such as the
-  // 'range' comparator — is honestly reported as not measured. Never a pass.
-  return (
-    <span
-      className="rounded bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700"
-      data-testid="verdict-unmeasured"
-    >
-      not measured
-    </span>
-  )
-}
+const HEADERS = ['Parameter / unit', 'Current (ours)', 'Ideal', 'Regulatory limit', 'Competition']
 
-function targetText(spec: SpecVerdict): string {
-  if (spec.target_text) return spec.target_text
-  const op = spec.comparator === 'min' ? '≥' : spec.comparator === 'max' ? '≤' : '='
-  return `${op} ${spec.target ?? '?'}${spec.unit ? ` ${spec.unit}` : ''}`
-}
-
-function SpecRow({
-  spec,
-  measuredByName,
-  onSave,
-  saving,
-  tutorialId,
-}: {
-  tutorialId?: string
-  spec: SpecVerdict
-  measuredByName?: string
-  onSave: (id: string, measured: number | null) => void
-  saving: boolean
-}) {
-  const serverValue = spec.measured === null ? '' : String(spec.measured)
-  const [value, setValue] = useState(serverValue)
-  const [lastSeen, setLastSeen] = useState(serverValue)
-  if (lastSeen !== serverValue) {
-    setLastSeen(serverValue)
-    setValue(serverValue)
-  }
-
-  const failed = spec.verdict === 'fail'
-
-  return (
-    <li
-      // On a wide screen the measurement box sits at the right-hand end.
-      className={`border-b border-slate-200 px-3 py-2.5 lg:flex lg:items-start lg:justify-between lg:gap-6 ${failed ? 'bg-red-50' : ''}`}
-      data-testid={`spec-${spec.id}`}
-      data-verdict={spec.verdict ?? ''}
-      data-tutorial={tutorialId}
-    >
-      <div className="min-w-0 lg:flex-1">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="text-sm font-medium text-slate-900">{spec.parameter}</span>
-        <VerdictBadge verdict={spec.verdict} />
-        <span className="font-mono text-xs text-slate-600">{targetText(spec)}</span>
-        {/* The rule this number comes from — already in the data, so a failing
-            measurement always names the clause you have to argue with. */}
-        {spec.clause_key && (
-          <Link
-            to={`/register?search=${encodeURIComponent(spec.clause_key)}`}
-            className="inline-flex min-h-6 items-center font-mono text-xs text-slate-500 underline hover:text-slate-800"
-            data-testid={`spec-rule-${spec.id}`}
-          >
-            {spec.clause_key}
-          </Link>
-        )}
-      </div>
-
-      {spec.condition && <p className="mt-0.5 text-xs text-slate-600">{spec.condition}</p>}
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2 lg:mt-0 lg:shrink-0">
-        <label className="text-xs text-slate-600" htmlFor={`measured-${spec.id}`}>
-          Measured{spec.unit ? ` (${spec.unit})` : ''}
-        </label>
-        <input
-          id={`measured-${spec.id}`}
-          type="number"
-          inputMode="decimal"
-          step="any"
-          value={value}
-          disabled={saving}
-          placeholder="—"
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={() => {
-            if (value === serverValue) return
-            const trimmed = value.trim()
-            // An empty box clears the measurement. It must never read as a pass.
-            onSave(spec.id as string, trimmed === '' ? null : Number(trimmed))
-          }}
-          className="min-h-11 w-28 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
-        />
-        {spec.measured !== null && (
-          <span className="text-xs text-slate-500" data-testid={`measured-by-${spec.id}`}>
-            by {measuredByName ?? 'unknown'}
-            {spec.measured_at ? ` on ${formatDay(spec.measured_at)}` : ''}
-          </span>
-        )}
-      </div>
-    </li>
-  )
-}
-
+// Page orchestrator only. SQL remains the owner of every regulatory verdict,
+// goal status and danger zone; the child components format those returned
+// answers and own their small pieces of local interaction state.
 export default function SpecSheet() {
   const specs = useSpecs()
   const realtime = useRealtimeSpecs()
   const members = useMembers()
-  const setMeasurement = useSetMeasurement()
+  const record = useRecordMeasurement()
+  const auth = useAuth()
+  const permissions = usePermissions()
 
-  const memberNames = new Map((members.data ?? []).map((m) => [m.id, m.full_name]))
+  const memberNames = useMemo(
+    () => new Map((members.data ?? []).map((member) => [member.id, member.full_name])),
+    [members.data],
+  )
+  const actorId = auth.status === 'member' && auth.member.status === 'active' ? auth.member.id : null
+  // Which rows are open lives in the address (?open=a,b), so a link or a
+  // refresh opens the same rows and other parameters are kept.
+  const [params, setParams] = useUrlParams()
+  const open = readSetParam(params, 'open', 100)
+  const toggle = (id: string) => {
+    const next = new Set(open)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setParams((current) => mergeSearchParams(current, { open: writeSetParam(next) }), { replace: true })
+  }
 
   const error = specs.error ?? members.error
   if (error) {
@@ -163,14 +60,15 @@ export default function SpecSheet() {
   }
 
   const rows = specs.data ?? []
-  const failing = rows.filter((s) => s.verdict === 'fail').length
-  const measured = rows.filter((s) => s.measured !== null).length
+  const failing = rows.filter((spec) => spec.verdict === 'fail').length
+  const incomplete = rows.filter((spec) => spec.verdict === 'unevaluable').length
+  const measured = rows.filter((spec) => spec.current_measurement_id !== null).length
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain('wide')}>
       <PageHeader
         title="Spec sheet"
-        description="Measured values checked against the regulation limits. The verdict comes from the rule, never typed in."
+        description="Compare current engineering observations with project targets and regulatory limits. Verdicts and zones come from the database rules."
       >
         <p className="mt-1 text-xs text-slate-500">
           <span data-testid="specs-realtime-state" title="Live updates from other people editing">
@@ -181,20 +79,11 @@ export default function SpecSheet() {
 
       <p className="mb-3 text-sm text-slate-600" data-testid="spec-summary" data-tutorial="spec-summary">
         {measured} of {rows.length} measured
-        {failing > 0 && (
-          <span className="ml-2 font-semibold text-red-700">· {failing} failing</span>
-        )}
+        {failing > 0 && <span className="ml-2 font-semibold text-red-700">· <span aria-hidden="true">✕ </span>{failing} failing</span>}
+        {incomplete > 0 && <span className="ml-2 text-slate-700">· <span aria-hidden="true">? </span>{incomplete} with an incomplete rule</span>}
       </p>
 
-      {specs.isLoading && <p role="status" className="text-xs text-slate-500">Loading…</p>}
-      {setMeasurement.isError && (
-        <p role="alert" className="mb-3 rounded border border-red-300 bg-red-50 p-2 text-sm text-red-800">
-          Could not save that measurement: {setMeasurement.error.message}
-        </p>
-      )}
-      {setMeasurement.isPending && (
-        <p role="status" className="mb-3 text-xs text-slate-500">Saving…</p>
-      )}
+      {specs.isLoading && <LoadingState label="Loading specifications…" />}
 
       {!specs.isLoading && rows.length === 0 && (
         <p className="rounded border border-slate-200 bg-slate-50 p-6 text-center text-slate-600">
@@ -202,18 +91,47 @@ export default function SpecSheet() {
         </p>
       )}
 
-      <ul className="rounded-lg border border-slate-200 bg-white">
-        {rows.map((spec, index) => (
-          <SpecRow
-            key={spec.id}
-            tutorialId={index === 0 ? 'spec-row' : undefined}
-            spec={spec}
-            measuredByName={spec.measured_by ? memberNames.get(spec.measured_by) : undefined}
-            saving={setMeasurement.isPending}
-            onSave={(id, value) => setMeasurement.mutate({ id, measured: value })}
-          />
-        ))}
-      </ul>
+      {rows.length > 0 && (
+        <>
+          <div role="table" aria-label="Specifications" aria-describedby="spec-table-notes" className="space-y-3" data-testid="spec-table">
+            <div role="rowgroup" className="sr-only md:not-sr-only">
+              <div role="row" className={`px-3 pb-1 text-[0.68rem] font-medium tracking-wide text-slate-500 uppercase ${SPEC_COLUMNS}`}>
+                {HEADERS.map((header) => (
+                  <div key={header} role="columnheader">
+                    {header}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {rows.map((spec, index) => (
+              <SpecRow
+                key={spec.id}
+                tutorialId={index === 0 ? 'spec-row' : undefined}
+                spec={spec}
+                memberNames={memberNames}
+                actorId={actorId}
+                canMeasure={actorId !== null}
+                canAdministerSpecs={permissions.canEditSpecTargets}
+                onRecord={record.mutateAsync}
+                expanded={open.has(spec.id as string)}
+                onToggle={() => toggle(spec.id as string)}
+              />
+            ))}
+          </div>
+          <div id="spec-table-notes" className="mt-4 space-y-1 text-xs text-slate-600">
+            <p>
+              The outline colour follows the database's zone: red fails the regulatory rule, amber passes it but misses the
+              project goal, green passes and meets the goal, no colour means it cannot be judged yet. It describes our own
+              measurement only — it is not scrutineering approval.
+            </p>
+            <p data-testid="competition-note">
+              Competition: Reqon records no other team's measurements, so this column has nothing to show. It is a place for
+              that data, not a comparison.
+            </p>
+            <p>Open a row to record a measurement, see the acceptable threshold and goal, and its history.</p>
+          </div>
+        </>
+      )}
     </main>
   )
 }

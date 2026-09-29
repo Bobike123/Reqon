@@ -5,14 +5,16 @@ import {
   milestonePercent,
   milestoneSpan,
   monthTicks,
-  weekTicks,
   placeBar,
   placeDay,
   progressOf,
+  rangeDays,
   sectionPercent,
   sectionSpan,
+  shiftDay,
   spanOfDates,
   timelineRange,
+  weekTicks,
 } from './ganttModel.ts'
 
 const TODAY = '2026-09-13'
@@ -126,13 +128,13 @@ describe('week ruler', () => {
 describe('progress', () => {
   it('counts done against everything still alive', () => {
     expect(progressOf([task('a', 'done', 's1'), task('b', 'wip', 's1')])).toEqual({
-      done: 1, total: 2, percent: 50,
+      done: 1, total: 2, percent: 50, archivedUnfinished: 0,
     })
   })
 
   it('drops cancelled work from both sides, so it never reads 0% forever', () => {
     expect(progressOf([task('a', 'done', 's1'), task('b', 'cancelled', 's1')])).toEqual({
-      done: 1, total: 1, percent: 100,
+      done: 1, total: 1, percent: 100, archivedUnfinished: 0,
     })
   })
 
@@ -162,6 +164,25 @@ describe('rolling up to sections and submissions', () => {
   it('rolls a submission up from every subtask beneath it, ignoring loose tasks', () => {
     // 1 of 2 done under s1; task 'c' is on the Board but under no section.
     expect(milestonePercent(sections, tasks)).toBe(50)
+  })
+
+  it('counts an ARCHIVED Done task as complete and keeps an archived unfinished one in the denominator', () => {
+    const progress = [
+      { id: 'a', state: 'done', archived_at: '2026-09-01T00:00:00Z', section_id: null, milestone_key: 'MS1' },
+      { id: 'b', state: 'wip', archived_at: '2026-09-01T00:00:00Z', section_id: null, milestone_key: 'MS1' },
+      { id: 'c', state: 'done', archived_at: null, section_id: null, milestone_key: 'MS1' },
+      { id: 'd', state: 'cancelled', archived_at: null, section_id: null, milestone_key: 'MS1' },
+    ] as never[]
+    // done: a, c of 3 counted (b unfinished; cancelled d leaves entirely)
+    expect(milestonePercent([], progress, 'MS1')).toBe(67)
+  })
+
+  it('counts an unsectioned task attached to the milestone once, and a sectioned one once', () => {
+    const progress = [
+      { id: 'x', state: 'done', archived_at: null, section_id: null, milestone_key: 'MS1' },
+      { id: 'y', state: 'todo', archived_at: null, section_id: sections[0].id, milestone_key: 'MS1' },
+    ] as never[]
+    expect(milestonePercent(sections, progress, 'MS1')).toBe(50)
   })
 
   it('falls back to sections drafted when no subtask exists anywhere', () => {
@@ -196,5 +217,101 @@ describe('spans', () => {
     const parent = { from: '2026-11-01', to: '2026-11-30' }
     expect(sectionSpan([task('a', 'todo', 's1')], 's1', parent)).toEqual(parent)
     expect(sectionSpan([], 's1', null)).toBeNull()
+  })
+})
+
+// ------------------------------------------------------------ date boundaries
+// The chart works on YYYY-MM-DD strings and whole-day arithmetic in UTC, so no
+// reader's time zone or daylight-saving change can move a bar by a day. These
+// pin the places an off-by-one would show: month ends, the year turn, a leap
+// day, and the Sundays clocks change.
+describe('month and year boundaries', () => {
+  it('widens across the year turn without dropping December or January', () => {
+    const range = timelineRange(['2026-12-31', '2027-01-01'], '2026-12-15')
+    expect(range).toEqual({ from: '2026-12-01', to: '2027-01-31' })
+    expect(monthTicks(range).map((t) => t.key)).toEqual(['2026-12', '2027-01'])
+  })
+
+  it('a leap February is 29 days wide, a normal one 28', () => {
+    const leap = monthTicks({ from: '2028-02-01', to: '2028-03-31' })
+    expect(leap[0].key).toBe('2028-02')
+    // 29 + 31 = 60 days: February is 29/60 of the track.
+    expect(leap[0].width).toBeCloseTo((29 / 60) * 100, 6)
+    const normal = monthTicks({ from: '2027-02-01', to: '2027-03-31' })
+    expect(normal[0].width).toBeCloseTo((28 / 59) * 100, 6)
+  })
+
+  it('places the last day of a month and the first of the next in adjacent columns', () => {
+    const range = { from: '2026-01-01', to: '2026-02-28' } // 59 days
+    expect(placeDay('2026-01-31', range)).toBeCloseTo((30 / 59) * 100, 6)
+    expect(placeDay('2026-02-01', range)).toBeCloseTo((31 / 59) * 100, 6)
+  })
+
+  it('draws a period across a month boundary as one bar, both ends inclusive', () => {
+    const range = { from: '2026-01-01', to: '2026-02-28' }
+    const box = placeBar({ from: '2026-01-31', to: '2026-02-01' }, range)
+    expect(box?.left).toBeCloseTo((30 / 59) * 100, 6)
+    expect(box?.width).toBeCloseTo((2 / 59) * 100, 6)
+  })
+
+  it('does not clip a period that ends exactly on the last day of the range', () => {
+    const range = timelineRange(['2026-11-20', '2026-12-31'], '2026-11-25')
+    expect(placeBar({ from: '2026-12-31', to: '2026-12-31' }, range)).not.toBeNull()
+    expect(placeBar({ from: '2026-11-20', to: '2026-12-31' }, range)?.width).toBeGreaterThan(0)
+  })
+
+  it('a start before every deadline pulls the range back to the start\'s own month', () => {
+    // Deadlines only would give Nov–Dec; the start in September must be included.
+    expect(timelineRange(['2026-09-15', '2026-11-20', '2026-12-05'], '2026-11-25').from).toBe('2026-09-01')
+  })
+})
+
+describe('daylight-saving weeks', () => {
+  // Europe changes clocks on Sunday 29 Mar and 25 Oct 2026, so those weeks have
+  // 167 or 169 hours in local time. Whole-day UTC arithmetic keeps every week 7 days.
+  it.each([
+    ['spring forward', { from: '2026-03-16', to: '2026-04-12' }],
+    ['fall back', { from: '2026-10-12', to: '2026-11-08' }],
+  ])('every full week is seven days wide across %s', (_name, range) => {
+    const ticks = weekTicks(range)
+    const total = (Date.parse(`${range.to}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`)) / 86_400_000 + 1
+    const full = ticks.filter((t) => t.width > 0)
+    // Interior weeks (not clipped at either edge) are exactly 7/total wide.
+    for (const tick of full.slice(1, -1)) expect(tick.width).toBeCloseTo((7 / total) * 100, 6)
+    // Consecutive week keys are exactly seven calendar days apart.
+    for (let i = 1; i < ticks.length; i += 1) {
+      const gap = (Date.parse(`${ticks[i].key}T00:00:00Z`) - Date.parse(`${ticks[i - 1].key}T00:00:00Z`)) / 86_400_000
+      expect(gap).toBe(7)
+    }
+  })
+
+  it('a deadline on the changeover Sunday sits on that day, not the next', () => {
+    const range = { from: '2026-03-23', to: '2026-04-05' } // 14 days
+    expect(placeDay('2026-03-29', range)).toBeCloseTo((6 / 14) * 100, 6)
+    expect(placeDay('2026-03-30', range)).toBeCloseTo((7 / 14) * 100, 6)
+  })
+})
+
+describe('a section\'s span uses starts as well as deadlines', () => {
+  it('begins at the earliest start, not the earliest deadline', () => {
+    const tasks = [
+      { ...task('a', 'todo', 's1', '2026-11-20'), starts_on: '2026-11-02' },
+      task('b', 'todo', 's1', '2026-11-25'),
+    ] as Task[]
+    expect(sectionSpan(tasks, 's1', null)).toEqual({ from: '2026-11-02', to: '2026-11-25' })
+  })
+})
+
+describe('rangeDays and shiftDay (dragging a bar)', () => {
+  it('counts both ends of a range', () => {
+    expect(rangeDays({ from: '2026-10-01', to: '2026-10-01' })).toBe(1)
+    expect(rangeDays({ from: '2026-10-01', to: '2026-10-31' })).toBe(31)
+  })
+  it('moves a calendar day by whole days across months, years and the DST change, never by a time zone', () => {
+    expect(shiftDay('2026-10-31', 1)).toBe('2026-11-01')
+    expect(shiftDay('2026-12-31', 1)).toBe('2027-01-01')
+    expect(shiftDay('2026-03-29', -1)).toBe('2026-03-28')
+    expect(shiftDay('2026-10-25', 0)).toBe('2026-10-25')
+    expect(shiftDay('2028-02-28', 1)).toBe('2028-02-29')
   })
 })

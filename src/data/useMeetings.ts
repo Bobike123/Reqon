@@ -107,15 +107,26 @@ export function useCreateMeeting() {
 export function useUpdateMeeting() {
   const { invalidate } = useMeetingCache()
 
-  return useMutation<void, Error, MeetingDraft & { id: string }>({
-    mutationFn: async ({ id, ...draft }) => {
-      const { data, error } = await supabase
-        .from('meetings')
-        .update(toRow(draft))
-        .eq('id', id)
-        .select('id')
+  // `expectedUpdatedAt` is the meeting's updated_at when the editor opened. The
+  // write then applies only if nobody saved it since (touch_updated_at keeps
+  // the column current), so a second editor never silently overwrites the
+  // first. Leaving it out keeps the old last-write-wins behaviour.
+  return useMutation<void, Error, MeetingDraft & { id: string; expectedUpdatedAt?: string }>({
+    mutationFn: async ({ id, expectedUpdatedAt, ...draft }) => {
+      let query = supabase.from('meetings').update(toRow(draft)).eq('id', id)
+      if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt)
+      const { data, error } = await query.select('id')
       if (error) throw new DataError('edit meetings', error)
       if (data && data.length > 0) return
+      if (expectedUpdatedAt) {
+        const now = unwrap('check whether the meeting changed', await supabase.from('meetings').select('updated_at').eq('id', id).limit(1))
+        if (now.length > 0 && now[0].updated_at !== expectedUpdatedAt) {
+          throw new DataError(
+            'save the meeting: someone else saved it after you opened it. Your text is still here — copy what you need, then close and reopen the meeting to see their version',
+            null,
+          )
+        }
+      }
       if (await ask('is_admin', 'check whether the meeting was saved')) {
         throw new DataError('save the meeting: it no longer exists — someone may have deleted it', null)
       }

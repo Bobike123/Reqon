@@ -48,29 +48,30 @@ where m.key like 'MS1%';
 
 -- ---------------------------------------------------------------- 4. Overdue
 -- Overdue items.
--- Source: v_attention, reason = 'overdue'. The view decides what counts as
--- overdue (task not done/cancelled with due_date < current_date); the app does
--- not re-derive it.
+-- Source: attention(p_season, p_today), reason = 'overdue'. SQL decides what
+-- counts as overdue (task not done/cancelled, NOT archived, due_date < p_today)
+-- against the READER'S own day, which the app passes in; it never uses the
+-- database's current_date. Replace :today with the reader's local YYYY-MM-DD.
 select count(*) as overdue
-from v_attention a
-join v_current_season s on s.id = a.season_id
+from v_current_season s, attention(s.id, :today::date) a
 where a.reason = 'overdue';
 
 -- ------------------------------------------------------------ 5. Open topics
--- Topics raised but not yet agendaed or decided.
--- Source: topics.state = 'open', current season.
-select count(*) as open_topics
-from topics t
-join v_current_season s on s.id = t.season_id
-where t.state = 'open';
+-- Proposals awaiting a decision: suggested or under review, not archived.
+-- Parked proposals are set aside and decided ones are history.
+-- Source: task_proposals, current season.
+select count(*) as open_proposals
+from task_proposals p
+join v_current_season s on s.id = p.season_id
+where p.state in ('open', 'agenda') and p.archived_at is null;
 
 -- ---------------------------------------------------------------- 6. Blocked
 -- Blocked items, both rules and tasks.
--- Source: v_attention, reason = 'blocked'. Covers clause_status.state =
--- 'blocked' and tasks.state = 'blocked' in one place, again decided by SQL.
+-- Source: attention(p_season, p_today), reason = 'blocked'. Covers
+-- clause_status.state = 'blocked' and (unarchived) tasks.state = 'blocked' in one
+-- place, again decided by SQL.
 select count(*) as blocked
-from v_attention a
-join v_current_season s on s.id = a.season_id
+from v_current_season s, attention(s.id, :today::date) a
 where a.reason = 'blocked';
 
 -- ------------------------------------------------------- 7. Subteam progress
@@ -81,8 +82,9 @@ from v_subteam_progress
 order by duties desc;
 
 -- --------------------------------------------------------------- Priorities
--- The Priorities screen is v_attention verbatim for the current season.
--- `reason` is computed by the view; React only groups and renders it.
+-- The Priorities screen is attention(p_season, p_today) verbatim for the current
+-- season. `reason` is computed in SQL (blocked, score-killer, overdue, urgent,
+-- penalty, starred); React only orders and renders it. Archived tasks never
+-- appear.
 select kind, ref, reason, starred, owner_id, clause_key
-from v_attention a
-join v_current_season s on s.id = a.season_id;
+from v_current_season s, attention(s.id, :today::date) a;

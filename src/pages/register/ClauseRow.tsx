@@ -1,6 +1,12 @@
 import { memo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { obligationInfo, PARKED_INFO } from '../../clauses/labels.ts'
+import { clausePageTarget, targetHref, targetNote } from '../../book/source.ts'
 import type { ClauseState } from '../../data/useClauseStatus.ts'
 import type { Member } from '../../data/useMembers.ts'
+import { ExplainedLabel } from '../../ui/ExplainedLabel.tsx'
+import { ClauseLinkedWork } from './ClauseLinkedWork.tsx'
+import type { LinkedWork } from './linkedWork.ts'
 import {
   criticalityBadge,
   formatSpec,
@@ -24,7 +30,20 @@ type Props = {
   onSetOwner: (clauseKey: string, ownerId: string | null) => void
   onSetEvidence: (clauseKey: string, evidence: string) => void
   onToggleStar: (clauseKey: string, starred: boolean) => void
+  // The work linked to this requirement.
+  work: LinkedWork
+  linkAvailability: 'ready' | 'loading' | 'unavailable'
+  // The edition this season reads. A recorded page is only used when the clause
+  // belongs to that same edition. A string, not an object, so memo() holds.
+  seasonRegsRef: string | null
+  memberNames: ReadonlyMap<string, string>
+  departmentNames: ReadonlyMap<string, string>
   tutorialId?: string
+  // Opens this rule in the Register's own reader pane. The link keeps its real
+  // address (/book?page=…), so a new tab or a copied link still works.
+  onOpenBook?: (clauseKey: string) => void
+  // True while this rule is the one shown in the reader.
+  reading?: boolean
 }
 
 function ClauseRowInner({
@@ -34,7 +53,14 @@ function ClauseRowInner({
   onSetOwner,
   onSetEvidence,
   onToggleStar,
+  work,
+  linkAvailability,
+  seasonRegsRef,
+  memberNames,
+  departmentNames,
   tutorialId,
+  onOpenBook,
+  reading = false,
 }: Props) {
   const { clause } = row
   const badge = criticalityBadge(clause.criticality)
@@ -55,10 +81,18 @@ function ClauseRowInner({
   // do not compete for attention — but still present, still searchable, still
   // editable. Never hidden.
   const parked = row.isParked
+  const bookTarget = clausePageTarget(clause, seasonRegsRef)
+  // New owners are active members; a current owner who has since retired stays
+  // visible (and selected), marked, instead of silently reading as unassigned.
+  const active = members.filter((m) => m.status === 'active')
+  const owners =
+    row.ownerId && !active.some((m) => m.id === row.ownerId)
+      ? [...active, { id: row.ownerId, full_name: `${memberNames.get(row.ownerId) ?? 'Someone'} (no longer active)` }]
+      : active
 
   return (
     <li
-      className={`border-b border-slate-200 px-3 py-3 sm:px-4 xl:grid xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-start xl:gap-x-8 ${parked ? 'bg-slate-50' : ''}`}
+      className={`border-b border-slate-200 px-3 py-3 sm:px-4 xl:grid xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-start xl:gap-x-8 ${reading ? 'bg-amber-50 ring-2 ring-inset ring-amber-400' : parked ? 'bg-slate-50' : ''}`}
       data-clause-key={clause.clause_key}
       data-parked={parked ? 'true' : 'false'}
       data-tutorial={tutorialId}
@@ -68,22 +102,15 @@ function ClauseRowInner({
         <span className="font-mono text-sm font-bold text-slate-900">
           {clause.printed_ref}
         </span>
-        {badge && (
-          <span
-            className={`rounded px-1.5 py-0.5 text-[11px] font-bold tracking-wide ${badge.className}`}
-            title={badge.title}
-          >
-            {badge.label}
-          </span>
-        )}
+        {badge && <ExplainedLabel info={badge.info} className={badge.className} testId={`criticality-${clause.clause_key}`} />}
         {parked && (
-          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
-            PARKED — Final Event
-          </span>
+          <ExplainedLabel info={PARKED_INFO} className="bg-slate-200 font-medium text-slate-700" testId={`parked-${clause.clause_key}`} />
         )}
-        <span className="text-[11px] uppercase tracking-wide text-slate-500">
-          {clause.obligation}
-        </span>
+        <ExplainedLabel
+          info={obligationInfo(clause.obligation)}
+          className="font-normal uppercase text-slate-600 underline decoration-dotted underline-offset-2"
+          testId={`obligation-${clause.clause_key}`}
+        />
         {specs.map((spec, i) => (
           <span
             key={i}
@@ -97,6 +124,43 @@ function ClauseRowInner({
       <p className={`mt-1 max-w-[80ch] text-sm ${parked ? 'text-slate-500' : 'text-slate-800'}`}>
         {clause.body}
       </p>
+
+      <div data-tutorial={tutorialId ? 'register-links' : undefined}>
+      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <Link
+          to={targetHref(bookTarget, clause.printed_ref)}
+          onClick={(event) => {
+            // A plain click reads it here, beside the rules; a modified click
+            // (new tab/window) follows the real address.
+            if (!onOpenBook || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+            event.preventDefault()
+            onOpenBook(clause.clause_key)
+          }}
+          aria-current={reading ? 'true' : undefined}
+          data-testid={`book-link-${clause.clause_key}`}
+          className="inline-flex min-h-11 items-center rounded text-slate-800 underline decoration-slate-400 underline-offset-2 hover:decoration-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+        >
+          Open in Requirements Book
+          <span className="sr-only"> for {clause.printed_ref}</span>
+        </Link>
+        {targetNote(bookTarget) && (
+          <span className="text-slate-600" data-testid="book-note">
+            {targetNote(bookTarget)}
+          </span>
+        )}
+      </div>
+
+      <ClauseLinkedWork
+        clauseKey={clause.clause_key}
+        printedRef={clause.printed_ref}
+        state={row.state}
+        work={work}
+        availability={linkAvailability}
+        memberNames={memberNames}
+        departmentNames={departmentNames}
+        onMarkCompliant={(key) => onSetState(key, 'compliant')}
+      />
+      </div>
       </div>
 
       {/* On a wide screen the controls get a column of their own: the rule
@@ -128,10 +192,10 @@ function ClauseRowInner({
           id={`owner-${clause.clause_key}`}
           value={row.ownerId ?? ''}
           onChange={(e) => onSetOwner(clause.clause_key, e.target.value || null)}
-          className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+          className="min-h-11 w-full max-w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 sm:w-48"
         >
           <option value="">Unassigned</option>
-          {members.map((m) => (
+          {owners.map((m) => (
             <option key={m.id} value={m.id}>
               {m.full_name}
             </option>

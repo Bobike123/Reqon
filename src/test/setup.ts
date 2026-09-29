@@ -8,7 +8,8 @@ vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-anon-key')
 
 // jsdom has <dialog> but not its modal methods. Enough of them for the app's
 // Dialog component; real browsers add the rest (inertness, focus return).
-const dialogProto = window.HTMLDialogElement?.prototype
+// (Node-environment tests, such as scripts/book, have no window at all.)
+const dialogProto = typeof window === 'undefined' ? undefined : window.HTMLDialogElement?.prototype
 if (dialogProto && typeof dialogProto.showModal !== 'function') {
   if (!Object.getOwnPropertyDescriptor(dialogProto, 'open')) {
     Object.defineProperty(dialogProto, 'open', {

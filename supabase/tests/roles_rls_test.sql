@@ -95,6 +95,17 @@ begin
 
   -- ------------------------------------------------------ things to act on
   insert into seasons (label, is_current) values ('ROLES-TEST', false) returning id into season;
+  -- Free a slot under the 10-active department cap (20260115000000) before
+  -- adding this fixture department — whatever reconciliation state this
+  -- file runs against (a bare 14-active seed, or already reconciled to 10),
+  -- archiving one task-free active department leaves room for exactly one
+  -- more. Rolled back with everything else this file creates.
+  update subteams set archived_at = now(), archive_reason = 'roles-test'
+    where key = (
+      select s.key from subteams s where s.archived_at is null
+        and not exists (select 1 from tasks t where t.subteam_key = s.key and t.state not in ('done', 'cancelled'))
+      order by s.key limit 1
+    );
   insert into subteams (key, name, book_section) values ('ZZTEST', 'Test subsystem', 'Z');
   insert into clauses (clause_key, printed_ref, section, article, body, obligation, criticality)
     values ('ZZ.1', 'ZZ.1', 'Z', 1, 'Test rule', 'info', 'info');
@@ -201,14 +212,17 @@ begin
     ('developer     sets milestone points',       dev, 'update milestones set max_points = 10 where key = ''ZZ-MS''', 'write', 'ALLOWED'),
 
     -- ================== EVERYDAY WORK STILL WORKS =========================
-    -- Corrected 20260112: task_insert has required is_admin() since 20260108
-    -- (proposals_and_meetings) — a task is created by promoting a proposal,
-    -- not typed directly, so only an administrator may INSERT one. Moving a
-    -- card and picking its owner (task_update) is still everyone's, which is
-    -- what proposals_meetings_rls_test.sql's "moves a task" checks cover.
+    -- Corrected 20260116 (task_lifecycle_and_authorization): there is no
+    -- task_insert policy at all any more — a task is created ONLY by
+    -- promoting a proposal (promote_proposal(), SECURITY DEFINER, bypasses
+    -- RLS as the table owner), never by a direct INSERT through PostgREST,
+    -- Developer included ("Developer maintenance happens outside RLS", not
+    -- through a grant this policy set could name). Editing an owned/headed
+    -- task (task_update, now scoped by can_edit_task()) is covered
+    -- exhaustively in task_authorization_test.sql, not here.
     ('member        adds a task',                 mem, format('insert into tasks (season_id, title) values (%L, ''m'')', season), 'write', 'DENIED'),
     ('treasurer     adds a task',                 tre, format('insert into tasks (season_id, title) values (%L, ''t'')', season), 'write', 'DENIED'),
-    ('developer     adds a task',                 dev, format('insert into tasks (season_id, title) values (%L, ''d'')', season), 'write', 'ALLOWED'),
+    ('developer     adds a task',                 dev, format('insert into tasks (season_id, title) values (%L, ''d'')', season), 'write', 'DENIED'),
 
     -- ============ THE DEVELOPER SEES (AND DOES) EVERYTHING ================
     ('developer     reads members',               dev, 'select count(*) from members', 'read', 'ALLOWED'),

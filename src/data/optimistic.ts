@@ -15,6 +15,10 @@ type Options<TRow, TVars> = {
   // Which row in the list `vars` is about. Used to snapshot that one row
   // before the optimistic patch, and to find it again on rollback.
   identify: (row: TRow, vars: TVars) => boolean
+  // Other caches this write can change (a derived list, a progress figure, the
+  // attention list). Invalidated with the primary key once the server has
+  // answered, so no screen keeps a number computed from the old row.
+  alsoInvalidate?: readonly (readonly unknown[])[]
 }
 
 type Snapshot<TRow> = { before: TRow; patch: Partial<TRow> } | undefined
@@ -45,7 +49,7 @@ export function useOptimisticListMutation<TRow extends object, TVars>(
   options: Options<TRow, TVars>,
 ): UseMutationResult<unknown, Error, TVars, Snapshot<TRow>> {
   const queryClient = useQueryClient()
-  const { queryKey, write, apply, identify } = options
+  const { queryKey, write, apply, identify, alsoInvalidate } = options
 
   return useMutation<unknown, Error, TVars, Snapshot<TRow>>({
     mutationFn: write,
@@ -98,6 +102,7 @@ export function useOptimisticListMutation<TRow extends object, TVars>(
     onSettled: () => {
       // 5 — success or failure, the server is the source of truth.
       void queryClient.invalidateQueries({ queryKey })
+      for (const key of alsoInvalidate ?? []) void queryClient.invalidateQueries({ queryKey: key })
     },
   })
 }

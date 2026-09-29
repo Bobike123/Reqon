@@ -3,6 +3,7 @@ import type { Milestone } from '../data/useMilestones.ts'
 import { isOverdue } from '../pages/board/boardModel.ts'
 import { submissionWindow } from '../pages/milestones/milestoneModel.ts'
 import { nextDeadline } from '../pages/now/nowModel.ts'
+import { milestoneMarks, taskMark } from '../pages/gantt/ganttMarks.ts'
 import { toLocalDateString } from './dates.ts'
 
 // Board, Now, Milestones and Gantt (Gantt draws milestoneModel's own
@@ -51,5 +52,40 @@ describe('the same deadline produces the same status on every screen', () => {
     const window = submissionWindow(ms(yesterday), now)
     expect(window.kind === 'dated' && window.passed).toBe(true)
     expect(nextDeadline([ms(yesterday)], now).kind).toBe('tbc') // filtered out: nothing upcoming
+  })
+})
+
+// The Gantt's new marks draw from the same "today" and the same overdue rule, so
+// what a task looks like on the timeline can never disagree with the Board, Now
+// or Priorities. Checked at the instants and zones where a day boundary bites:
+// far east (UTC+14) and far west (UTC-11) near local midnight, and the two
+// Copenhagen days the clocks change.
+describe.each([
+  ['UTC+14 near midnight', 'Pacific/Kiritimati', '2026-09-09T12:00:00Z', '2026-09-10'],
+  ['UTC-11 near midnight', 'Pacific/Pago_Pago', '2026-09-10T10:30:00Z', '2026-09-09'],
+  ['Copenhagen, spring-forward Sunday', 'Europe/Copenhagen', '2026-03-29T00:30:00Z', '2026-03-29'],
+  ['Copenhagen, fall-back Sunday', 'Europe/Copenhagen', '2026-10-25T00:30:00Z', '2026-10-25'],
+])('the Gantt agrees with every other screen: %s', (_name, zone, instant, expectedToday) => {
+  it('reads the same local day, and the same overdue and passed answers', () => {
+    vi.stubEnv('TZ', zone)
+    const now = new Date(instant)
+    const today = toLocalDateString(now)
+    expect(today).toBe(expectedToday)
+    const yesterday = new Date(`${today}T00:00:00Z`)
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+    const before = yesterday.toISOString().slice(0, 10)
+
+    for (const due of [before, today]) {
+      const board = isOverdue({ due_date: due, state: 'todo' }, today)
+      const gantt = taskMark({ starts_on: null, due_date: due, state: 'todo' }, today)
+      expect('overdue' in gantt && gantt.overdue).toBe(board)
+    }
+    for (const due of [before, today]) {
+      const window = submissionWindow(ms(due), now)
+      expect(milestoneMarks({ opens_on: null, due_on: due }, today).passed).toBe(window.kind === 'dated' && window.passed)
+    }
+    // "Due today" is not late; "due yesterday" is: on every screen.
+    expect(isOverdue({ due_date: today, state: 'todo' }, today)).toBe(false)
+    expect(isOverdue({ due_date: before, state: 'todo' }, today)).toBe(true)
   })
 })

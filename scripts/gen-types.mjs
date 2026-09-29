@@ -11,9 +11,19 @@ import { fileURLToPath } from 'node:url'
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 const TARGET = join(REPO, 'src/lib/database.types.ts')
 
+// Local mode (Reqon redesign Phase 1 prerequisite, docs/redesign/phases/00.md):
+// generate from a migrated disposable/local Postgres instead of the hosted
+// project, via the CLI's own --db-url flag. Never falls back to the hosted
+// path silently — either LOCAL_DB_URL is set and this uses it, or it is
+// unset and behavior is exactly as before (SUPABASE_PROJECT_ID required).
+// scripts/gen-types-local.sh drives the disposable container and sets this.
+const localDbUrl = process.env.LOCAL_DB_URL
 const projectId = process.env.SUPABASE_PROJECT_ID
-if (!projectId) {
-  console.error('SUPABASE_PROJECT_ID is not set. Refusing to run — the previous types file is untouched.')
+if (!localDbUrl && !projectId) {
+  console.error(
+    'Neither LOCAL_DB_URL nor SUPABASE_PROJECT_ID is set. Refusing to run — the previous types file is untouched.\n' +
+      'For local generation from a migrated disposable database, run: npm run types:gen:local',
+  )
   process.exit(1)
 }
 
@@ -26,9 +36,10 @@ const tmpFile = join(dirname(TARGET), `.database.types.${process.pid}.tmp`)
 try {
   // supabase is a pinned devDependency (see package.json); npx resolves it
   // from node_modules/.bin rather than requiring a global install.
+  const sourceArgs = localDbUrl ? ['--db-url', localDbUrl] : ['--project-id', projectId]
   const output = execFileSync(
     'npx',
-    ['--no-install', 'supabase', 'gen', 'types', 'typescript', '--project-id', projectId, '--schema', 'public'],
+    ['--no-install', 'supabase', 'gen', 'types', 'typescript', ...sourceArgs, '--schema', 'public'],
     { encoding: 'utf8', cwd: REPO },
   )
 

@@ -81,6 +81,10 @@ function makeBuilder(table: string) {
       ctx.filters[col] = val
       return builder
     },
+    // A no-op filter, not a real one: fixture rows here don't carry every
+    // real column (e.g. tasks.archived_at), and this suite tests season
+    // scoping, not archive filtering.
+    is: () => builder,
     range: (from: number, to: number) => {
       ctx.range = [from, to]
       return builder
@@ -134,7 +138,6 @@ const { useCurrentSeason } = await import('./useCurrentSeason.ts')
 const { useClauses } = await import('./useClauses.ts')
 const { useClauseStatus, useSetClauseStatus } = await import('./useClauseStatus.ts')
 const { useTasks } = await import('./useTasks.ts')
-const { useSuggestProposal } = await import('./useProposals.ts')
 const { useMembers } = await import('./useMembers.ts')
 const { useMilestoneSections } = await import('./useMilestones.ts')
 const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
@@ -316,17 +319,8 @@ describe('attribution', () => {
     expect(write?.payload?.season_id).toBe('season-a')
     expect(write?.payload?.state).toBe('compliant')
   })
-
-  it('stamps proposals.raised_by', async () => {
-    const season = renderHook(() => useCurrentSeason(), { wrapper })
-    await waitFor(() => expect(season.result.current.data).toBeTruthy())
-    const { result } = renderHook(() => useSuggestProposal(), { wrapper })
-    await act(async () => {
-      await result.current.mutateAsync({ title: 'Fairing width' })
-    })
-    const write = calls.find((c) => c.table === 'task_proposals' && c.op === 'insert')
-    expect(write?.payload?.raised_by).toBe(MEMBER.id)
-  })
+  // proposals.raised_by is no longer stamped by the client: submit_proposal()
+  // takes the author from the session (supabase/tests/proposal_commands_test.sql).
 })
 
 describe('optimistic writes', () => {

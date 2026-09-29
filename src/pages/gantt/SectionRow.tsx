@@ -1,58 +1,64 @@
-import type { Member } from '../../data/useMembers.ts'
+import { useState } from 'react'
 import type { MilestoneSection } from '../../data/useMilestones.ts'
-import type { Task, TaskState } from '../../data/useTasks.ts'
+import type { Task } from '../../data/useTasks.ts'
 import { formatDay } from '../../lib/dates.ts'
 import { Bar, ROW, STICKY_LABEL, Track } from './GanttChart.tsx'
+import { taskDropHandlers } from './ganttDrag.ts'
 import { GanttTaskRow } from './GanttTaskRow.tsx'
-import { SectionTaskTools } from './SectionTaskTools.tsx'
-import { progressOf, sectionPercent, sectionSpan, tasksInSection, type Span } from './ganttModel.ts'
+import { LinkTaskTool } from './LinkTaskTool.tsx'
+import type { GanttEnv } from './ganttEnv.ts'
+import { currentTargetKey, linkCandidates, relinkFrom } from './ganttLinking.ts'
+import { sectionSpan, type Span } from './ganttModel.ts'
+import { progressLabel, sectionProgress, tasksUnderSection, type ProgressSource } from './ganttProgress.ts'
 
-// One milestone section: its drafted tick, its bar, and — when open — its
-// subtask rows and the add/link tools (Phase 6 §6.3).
+// One milestone section: its drafted tick, its bar, and — when open — its Board
+// tasks and the tool that links an existing one. Progress comes from ALL linked
+// tasks (archived included) so archiving a Done task never lowers it; the rows
+// listed are the active ones.
 export function SectionRow({
   section,
+  milestoneKey,
   tasks,
-  unlinked,
+  progressTasks,
   fallbackSpan,
-  range,
-  todayLeft,
   open,
   onToggle,
-  members,
   onDraftedChange,
-  canCreateTask,
-  addingTask,
-  onCreateTask,
-  onLinkTask,
-  onMoveTask,
-  onOwnerTask,
-  onUnlinkTask,
+  env,
 }: {
   section: MilestoneSection
+  milestoneKey: string
   tasks: Task[]
-  unlinked: Task[]
+  progressTasks: ProgressSource[]
   fallbackSpan: Span | null
-  range: Span
-  todayLeft: number | null
   open: boolean
   onToggle: () => void
-  members: Member[]
   onDraftedChange: (isDrafted: boolean) => void
-  canCreateTask: boolean
-  addingTask: boolean
-  onCreateTask: (title: string) => void
-  onLinkTask: (taskId: string) => void
-  onMoveTask: (taskId: string, state: TaskState) => void
-  onOwnerTask: (taskId: string, ownerId: string | null) => void
-  onUnlinkTask: (taskId: string) => void
+  env: GanttEnv
 }) {
-  const mine = tasksInSection(tasks, section.id)
-  const progress = progressOf(mine)
+  const under = tasksUnderSection(tasks, section.id)
+  const shown = under.filter(env.lens.matches)
+  const progress = sectionProgress(section, progressTasks)
   const span = sectionSpan(tasks, section.id, fallbackSpan)
+  const words = progressLabel(progress, 'section')
+  const target = { seasonId: env.seasonId, milestoneKey, sectionId: section.id }
+  const { direct, relink } = linkCandidates(tasks, target, (t) => env.permsFor(t).canEdit)
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  // A task dragged from another row lands here (the same move as "Move to").
+  const [dropOver, setDropOver] = useState(false)
+  const drop = taskDropHandlers((taskId) => {
+    const task = byId.get(taskId)
+    if (task) env.onMoveTo(task, target)
+  }, setDropOver)
+  const dimmed = env.lens.active && shown.length === 0
+  const link = (taskId: string) => {
+    const task = byId.get(taskId)
+    if (task) env.onLink(task, target)
+  }
 
   return (
-    <div data-testid={`gantt-section-${section.id}`}>
-      <div className={`${ROW} group py-1`}>
+    <div data-testid={`gantt-section-${section.id}`} className={dimmed ? 'opacity-70' : undefined}>
+      <div className={`${ROW} group py-1 ${dropOver ? "rounded ring-2 ring-slate-900" : ""}`} {...drop} data-drop-target="true">
         <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-white pl-6 pr-2 group-hover:bg-slate-100`}>
           <button
             type="button"
@@ -66,8 +72,9 @@ export function SectionRow({
             {section.name}
           </button>
           {/* The same tick as Milestones, writing to the same row: one
-              checklist, two screens. */}
-          <label className="ml-auto flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
+              checklist, two screens. It is the legacy drafted checklist, not
+              task completion, and says so when it is what the bar shows. */}
+          <label className="ml-auto flex min-h-11 shrink-0 items-center gap-1 text-[11px] text-slate-600 sm:min-h-0">
             <input
               type="checkbox"
               checked={section.is_drafted}
@@ -75,19 +82,24 @@ export function SectionRow({
               onChange={(e) => onDraftedChange(e.target.checked)}
               className="h-4 w-4 accent-slate-900"
             />
-            {progress.total > 0 ? `${progress.done}/${progress.total}` : 'drafted'}
+            {progress.basis === 'tasks' ? `${progress.done}/${progress.total}` : 'drafted'}
           </label>
         </div>
 
-        <Track today={todayLeft}>
+        <Track
+          today={env.todayLeft}
+          summary={`${section.name}: ${words}${span ? `, ${formatDay(span.from)} to ${formatDay(span.to)}` : ''}${
+            env.lens.active ? `. ${shown.length} task${shown.length === 1 ? '' : 's'} shown for ${env.lens.name}` : ''
+          }`}
+        >
           {span && (
             <Bar
               span={span}
-              range={range}
-              percent={sectionPercent(section, tasks)}
-              tone={mine.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
-              title={`${section.name}: ${formatDay(span.from)} → ${formatDay(span.to)}${
-                mine.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''
+              range={env.range}
+              percent={progress.percent ?? 0}
+              tone={under.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
+              title={`${section.name}: ${formatDay(span.from)} → ${formatDay(span.to)} · ${words}${
+                under.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''
               }`}
             />
           )}
@@ -96,33 +108,54 @@ export function SectionRow({
 
       {open && (
         <>
-          {mine.map((task) => (
-            <GanttTaskRow
-              key={task.id}
-              task={task}
-              sectionName={section.name}
-              members={members}
-              range={range}
-              todayLeft={todayLeft}
-              onMove={(state) => onMoveTask(task.id, state)}
-              onOwner={(ownerId) => onOwnerTask(task.id, ownerId)}
-              onUnlink={() => onUnlinkTask(task.id)}
-            />
-          ))}
+          {shown.map((task) => {
+            const perms = env.permsFor(task)
+            return (
+              <GanttTaskRow
+                key={task.id}
+                task={task}
+                today={env.today}
+                departmentName={task.subteam_key ? (env.departmentNames.get(task.subteam_key) ?? task.subteam_key) : null}
+                ownerName={task.owner_id ? (env.memberNames.get(task.owner_id) ?? 'Unknown member') : null}
+                members={env.members}
+                range={env.range}
+                todayLeft={env.todayLeft}
+                perms={perms}
+                unlink={
+                  perms.canEdit
+                    ? { kind: 'action', label: `Unlink ${task.title} from ${section.name}`, onUnlink: () => env.onUnlinkSection(task) }
+                    : null
+                }
+                expanded={env.expandedTask === task.id}
+                onToggle={() => env.onToggleTask(task.id)}
+                moveTargets={env.moveTargets}
+                currentTargetKey={currentTargetKey(task)}
+                onMoveTo={(to) => env.onMoveTo(task, to)}
+                onSchedule={(start, due) => env.onSchedule(task, start, due)}
+                onMove={(state) => env.onMove(task.id, state)}
+                onOwner={(ownerId) => env.onOwner(task.id, ownerId)}
+              />
+            )
+          })}
 
-          {mine.length === 0 && (
-            <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-500">
-              No subtasks yet. Anything added here is a real Board task.
+          {under.length === 0 && (
+            <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600">
+              No subtasks yet. Link an existing Board task below.
+            </p>
+          )}
+          {under.length > 0 && shown.length === 0 && (
+            <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600" data-testid={`gantt-section-empty-${section.id}`}>
+              Nothing for {env.lens.name} in this section ({under.length} task{under.length === 1 ? '' : 's'} hidden by the
+              filter).
             </p>
           )}
 
-          <SectionTaskTools
-            section={section}
-            unlinked={unlinked}
-            canCreate={canCreateTask}
-            busy={addingTask}
-            onCreate={onCreateTask}
-            onLink={onLinkTask}
+          <LinkTaskTool
+            targetLabel={section.name}
+            direct={direct.map((t) => ({ id: t.id, title: t.title }))}
+            moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
+            onLink={link}
+            onMove={link}
           />
         </>
       )}

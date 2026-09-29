@@ -1,29 +1,31 @@
 import { Link } from 'react-router-dom'
-import { useState } from 'react'
 import type { Member } from '../data/useMembers.ts'
 import type { Task } from '../data/useTasks.ts'
-import type { Proposal, ProposalState } from '../data/useProposals.ts'
-import { PROPOSAL_STATES, proposalStateLabel } from './proposalStates.ts'
+import type { Proposal } from '../data/useProposals.ts'
+import { formatDay } from '../lib/dates.ts'
+import { TASK_PRIORITY_BADGE_TONE, TASK_PRIORITY_LABEL, isUrgent } from '../tasks/priority.ts'
+import { describeBlockers, draftFrom, promotionBlockers } from './promotion.ts'
+import { proposalStatusLabel, reviewActionsFor } from './proposalStates.ts'
 
-// ONE proposal card, used by BOTH the Proposals screen and the Now screen.
-// Do not fork this for a second screen — the whole point of Prompt 0's rule
-// that proposals are editable from Now as well is that they behave identically.
-//
-// `canReview` mirrors proposal_update in the database: only an administrator
-// may change a proposal's stage, owner or decision, or promote it. A member
-// sees the same card, reads the same facts, and is offered no control that
-// would come back refused.
+// ONE proposal card, used by BOTH the Proposals screen and the Now screen. It
+// only PRESENTS a proposal and offers one control: Review, for the people who
+// may review it (`canReview`, mirroring can_review_proposal(): the proposal's
+// department Head, or a Developer). Everything a reviewer does — edit, approve,
+// park, reject, reopen — happens in the ReviewDialog, so the card never offers a
+// control the database would refuse, and a member simply reads the same facts.
 
 type Props = {
   proposal: Proposal
   members: Member[]
   taskFromProposal?: Task
-  promoting: boolean
+  departmentName?: string
+  // Whether the proposal's department has a Head appointed. Without one only a
+  // Developer can decide it (can_review_proposal), and the card says so.
+  departmentHasHead?: boolean
+  milestoneName?: string
+  requirementCount: number
   canReview: boolean
-  onSetState: (id: string, state: ProposalState) => void
-  onSetDecision: (id: string, decision: string) => void
-  onSetOwner: (id: string, ownerId: string | null) => void
-  onPromote: (proposal: Proposal) => void
+  onReview: (proposal: Proposal) => void
   // The one card the guided tour points at.
   tutorial?: boolean
 }
@@ -32,29 +34,22 @@ export function ProposalCard({
   proposal,
   members,
   taskFromProposal,
-  promoting,
+  departmentName,
+  departmentHasHead = true,
+  milestoneName,
+  requirementCount,
   canReview,
-  onSetState,
-  onSetDecision,
-  onSetOwner,
-  onPromote,
+  onReview,
   tutorial = false,
 }: Props) {
-  const serverDecision = proposal.decision ?? ''
-  const [decision, setDecision] = useState(serverDecision)
-  const [lastSeen, setLastSeen] = useState(serverDecision)
-
-  // Follow the server if someone else edits, without clobbering local typing.
-  if (lastSeen !== serverDecision) {
-    setLastSeen(serverDecision)
-    setDecision(serverDecision)
-  }
-
   const nameOf = (id: string | null) =>
     id ? (members.find((m) => m.id === id)?.full_name ?? 'someone no longer on the roster') : null
   const promoted = Boolean(taskFromProposal)
   const owner = nameOf(proposal.owner_id)
   const suggester = nameOf(proposal.raised_by)
+  const archived = proposal.archived_at !== null
+  const blockers = promotionBlockers(draftFrom(proposal, requirementCount))
+  const reviewable = canReview && !promoted && (!archived || reviewActionsFor(proposal, false).length > 0)
 
   return (
     <li
@@ -66,126 +61,77 @@ export function ProposalCard({
       <div className="flex flex-wrap items-baseline gap-2">
         <h3 className="text-sm font-semibold text-slate-900">{proposal.title}</h3>
         {proposal.starred && <span aria-label="Starred">★</span>}
+        {isUrgent(proposal.priority) && (
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${TASK_PRIORITY_BADGE_TONE.urgent}`}>
+            {TASK_PRIORITY_LABEL.urgent}
+          </span>
+        )}
+        {proposal.state === 'parked' && (
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900" data-testid={`proposal-parked-${proposal.id}`}>
+            Parked
+          </span>
+        )}
       </div>
       {proposal.context && <p className="mt-0.5 text-sm text-slate-600">{proposal.context}</p>}
       <p className="mt-0.5 text-xs text-slate-500">
         Suggested{suggester ? ` by ${suggester}` : ''} on {proposal.raised_on}
       </p>
+      <p className="mt-0.5 text-xs text-slate-600" data-testid={`proposal-facts-${proposal.id}`}>
+        {departmentName ?? 'No department'}
+        {proposal.due_date ? ` · due ${formatDay(proposal.due_date)}` : ' · no deadline'}
+        {milestoneName ? ` · ${milestoneName}` : ''}
+        {` · ${requirementCount} ${requirementCount === 1 ? 'requirement' : 'requirements'}`}
+      </p>
 
-      {canReview ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <label className="sr-only" htmlFor={`proposal-state-${proposal.id}`}>
-            Stage for {proposal.title}
-          </label>
-          <select
-            id={`proposal-state-${proposal.id}`}
-            value={proposal.state}
-            onChange={(e) => onSetState(proposal.id, e.target.value as ProposalState)}
-            className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-          >
-            {PROPOSAL_STATES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-
-          <label className="sr-only" htmlFor={`proposal-owner-${proposal.id}`}>
-            Owner for {proposal.title}
-          </label>
-          <select
-            id={`proposal-owner-${proposal.id}`}
-            value={proposal.owner_id ?? ''}
-            onChange={(e) => onSetOwner(proposal.id, e.target.value || null)}
-            className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
-          >
-            <option value="">Unassigned</option>
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.full_name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : (
-        // A member reads the same two facts as a plain sentence: the stage, and
-        // who is looking after it. No control the database would refuse.
-        <p className="mt-2 text-sm text-slate-700" data-testid={`proposal-status-${proposal.id}`}>
-          <span className="font-medium">{proposalStateLabel(proposal.state)}</span>
-          {owner ? ` · with ${owner}` : ''}
+      {proposal.legacy_incomplete && (
+        <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs text-amber-900" data-testid={`proposal-legacy-${proposal.id}`}>
+          Older proposal: it needs {describeBlockers(blockers) || 'its details confirmed'} before it can become a task.
         </p>
       )}
 
-      {/* Editable in EVERY stage, on purpose. A proposal must never become a
-          dead end because of the stage it happens to be in — the decision can
-          be written before it is marked decided, and corrected afterwards. */}
-      {canReview ? (
-        <div className="mt-2" data-tutorial={tutorial ? 'proposal-decision' : undefined}>
-          <label
-            id={`proposal-decision-label-${proposal.id}`}
-            className="block text-xs font-medium text-slate-600"
-            htmlFor={`proposal-decision-${proposal.id}`}
-          >
-            Decision
-          </label>
-          <textarea
-            id={`proposal-decision-${proposal.id}`}
-            // Explicit association as well as htmlFor: assistive tech and test
-            // queries both resolve the name without guessing.
-            aria-labelledby={`proposal-decision-label-${proposal.id}`}
-            rows={2}
-            value={decision}
-            placeholder="What was decided, and why…"
-            onChange={(e) => setDecision(e.target.value)}
-            onBlur={() => {
-              if (decision !== serverDecision) onSetDecision(proposal.id, decision)
-            }}
-            className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-          />
-        </div>
-      ) : (
-        serverDecision && (
-          <p className="mt-2 rounded bg-slate-50 p-2 text-sm text-slate-700">
-            <span className="font-medium">Decision:</span> {serverDecision}
-          </p>
-        )
+      <p className="mt-2 text-sm text-slate-700" data-testid={`proposal-status-${proposal.id}`}>
+        <span className="font-medium">{proposalStatusLabel(proposal)}</span>
+        {owner ? ` · with ${owner}` : ''}
+      </p>
+      {proposal.decision && (
+        <p className="mt-1 rounded bg-slate-50 p-2 text-sm text-slate-700">
+          <span className="font-medium">Reviewer note:</span> {proposal.decision}
+        </p>
       )}
 
-      <div
-        className="mt-2 flex flex-wrap items-center gap-2"
-        data-tutorial={tutorial ? 'proposal-promote' : undefined}
-      >
+      <div className="mt-2 flex flex-wrap items-center gap-2" data-tutorial={tutorial ? 'proposal-promote' : undefined}>
         {promoted ? (
           <span
             className="pc-fade-in inline-flex flex-wrap items-center gap-2 rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
             data-testid={`proposal-promoted-${proposal.id}`}
           >
-            On the Board as “{taskFromProposal?.title}”
+            Created the task “{taskFromProposal?.title}”
             <Link
-              to="/board"
-              className="rounded font-medium text-slate-900 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+              to={`/board?task=${encodeURIComponent(taskFromProposal?.id ?? '')}`}
+              className="inline-flex min-h-11 items-center rounded font-medium text-slate-900 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
             >
               Open on Board
             </Link>
           </span>
-        ) : canReview ? (
+        ) : reviewable ? (
           <button
             type="button"
-            // Disabled while in flight so a second click cannot start a second
-            // insert. The mutation is idempotent as well — see
-            // usePromoteProposal.
-            disabled={promoting}
-            onClick={() => onPromote(proposal)}
-            data-testid={`promote-${proposal.id}`}
-            className="min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
+            onClick={() => onReview(proposal)}
+            data-testid={`review-open-${proposal.id}`}
+            data-tutorial={tutorial ? 'proposal-decision' : undefined}
+            className="min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
           >
-            {promoting ? 'Promoting…' : 'Promote to task'}
+            Review
           </button>
-        ) : (
-          <p className="text-xs text-slate-500">
-            The President, Vice President or a Developer decides whether this becomes a board task.
+        ) : !canReview && !archived ? (
+          <p className="text-xs text-slate-500" data-testid={`proposal-hint-${proposal.id}`}>
+            {!departmentName
+              ? 'A Developer completes the details of this older proposal before it can become a board task.'
+              : departmentHasHead
+                ? `The Head of ${departmentName}, or a Developer, decides whether this becomes a board task.`
+                : `${departmentName} has no Head appointed yet, so only a Developer can decide whether this becomes a board task.`}
           </p>
-        )}
+        ) : null}
       </div>
     </li>
   )

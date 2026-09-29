@@ -48,6 +48,10 @@ function builder(table: string) {
       ctx.filters[col] = val
       return b
     },
+    // A no-op filter, not a real one: fixture rows here don't carry every
+    // real column (e.g. tasks.archived_at), and this suite tests season
+    // scoping, not archive filtering — see data.test.tsx's identical choice.
+    is: () => b,
     update: (payload: Record<string, unknown>) => {
       ctx.op = 'update'
       ctx.payload = payload

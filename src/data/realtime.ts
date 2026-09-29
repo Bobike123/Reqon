@@ -31,7 +31,7 @@ export function useSeasonRealtimeChannel<T>(
   // then covers every season's rows unfiltered, and onChange is responsible
   // for invalidating the smallest safe query set rather than assuming the
   // event belongs to the currently-viewed season.
-  options: { filterBySeasonId?: boolean } = {},
+  options: { filterBySeasonId?: boolean; onSubscribed?: (seasonId: string) => void } = {},
 ): RealtimeState {
   const filterBySeasonId = options.filterBySeasonId ?? true
   const seasonId = useSeasonId()
@@ -46,13 +46,16 @@ export function useSeasonRealtimeChannel<T>(
   // own effect, not during render: writing a ref while rendering is a React
   // purity violation even though this value never affects what is returned.
   const onChangeRef = useRef(onChange)
+  const onSubscribedRef = useRef(options.onSubscribed)
   useEffect(() => {
     onChangeRef.current = onChange
+    onSubscribedRef.current = options.onSubscribed
   })
 
   useEffect(() => {
     if (!seasonId || !userId) return
 
+    let active = true
     const realtimeChannel = supabase
       .channel(`${table}-${seasonId}`)
       .on(
@@ -66,16 +69,25 @@ export function useSeasonRealtimeChannel<T>(
         // Left for the SDK's own overload to infer, then narrowed here —
         // annotating the callback's parameter directly defeats overload
         // resolution against supabase-js's postgres_changes signatures.
-        (payload) => onChangeRef.current(payload as unknown as RealtimeChangePayload<T>, seasonId),
+        (payload) => {
+          // removeChannel is asynchronous. A payload already queued by the old
+          // channel after a season switch/unmount must not touch its old cache.
+          if (active) onChangeRef.current(payload as unknown as RealtimeChangePayload<T>, seasonId)
+        },
       )
       .subscribe((status: string) => {
+        if (!active) return
         setChannel({
           seasonId,
           status: status === 'SUBSCRIBED' ? 'live' : status === 'CLOSED' ? 'off' : 'connecting',
         })
+        // SUBSCRIBED is delivered again after a reconnect. Refetching through
+        // the entity hook closes the gap while the socket was unavailable.
+        if (status === 'SUBSCRIBED') onSubscribedRef.current?.(seasonId)
       })
 
     return () => {
+      active = false
       void supabase.removeChannel(realtimeChannel)
     }
   }, [table, seasonId, userId, filterBySeasonId])

@@ -23,7 +23,7 @@ describe('isOverdue', () => {
   })
 
   it('is true across every other open state', () => {
-    for (const state of ['urgent', 'wip', 'blocked'] as const) {
+    for (const state of ['todo', 'wip', 'blocked'] as const) {
       expect(isOverdue({ due_date: '2026-09-08', state }, TODAY)).toBe(true)
     }
   })

@@ -37,15 +37,26 @@ function reset() {
       { member_id: 'm4', role: 'developer' },
       { member_id: 'm5', role: 'treasurer' },
     ],
-    subteams: [{ key: 'GEOM', name: 'Design Envelope', description: null, lead_id: null, is_parked: false, sort_order: 0 }],
+    subteams: [
+      {
+        key: 'GEOM', name: 'Design Envelope', description: null, lead_id: null, is_parked: false,
+        sort_order: 0, archived_at: null, archived_by: null, archive_reason: null,
+      },
+      {
+        key: 'RACEOP', name: 'Race Operations', description: null, lead_id: null, is_parked: true,
+        sort_order: 1, archived_at: null, archived_by: null, archive_reason: null,
+      },
+    ],
     seasons: [
-      { id: 'sa', label: '2026/27', edition: null, is_current: true },
-      { id: 'sb', label: '2027/28', edition: null, is_current: false },
+      { id: 'sa', label: '2026/27', edition: null, regs_ref: 'ED1', is_current: true },
+      { id: 'sb', label: '2027/28', edition: null, regs_ref: 'ED2', is_current: false },
     ],
     v_current_season: [],
     milestones: [{ key: 'MS1-1', season_id: 'sa', ordinal: 1, name: 'Team Plan', opens_on: '2026-11-01', due_on: '2026-11-30', max_points: 75, is_blocking: false, aim: null, article_ref: null, notes: null }],
     handover_notes: [],
     tasks: [], proposals: [], clause_status: [], clauses: [],
+    // Reference data: any member reads, only administrators write (is_admin()).
+    regulation_documents: [],
   }
   db.v_current_season = db.seasons.filter((s) => s.is_current)
   rpcCalls = []
@@ -65,7 +76,7 @@ function policyAllows(table: string, op: string, filters: Record<string, unknown
   if (table === 'members' && op === 'insert') return isAdmin(caller)
   if (table === 'members' && op === 'update') return filters.id === caller.id || isAdmin(caller)
   if (table === 'members' && op === 'delete') return false
-  if (['subteams', 'seasons', 'milestones', 'clauses'].includes(table)) return isAdmin(caller)
+  if (['subteams', 'seasons', 'milestones', 'clauses', 'regulation_documents'].includes(table)) return isAdmin(caller)
   if (table === 'member_roles') return (op === 'insert' || op === 'delete') && canManageRoles(caller)
   return true
 }
@@ -112,8 +123,10 @@ function makeBuilder(table: string) {
       const row: Record<string, unknown> =
         table === 'member_roles'
           ? { assigned_by: caller.id, ...ctx.payload } // the column default: auth.uid()
-          : { id: `${table}-${db[table].length + 1}`, ...ctx.payload }
-      const keyField = table === 'handover_notes' ? 'subteam_key' : 'id'
+          : table === 'regulation_documents'
+            ? { ...ctx.payload } // keyed by regs_ref, no surrogate id
+            : { id: `${table}-${db[table].length + 1}`, ...ctx.payload }
+      const keyField = table === 'handover_notes' ? 'subteam_key' : table === 'regulation_documents' ? 'regs_ref' : 'id'
       const i = db[table].findIndex((r) => r[keyField] !== undefined && r[keyField] === row[keyField])
       if (ctx.op === 'upsert' && i >= 0) db[table][i] = { ...db[table][i], ...ctx.payload }
       else db[table].push(row)
@@ -219,6 +232,10 @@ const supabase = {
     // useUpdateMember/useUpdateSubteam/useUpdateMilestone ask this to tell a
     // refused UPDATE apart from one that simply matched no (renamed/deleted) row.
     if (fn === 'is_admin') return { data: isAdmin(caller), error: null }
+    // can_manage_departments() (20260115000000): same membership as is_admin()
+    // today, kept as its own RPC per ADR-0001 so department authority does not
+    // silently follow future, unrelated changes to is_admin().
+    if (fn === 'can_manage_departments') return { data: isAdmin(caller), error: null }
     rpcCalls.push({ fn, args })
     // Everything else here is set_current_season, which the real function
     // refuses to anyone but the president or vice-president in SQL.
@@ -235,6 +252,10 @@ const supabase = {
   },
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
+// Settings.tsx wires this for live department/Head updates (Phase 1). Real
+// channel behaviour is exercised elsewhere (data/realtimeEntities.test.tsx);
+// this suite only needs it to not crash on mount.
+vi.mock('../data/useRealtimeSubteams.ts', () => ({ useRealtimeSubteams: () => 'off' }))
 // The signed-in person's roles come from member_roles, exactly as AuthProvider
 // loads them. usePermissions() reads this same mocked context.
 vi.mock('../auth/context.ts', () => ({
@@ -250,12 +271,12 @@ const { useSetCurrentSeason } = await import('../data/useSeasons.ts')
 const { useApplyRoleChanges } = await import('../roles/useMemberRoles.ts')
 const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
-function renderSettings() {
+function renderSettings(url = '/settings') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
       <SeasonProvider>
-        <MemoryRouter><Settings /></MemoryRouter>
+        <MemoryRouter initialEntries={[url]}><Settings /></MemoryRouter>
       </SeasonProvider>
     </QueryClientProvider>,
   )
@@ -283,8 +304,9 @@ describe('who sees what', () => {
   it('the president sees every admin control, and a role button for each member', async () => {
     renderSettings()
     expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
-    expect(screen.getByText('Subsystems')).toBeInTheDocument()
+    expect(screen.getByText('Departments')).toBeInTheDocument()
     expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
+    expect(screen.getByText('Requirements Book')).toBeInTheDocument()
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     // The roster rows arrive with the members query, after the forms.
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
@@ -296,7 +318,7 @@ describe('who sees what', () => {
     caller = VP
     renderSettings()
     expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
-    expect(screen.getByText('Subsystems')).toBeInTheDocument()
+    expect(screen.getByText('Departments')).toBeInTheDocument()
     expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     // Wait for the roster rows, or the absence checks below prove nothing.
@@ -322,7 +344,8 @@ describe('who sees what', () => {
       expect(screen.getByText(shown, { selector: 'strong' })).toBeInTheDocument()
       await screen.findByTestId('member-m2')
       expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
-      expect(screen.queryByText('Subsystems')).not.toBeInTheDocument()
+      expect(screen.queryByText('Departments')).not.toBeInTheDocument()
+      expect(screen.queryByText('Requirements Book')).not.toBeInTheDocument()
       expect(screen.queryByText('Start a new season')).not.toBeInTheDocument()
       expect(screen.queryByTestId('make-current-sb')).not.toBeInTheDocument()
       expect(changeRolesButtons()).toHaveLength(0)
@@ -335,7 +358,7 @@ describe('who sees what', () => {
     caller = DEV
     renderSettings()
     expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
-    expect(screen.getByText('Subsystems')).toBeInTheDocument()
+    expect(screen.getByText('Departments')).toBeInTheDocument()
     expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
@@ -703,21 +726,177 @@ describe('roster', () => {
 
 // --- Subteams, milestones, notes ---------------------------------------------
 
-describe('subsystems', () => {
-  it('renames and assigns a lead without touching the key', async () => {
+describe('departments', () => {
+  it('renames and assigns a Head in one explicit save, without touching the key', async () => {
     const user = userEvent.setup()
     renderSettings()
-    const row = await screen.findByTestId('subteam-row-GEOM')
+    const row = await screen.findByTestId('department-row-GEOM')
+    // Read first: no editable box until Edit is chosen.
+    expect(within(row).queryByLabelText('Name for GEOM')).not.toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'Edit Design Envelope' }))
     const name = within(row).getByLabelText('Name for GEOM')
+    expect(name).toHaveFocus()
     await user.clear(name)
     await user.type(name, 'Design Envelope & Geometry')
     await user.tab()
+    // Leaving the field saves nothing.
+    expect(db.subteams[0].name).toBe('Design Envelope')
+    await user.selectOptions(within(row).getByLabelText('Head of Department for GEOM'), 'm2')
+    await user.click(within(row).getByRole('button', { name: 'Save department' }))
     await waitFor(() => expect(db.subteams[0].name).toBe('Design Envelope & Geometry'))
-
-    await user.selectOptions(within(row).getByLabelText('Lead for GEOM'), 'm2')
-    await waitFor(() => expect(db.subteams[0].lead_id).toBe('m2'))
+    expect(db.subteams[0].lead_id).toBe('m2')
+    expect(await within(screen.getByTestId('department-row-GEOM')).findByTestId('department-saved-GEOM')).toHaveTextContent('Saved: name, Head.')
     // The key is the join target for 1,146 clauses — it must not change.
     expect(db.subteams[0].key).toBe('GEOM')
+  })
+
+  it('says when there is nothing to save, and Cancel changes nothing', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('department-row-GEOM')
+    await user.click(within(row).getByTestId('department-edit-GEOM'))
+    await user.click(within(row).getByRole('button', { name: 'Save department' }))
+    expect(within(row).getByTestId('department-note-GEOM')).toHaveTextContent('Nothing to save')
+    await user.type(within(row).getByLabelText('Name for GEOM'), ' changed')
+    await user.click(within(row).getByRole('button', { name: 'Cancel' }))
+    expect(db.subteams[0].name).toBe('Design Envelope')
+    expect(within(row).queryByLabelText('Name for GEOM')).not.toBeInTheDocument()
+  })
+
+  it('parks and unparks a department through the same department command', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('department-row-GEOM')
+    await user.click(within(row).getByTestId('department-edit-GEOM'))
+    await user.click(within(row).getByRole('checkbox', { name: /Parked/ }))
+    await user.click(within(row).getByRole('button', { name: 'Save department' }))
+    await waitFor(() => expect(db.subteams[0].is_parked).toBe(true))
+    expect(db.subteams[0].archived_at).toBeNull()
+    expect(await within(screen.getByTestId('department-row-GEOM')).findByText('Parked')).toBeInTheDocument()
+  })
+
+  it('opens the exact editor from a link (?edit=department:KEY), and says so when that department is archived', async () => {
+    renderSettings('/settings?edit=department:RACEOP&keep=1')
+    const row = await screen.findByTestId('department-row-RACEOP')
+    expect(await within(row).findByLabelText('Name for RACEOP')).toHaveFocus()
+    expect(within(screen.getByTestId('department-row-GEOM')).queryByLabelText('Name for GEOM')).not.toBeInTheDocument()
+  })
+
+  it('says a linked department is archived instead of opening nothing', async () => {
+    db.subteams[1] = { ...db.subteams[1], archived_at: '2026-09-01T00:00:00Z', archive_reason: 'merged' }
+    renderSettings('/settings?edit=department:RACEOP')
+    expect(await screen.findByTestId('department-edit-missing')).toHaveTextContent('RACEOP is archived. Restore it below to edit it.')
+  })
+
+  it('keeps job title, access role and department headship apart on the roster', async () => {
+    db.subteams[0] = { ...db.subteams[0], lead_id: 'm2' }
+    renderSettings()
+    const row = await screen.findByTestId('member-m2')
+    const headship = await within(row).findByTestId('headship-m2')
+    expect(headship).toHaveTextContent('Head of Department: Design Envelope')
+    // A contextual Edit link opens that department's own editor.
+    expect(within(headship).getByRole('link', { name: 'Edit Design Envelope' })).toHaveAttribute('href', '/settings?edit=department%3AGEOM')
+  })
+
+  it('shows Edit on hover and keyboard focus, and always on touch screens', async () => {
+    renderSettings()
+    const edit = await screen.findByTestId('department-edit-GEOM')
+    expect(edit.className).toMatch(/sm:opacity-0/)
+    expect(edit.className).toMatch(/sm:group-hover:opacity-100/)
+    expect(edit.className).toMatch(/sm:group-focus-within:opacity-100/)
+    expect(edit.className).toMatch(/pointer-coarse:opacity-100/)
+  })
+
+  it('shows the active count against the 10-department cap', async () => {
+    renderSettings()
+    expect(await screen.findByText('2 active / 10')).toBeInTheDocument()
+  })
+
+  it('shows a Parked badge, independent of archived state', async () => {
+    renderSettings()
+    const row = await screen.findByTestId('department-row-RACEOP')
+    expect(within(row).getByText('Parked')).toBeInTheDocument()
+    // GEOM is not parked.
+    expect(within(await screen.findByTestId('department-row-GEOM')).queryByText('Parked')).not.toBeInTheDocument()
+  })
+
+  it('reorders with the Move up/down controls, keyboard-reachable buttons', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await screen.findByTestId('department-row-GEOM')
+    await user.click(screen.getByRole('button', { name: 'Move Race Operations up' }))
+    await waitFor(() => expect(rpcCalls.some((c) => c.fn === 'reorder_departments')).toBe(true))
+    const call = rpcCalls.find((c) => c.fn === 'reorder_departments')
+    expect((call?.args as { p_ordered_keys: string[] } | undefined)?.p_ordered_keys).toEqual(['RACEOP', 'GEOM'])
+  })
+
+  it('describes a department, saved by Save — never on blur', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('department-row-GEOM')
+    await user.click(within(row).getByTestId('department-edit-GEOM'))
+    const desc = within(row).getByLabelText('Description for GEOM')
+    await user.type(desc, 'What this department covers')
+    await user.tab()
+    expect(db.subteams[0].description).toBeNull()
+    await user.click(within(row).getByRole('button', { name: 'Save department' }))
+    await waitFor(() => expect(db.subteams[0].description).toBe('What this department covers'))
+  })
+
+  it('cancelling the archive confirmation changes nothing', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('department-row-GEOM')
+    await user.click(within(row).getByRole('button', { name: 'Archive…' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
+    expect(db.subteams[0].archived_at).toBeNull()
+  })
+
+  it('disables creating and restoring once at the 10-active cap', async () => {
+    db.subteams = Array.from({ length: 11 }, (_, i) => ({
+      key: `D${i}`, name: `Dept ${i}`, description: null, lead_id: null, is_parked: false,
+      sort_order: i, archived_at: i === 0 ? new Date().toISOString() : null, archived_by: null,
+      archive_reason: i === 0 ? 'already archived' : null,
+    }))
+    renderSettings()
+    expect(await screen.findByText('10 active / 10')).toBeInTheDocument()
+    expect(screen.getByLabelText('Key')).toBeDisabled()
+    await userEvent.setup().click(screen.getByText('Archived (1)'))
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeDisabled()
+  })
+
+  it('creates a new department with no book_section', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await screen.findByTestId('department-row-GEOM')
+    await user.type(screen.getByLabelText('Key'), 'swdata')
+    await user.type(screen.getByLabelText('Name'), 'Software & Data')
+    await user.click(screen.getByRole('button', { name: 'New department' }))
+    await waitFor(() => expect(db.subteams.some((s) => s.key === 'SWDATA')).toBe(true))
+    expect(db.subteams.find((s) => s.key === 'SWDATA')?.book_section).toBeNull()
+  })
+
+  it('archives a department with a reason, and it can be restored', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const row = await screen.findByTestId('department-row-GEOM')
+    await user.click(within(row).getByRole('button', { name: 'Archive…' }))
+    await user.type(screen.getByLabelText(/Reason/), 'test reason')
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
+    await waitFor(() => expect(db.subteams[0].archived_at).not.toBeNull())
+    expect(db.subteams[0].archive_reason).toBe('test reason')
+
+    const restoreButton = await screen.findByRole('button', { name: 'Restore' })
+    await user.click(restoreButton)
+    await waitFor(() => expect(db.subteams[0].archived_at).toBeNull())
+  })
+
+  it('a non-admin does not see the Departments section at all', async () => {
+    caller = CREW
+    renderSettings()
+    await screen.findByTestId('member-m2')
+    expect(screen.queryByTestId('department-row-GEOM')).not.toBeInTheDocument()
   })
 })
 
@@ -740,7 +919,7 @@ describe('milestone administration', () => {
 })
 
 describe('handover notes', () => {
-  it('saves one note per subsystem into handover_notes', async () => {
+  it('saves one note per department into handover_notes', async () => {
     const user = userEvent.setup()
     renderSettings()
     const box = await screen.findByLabelText('Design Envelope')
@@ -756,6 +935,42 @@ describe('handover notes', () => {
 })
 
 // --- Seasons -----------------------------------------------------------------
+
+describe('Requirements Book source', () => {
+  const saveButton = () => screen.findByRole('button', { name: /save requirements book source/i })
+
+  it('lets an administrator point the current season\'s edition at an https document', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await user.type(await screen.findByLabelText(/^link/i), 'https://example.org/regs.pdf')
+    await user.click(await saveButton())
+    expect(await screen.findByText('Saved.')).toBeInTheDocument()
+    expect(db.regulation_documents).toEqual([
+      expect.objectContaining({ regs_ref: 'ED1', url: 'https://example.org/regs.pdf', storage_path: null }),
+    ])
+  })
+
+  it('refuses an unsafe link before it reaches the database', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await user.type(await screen.findByLabelText(/^link/i), 'javascript:alert(1)')
+    await user.click(await saveButton())
+    expect(await screen.findByRole('alert')).toHaveTextContent(/https/)
+    expect(db.regulation_documents).toEqual([])
+  })
+
+  it('is refused by the database for anyone who is not an administrator, even bypassing the screen', async () => {
+    caller = CREW
+    const { useSaveRegulationDocument } = await import('../data/useRegulationDocument.ts')
+    const result = hook(() => useSaveRegulationDocument())
+    await expect(
+      result.current.mutateAsync({
+        regsRef: 'ED1', edition: null, title: null, url: 'https://example.org/regs.pdf', storagePath: null, pageOffset: 0, pageCount: null,
+      }),
+    ).rejects.toMatchObject({ permission: true })
+    expect(db.regulation_documents).toEqual([])
+  })
+})
 
 describe('seasons', () => {
   it('creates a new season that is NOT current', async () => {
@@ -794,7 +1009,7 @@ describe('export', () => {
 
   it('is scoped to one season and carries identifying metadata', async () => {
     const out = await buildSeasonExport('sa')
-    expect(out.exportVersion).toBe(2)
+    expect(out.exportVersion).toBe(4) // 4: archived work, junctions, Book metadata, global history (Phase 11)
     expect(typeof out.exportedAt).toBe('string')
     expect(typeof out.consistency).toBe('string')
     expect(out.season).toMatchObject({ id: 'sa', label: '2026/27' })

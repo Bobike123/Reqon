@@ -12,6 +12,11 @@ export type { RealtimeState }
 export function useRealtimeClauseStatus(): RealtimeState {
   const queryClient = useQueryClient()
 
+  const refresh = (seasonId: string) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.clauseStatus(seasonId) })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.attention(seasonId) })
+  }
+
   return useSeasonRealtimeChannel<ClauseStatus>('clause_status', (payload, seasonId) => {
     const key = queryKeys.clauseStatus(seasonId)
     queryClient.setQueryData<ClauseStatus[]>(key, (rows) => {
@@ -29,5 +34,6 @@ export function useRealtimeClauseStatus(): RealtimeState {
       // who is reading it.
       return rows.map((row, i) => (i === index ? incoming : row))
     })
-  })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.attention(seasonId) })
+  }, { onSubscribed: refresh })
 }

@@ -1,6 +1,8 @@
 import type { Milestone, MilestoneSection } from '../../milestones/types.ts'
+import { taskProgress, tasksInMilestone } from '../../tasks/progress.ts'
 import type { Task } from '../../tasks/types.ts'
 import { draftedCount } from '../milestones/milestoneModel.ts'
+import { milestoneProgress } from './ganttProgress.ts'
 
 // The arithmetic behind the Gantt: where a bar sits and how far along it is.
 // Kept out of the screen so both can be tested without rendering a chart, and
@@ -72,6 +74,18 @@ export function placeBar(span: Span, range: Span): Box | null {
   }
 }
 
+// Whole days the chart spans, both ends inclusive — the unit a dragged bar's
+// pixel distance is converted into.
+export function rangeDays(range: Span): number {
+  return dayNumber(range.to) - dayNumber(range.from) + 1
+}
+
+// A calendar day moved by whole days. Pure string arithmetic in UTC, so no
+// time zone can shift a dragged deadline by one.
+export function shiftDay(iso: string, days: number): string {
+  return isoOfDay(dayNumber(iso) + days)
+}
+
 // Where a single date sits, as a percentage — for the "today" line.
 export function placeDay(iso: string, range: Span): number | null {
   const box = placeBar({ from: iso, to: iso }, range)
@@ -132,23 +146,13 @@ export function weekTicks(range: Span): Tick[] {
   return ticks
 }
 
-export type Progress = { done: number; total: number; percent: number | null }
-
-// A cancelled task is not work outstanding, and it is not work done either — it
-// leaves the count entirely. Otherwise a section whose tasks were all cancelled
-// would read 0% forever and look like nobody had started.
-//
-// `percent` is null, not 0, when there is nothing to count: "no subtasks yet"
+// The one progress rule (tasks/progress.ts, ADR-0006) — kept under this
+// file's existing name so MilestoneRow.tsx/SectionRow.tsx (and the rest of
+// this file) need no change. A cancelled task leaves the count entirely;
+// percent is null, not 0, when there is nothing to count: "no subtasks yet"
 // and "no subtask finished yet" are different facts and the screen says so.
-export function progressOf(tasks: Task[]): Progress {
-  const counted = tasks.filter((t) => t.state !== 'cancelled')
-  const done = counted.filter((t) => t.state === 'done').length
-  return {
-    done,
-    total: counted.length,
-    percent: counted.length === 0 ? null : Math.round((done / counted.length) * 100),
-  }
-}
+export type { Progress } from '../../tasks/progress.ts'
+export const progressOf = taskProgress
 
 export function tasksInSection(tasks: Task[], sectionId: string): Task[] {
   return tasks.filter((t) => t.section_id === sectionId)
@@ -163,9 +167,22 @@ export function sectionPercent(section: MilestoneSection, tasks: Task[]): number
 
 // Same rule one level up: every subtask under the milestone, or its sections
 // drafted out of total when there are none.
-export function milestonePercent(sections: MilestoneSection[], tasks: Task[]): number {
+type ProgressSource = Pick<Task, 'id' | 'state' | 'archived_at' | 'section_id' | 'milestone_key'>
+
+// `tasks` here is the PROGRESS list (active and archived), so an archived Done
+// task still counts as complete and an archived unfinished one stays in the
+// denominator (ADR-0006) — unlike the active list a row's own bar is drawn from.
+export function milestonePercent(sections: MilestoneSection[], tasks: ProgressSource[], milestoneKey?: string): number {
+  // With a milestone key this IS ganttProgress.milestoneProgress (the one rule);
+  // the number alone is kept for callers that only want a percentage.
+  if (milestoneKey !== undefined) return milestoneProgress(sections, tasks, milestoneKey).percent ?? 0
   const ids = new Set(sections.map((s) => s.id))
-  const mine = tasks.filter((t) => t.section_id !== null && ids.has(t.section_id))
+  // With the milestone's key, unsectioned tasks attached to it count too (each
+  // task once); without it, only sectioned tasks, as before.
+  const mine =
+    milestoneKey === undefined
+      ? tasks.filter((t) => t.section_id !== null && ids.has(t.section_id))
+      : tasksInMilestone(tasks, milestoneKey, ids)
   const percent = progressOf(mine).percent
   if (percent !== null) return percent
   const { drafted, total } = draftedCount(sections)
@@ -191,6 +208,8 @@ export function spanOfDates(dates: (string | null | undefined)[]): Span | null {
 // A section has no dates of its own. Its subtasks' due dates give it one; with
 // none, it borrows the milestone's window, which is the honest answer —
 // "somewhere inside this submission".
+// Starts count as well as deadlines, so a section whose subtasks begin early is
+// drawn from that start, not from the first deadline.
 export function sectionSpan(tasks: Task[], sectionId: string, fallback: Span | null): Span | null {
-  return spanOfDates(tasksInSection(tasks, sectionId).map((t) => t.due_date)) ?? fallback
+  return spanOfDates(tasksInSection(tasks, sectionId).flatMap((t) => [t.starts_on, t.due_date])) ?? fallback
 }

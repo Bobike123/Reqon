@@ -10,6 +10,11 @@ vi.mock('../auth/context.ts', () => ({
 vi.mock('../data/useCurrentSeason.ts', () => ({
   useCurrentSeason: () => ({ data: { id: 's1', label: '2026/27' } }),
 }))
+// TutorialProvider (rendered below) reads Head status from this hook; keep
+// it out of a real useSubteams()/QueryClient round trip.
+vi.mock('../data/useTaskActor.ts', () => ({
+  useTaskActor: () => ({ id: 'm1', status: 'active', isDeveloper: who.roles.includes('developer'), headOf: [] }),
+}))
 
 const { AppHeader } = await import('./AppHeader.tsx')
 const { TutorialProvider } = await import('../tutorial/TutorialProvider.tsx')
@@ -41,7 +46,7 @@ describe('main navigation', () => {
     const labels = within(desktopNav()).getAllByRole('link').map((a) => a.textContent)
     // Proposals and Meetings are two screens: the old "Meetings" was neither.
     expect(labels).toEqual([
-      'Now', 'Priorities', 'Register', 'Milestones', 'Gantt', 'Board', 'Proposals', 'Meetings', 'Spec sheet', 'Settings',
+      'Now', 'Priorities', 'Register', 'Book', 'Milestones', 'Gantt', 'Board', 'Proposals', 'Archive', 'Meetings', 'Spec sheet', 'Settings',
     ])
   })
 

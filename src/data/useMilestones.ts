@@ -93,7 +93,11 @@ export function useUpdateMilestone() {
     },
     onSuccess: () => {
       if (!seasonId) return
+      // The timeline, the Milestones list and Now's "next deadline" all read this
+      // one season-scoped key. Other seasons' caches are untouched.
       void queryClient.invalidateQueries({ queryKey: queryKeys.milestones(seasonId) })
+      // A moved deadline changes which tasks count as late against it.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.attention(seasonId) })
     },
   })
 }
@@ -106,11 +110,19 @@ export function useSetSectionDrafted() {
 
   return useMutation<void, Error, { id: string; isDrafted: boolean }>({
     mutationFn: async ({ id, isDrafted }) => {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('milestone_sections')
         .update({ is_drafted: isDrafted })
         .eq('id', id)
+        .select('id')
       if (error) throw new DataError('update milestone section', error)
+      if (data && data.length > 0) return
+      // RLS refuses by matching no rows. Only an ACTIVE member may write (20260118),
+      // so ask which it was rather than report a save that never happened.
+      const { data: active, error: askError } = await supabase.rpc('is_active_member')
+      if (askError) throw new DataError('check whether the change was saved', askError)
+      if (active === true) throw new DataError('save that section: it no longer exists', null)
+      throw new DataError('update milestone section', null, { permission: true })
     },
     onSettled: () => {
       if (!seasonId) return

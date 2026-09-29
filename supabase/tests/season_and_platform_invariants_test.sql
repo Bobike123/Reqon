@@ -19,8 +19,8 @@
 --    * the seasons_one_current index refuses a second current season even to a
 --      caller that bypasses the RPC
 --    * a signed-out caller cannot resolve the current season at all
---    * the realtime publication contains exactly the five tables the client
---      subscribes to (src/data/useRealtime*.ts) — no more, no fewer
+--    * the realtime publication contains exactly the tables the client
+--      subscribes to (src/data/useRealtime*.ts) — no more, no fewer.
 --    * every SECURITY DEFINER function in `public` pins its search_path
 --    * the transactional RPCs are executable by signed-in users only
 --    * every table in `public` has row-level security enabled
@@ -75,13 +75,13 @@ begin
   -- ============================================================ catalog checks
   -- Run as the owner: these read system catalogs, not application rows.
 
-  -- Realtime publication: exactly the five subscribed tables.
+  -- Realtime publication: exactly the ten subscribed tables.
   select string_agg(tablename, ',' order by tablename) into txt
     from pg_publication_tables
    where pubname = 'supabase_realtime' and schemaname = 'public';
   select * into lines, failures from pg_temp.note(lines, failures,
-    'realtime publication holds exactly the five subscribed tables',
-    txt = 'clause_status,milestone_sections,specs,task_proposals,tasks',
+    'realtime publication holds exactly the ten subscribed tables',
+    txt = 'clause_status,milestone_sections,milestones,proposal_requirements,spec_measurements,specs,subteams,task_proposals,task_requirements,tasks',
     format('found: %s', coalesce(txt, '(none)')));
 
   -- SECURITY DEFINER without a pinned search_path can be hijacked by a
@@ -99,7 +99,12 @@ begin
   -- The transactional RPCs: signed-in only.
   select string_agg(fn, ', ') into txt
     from unnest(array[
-      'public.promote_proposal(uuid,uuid,uuid,date,task_state)',
+      'public.promote_proposal(uuid,uuid,uuid)',
+      'public.submit_proposal(uuid,text,text,date,text,text[],text,task_priority,uuid)',
+      'public.review_proposal(uuid,text)',
+      'public.set_proposal_requirements(uuid,text[])',
+      'public.link_task_requirement(uuid,text)',
+      'public.unlink_task_requirement(uuid,text)',
       'public.apply_role_plan(jsonb)',
       'public.set_current_season(uuid)'
     ]) as fn
@@ -109,7 +114,12 @@ begin
 
   select string_agg(fn, ', ') into txt
     from unnest(array[
-      'public.promote_proposal(uuid,uuid,uuid,date,task_state)',
+      'public.promote_proposal(uuid,uuid,uuid)',
+      'public.submit_proposal(uuid,text,text,date,text,text[],text,task_priority,uuid)',
+      'public.review_proposal(uuid,text)',
+      'public.set_proposal_requirements(uuid,text[])',
+      'public.link_task_requirement(uuid,text)',
+      'public.unlink_task_requirement(uuid,text)',
       'public.apply_role_plan(jsonb)',
       'public.set_current_season(uuid)'
     ]) as fn

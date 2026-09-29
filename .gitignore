@@ -55,3 +55,19 @@ record-demo.cjs
 # Local Supabase CLI state — not part of the project
 supabase/.temp
 supabase/.branches
+
+# Playwright E2E — local run artifacts, never committed
+playwright-report/
+test-results/
+tests/e2e/.fixtures-manifest.json
+
+Reqon_Phase_Prompts
+
+/docs/
+*.md
+
+.claude
+demo
+supabase/changes
+# Local pre-change data exports of the hosted project — never commit
+supabase/.backups/

@@ -1,16 +1,21 @@
 import type { TaskState } from './types.ts'
 
 // One domain-owned definition of the task_state enum's presentation and
-// behaviour (Phase 6 §6.7). Before this, Board.tsx (LANES), Gantt.tsx
-// (STATES + a separate BAR_TONE map) and PromoteDialog.tsx (START_LANES)
-// each carried their own copy of the same six states, in slightly different
-// shapes — Board and Gantt's own comment already said as much: "If a seventh
-// state is ever added to the enum it belongs in both places — or, better,
-// the two lists become one." This is that one list.
+// behaviour. Before this, Board.tsx (LANES), Gantt.tsx (STATES + a separate
+// BAR_TONE map) and PromoteDialog.tsx (START_LANES) each carried their own
+// copy of the same states, in slightly different shapes. This is that one
+// list.
 //
-// The database enum (supabase/migrations/20260101000000_paddock_control_schema.sql)
+// The database enum (supabase/migrations/20260116000000_task_lifecycle_and_authorization.sql)
 // remains the authority on which values may be PERSISTED — this only decides
 // how an already-valid state is shown and where it may be entered from.
+//
+// `urgent` used to be a seventh state here. ADR-0004 makes it a priority
+// (tasks/priority.ts) instead — a task can be Blocked AND Urgent, which a
+// state enum could never express. Legacy activity rows that read
+// `to: "urgent"` predate this split; tasks/lifecycle.ts and the activity
+// display are responsible for labelling those "Urgent (legacy state)",
+// never rewritten (ADR-0004) and never re-added here.
 export type TaskStateMeta = {
   state: TaskState
   label: string
@@ -25,12 +30,11 @@ export type TaskStateMeta = {
 }
 
 export const TASK_STATES: readonly TaskStateMeta[] = [
-  { state: 'urgent', label: 'Urgent', order: 0, boardTone: 'border-red-300 bg-red-50', ganttBarTone: 'bg-red-500', creationEligible: true },
-  { state: 'todo', label: 'To do', order: 1, boardTone: 'border-slate-200 bg-white', ganttBarTone: 'bg-slate-400', creationEligible: true },
-  { state: 'wip', label: 'In progress', order: 2, boardTone: 'border-blue-200 bg-blue-50', ganttBarTone: 'bg-blue-500', creationEligible: true },
-  { state: 'blocked', label: 'Blocked', order: 3, boardTone: 'border-amber-300 bg-amber-50', ganttBarTone: 'bg-amber-500', creationEligible: false },
-  { state: 'done', label: 'Done', order: 4, boardTone: 'border-green-200 bg-green-50', ganttBarTone: 'bg-green-600', creationEligible: false },
-  { state: 'cancelled', label: 'Cancelled', order: 5, boardTone: 'border-slate-200 bg-slate-100', ganttBarTone: 'bg-slate-300', creationEligible: false },
+  { state: 'todo', label: 'To do', order: 0, boardTone: 'border-slate-200 bg-white', ganttBarTone: 'bg-slate-400', creationEligible: true },
+  { state: 'wip', label: 'In progress', order: 1, boardTone: 'border-blue-200 bg-blue-50', ganttBarTone: 'bg-blue-500', creationEligible: true },
+  { state: 'blocked', label: 'Blocked', order: 2, boardTone: 'border-amber-300 bg-amber-50', ganttBarTone: 'bg-amber-500', creationEligible: false },
+  { state: 'done', label: 'Done', order: 3, boardTone: 'border-green-200 bg-green-50', ganttBarTone: 'bg-green-600', creationEligible: false },
+  { state: 'cancelled', label: 'Cancelled', order: 4, boardTone: 'border-slate-200 bg-slate-100', ganttBarTone: 'bg-slate-300', creationEligible: false },
 ]
 
 function metaMap<V>(pick: (meta: TaskStateMeta) => V): Record<TaskState, V> {

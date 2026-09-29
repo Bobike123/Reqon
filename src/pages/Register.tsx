@@ -1,15 +1,27 @@
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { pageMain } from '../ui/layout.ts'
 import { ErrorState } from '../ui/states.tsx'
-import { useCallback, useDeferredValue, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { canEditTask } from '../auth/permissions.ts'
+import { BookReader } from '../book/BookReader.tsx'
+import { clausePageTarget, targetHref, targetNote } from '../book/source.ts'
+import { useTaskActor } from '../data/useTaskActor.ts'
+import { useTasks } from '../data/useTasks.ts'
+import { mergeSearchParams } from '../lib/searchParams.ts'
+import { AssignContext, type AssignContextValue } from './register/assignContext.ts'
 import type { ClauseState } from '../data/useClauseStatus.ts'
 import { useClauseStatus, useSetClauseStatus } from '../data/useClauseStatus.ts'
 import { useClauses } from '../data/useClauses.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useSubteams } from '../data/useSubteams.ts'
 import { useRealtimeClauseStatus } from '../data/useRealtimeClauseStatus.ts'
+import { useRealtimeTaskRequirements } from '../data/useRealtimeTaskRequirements.ts'
+import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
+import { useTaskRequirements, useTasksForProgress } from '../data/useTaskHistory.ts'
+import { useSeason } from '../season/context.ts'
 import { ClauseRow } from './register/ClauseRow.tsx'
+import { indexLinkedWork, linkedWorkFor } from './register/linkedWork.ts'
 import {
   applyFilters,
   buildRows,
@@ -20,6 +32,7 @@ import {
   type GroupingId,
   type SubteamInfo,
 } from './register/registerModel.ts'
+import { useUrlParams } from '../lib/useUrlParams.ts'
 
 export default function Register() {
   const clauses = useClauses()
@@ -28,21 +41,76 @@ export default function Register() {
   const subteams = useSubteams()
   const setStatus = useSetClauseStatus()
   const realtime = useRealtimeClauseStatus()
+  // Linked work: every requirement link and every task summary of the season,
+  // read ONCE and joined here — never a query per clause.
+  const links = useTaskRequirements()
+  const linkedTasks = useTasksForProgress()
+  useRealtimeTaskRequirements()
+  useRealtimeTasks()
+  const season = useSeason()
+  // The edition this season reads. A clause's recorded page only counts when
+  // the clause belongs to the same edition.
+  const seasonRegsRef = season.status === 'ready' ? (season.season.regs_ref ?? null) : null
 
-  const [grouping, setGrouping] = useState<GroupingId>('subsystem')
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
-  // The Now screen links here with ?subteam=GEOM. Read once into the search
-  // box so the arriving view is obviously filtered and easy to clear.
-  const [searchParams, setSearchParams] = useSearchParams()
+  // Search, grouping and the rule open in the reader live in the address, so a
+  // refresh, the browser's Back button or a shared link keep them. The Now
+  // screen links here with ?subteam=GEOM; the Spec sheet with ?search=B.2.1.9
+  // (which also switches "Team duties only" off, so the rule is found).
+  const [searchParams, setSearchParams] = useUrlParams()
   const subteamParam = searchParams.get('subteam')
-  // The Spec sheet links here with ?search=B.2.1.9 so a failing measurement can
-  // jump straight to the rule it breaks.
-  const searchParam = searchParams.get('search')
-  const [appliedSearch, setAppliedSearch] = useState<string | null>(null)
-  if (searchParam && appliedSearch !== searchParam) {
-    setAppliedSearch(searchParam)
-    setFilters((f) => ({ ...f, search: searchParam, teamDutiesOnly: false }))
+  const urlSearch = searchParams.get('search') ?? ''
+  const rawGroup = searchParams.get('group')
+  const grouping: GroupingId = GROUPINGS.some((g) => g.id === rawGroup) ? (rawGroup as GroupingId) : 'subsystem'
+  const setGrouping = (id: GroupingId) =>
+    setSearchParams((current) => mergeSearchParams(current, { group: id === 'subsystem' ? null : id }), { replace: true })
+  const [otherFilters, setOtherFilters] = useState<Omit<Filters, 'search'>>(() => ({
+    ...DEFAULT_FILTERS,
+    teamDutiesOnly: urlSearch ? false : DEFAULT_FILTERS.teamDutiesOnly,
+  }))
+  // The box keeps its own value (typing must never wait for the router) and the
+  // address follows it. It starts from the address; a link from another screen
+  // (Now, the Spec sheet) arrives as a fresh visit, so it is picked up here.
+  const [search, setSearch] = useState(urlSearch)
+  const filters: Filters = useMemo(() => ({ ...otherFilters, search }), [otherFilters, search])
+  const setFilters = (update: (f: Filters) => Filters) => {
+    const { search: nextSearch, ...rest } = update(filters)
+    setOtherFilters(rest)
+    if (nextSearch !== search) {
+      setSearch(nextSearch)
+      setSearchParams((current) => mergeSearchParams(current, { search: nextSearch }), { replace: true })
+    }
   }
+
+  // The rule open in the Book reader (?rule=<clause_key> — clause_key, never the
+  // printed reference, which two different rules can share).
+  const readingKey = searchParams.get('rule')
+  const [pageTurn, setPageTurn] = useState<{ rule: string; page: number } | null>(null)
+  const openBook = useCallback(
+    (clauseKey: string) => setSearchParams((current) => mergeSearchParams(current, { rule: clauseKey }), { replace: true }),
+    [setSearchParams],
+  )
+  const closeBook = () => {
+    const key = readingKey
+    setSearchParams((current) => mergeSearchParams(current, { rule: null }), { replace: true })
+    // Back to the rule the reader was opened from.
+    if (key) requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-testid="book-link-${CSS.escape(key)}"]`)?.focus())
+  }
+  const readerHeading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (readingKey) readerHeading.current?.focus()
+  }, [readingKey])
+
+  // Linking existing tasks from a rule: the season's active tasks and the same
+  // edit rule the Board uses, provided once for every row.
+  const tasks = useTasks()
+  const actor = useTaskActor()
+  const assign: AssignContextValue | null = useMemo(
+    () =>
+      actor && actor.status === 'active'
+        ? { candidates: tasks.data ?? [], canEdit: (task) => canEditTask(actor, { owner_id: task.owner_id, subteam_key: task.subteam_key, archived_at: task.archived_at }) }
+        : null,
+    [actor, tasks.data],
+  )
 
   const subteamMap = useMemo(() => {
     const map = new Map<string, SubteamInfo>()
@@ -56,6 +124,21 @@ export default function Register() {
     () => new Map((members.data ?? []).map((m) => [m.id, m.full_name])),
     [members.data],
   )
+
+  const departmentNames = useMemo(
+    () => new Map((subteams.data ?? []).map((s) => [s.key, s.name])),
+    [subteams.data],
+  )
+  const linkIndex = useMemo(
+    () => indexLinkedWork(links.data ?? [], linkedTasks.data ?? []),
+    [links.data, linkedTasks.data],
+  )
+  const linkAvailability: 'ready' | 'loading' | 'unavailable' =
+    links.error || linkedTasks.error
+      ? 'unavailable'
+      : links.data && linkedTasks.data
+        ? 'ready'
+        : 'loading'
 
   const rows = useMemo(
     () => buildRows(clauses.data ?? [], statuses.data ?? [], subteamMap),
@@ -133,6 +216,18 @@ export default function Register() {
   const total = rows.length
   const shown = filtered.length
 
+  // The rule open in the reader, and the page it opens on: its recorded page
+  // when that page belongs to this season's edition, else the start (with the
+  // reason said), unless the reader has since been paged.
+  const reading = readingKey ? rows.find((r) => r.clause.clause_key === readingKey) : undefined
+  const readingTarget = reading ? clausePageTarget(reading.clause, seasonRegsRef) : null
+  const readerPage =
+    reading && pageTurn?.rule === reading.clause.clause_key
+      ? pageTurn.page
+      : readingTarget?.kind === 'page'
+        ? readingTarget.page
+        : null
+
   return (
     <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
@@ -176,7 +271,7 @@ export default function Register() {
         </div>
       </fieldset>
 
-      <div className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-tutorial="register-filters">
+      <div role="search" aria-label="Find rules" className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-tutorial="register-filters">
         <div>
           <label htmlFor="search" className="block text-xs font-medium text-slate-600">
             Search
@@ -264,7 +359,7 @@ export default function Register() {
           </span>
           <button
             type="button"
-            onClick={() => setSearchParams({}, { replace: true })}
+            onClick={() => setSearchParams((current) => mergeSearchParams(current, { subteam: null }), { replace: true })}
             className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
           >
             Clear
@@ -285,6 +380,9 @@ export default function Register() {
         </p>
       )}
 
+      <AssignContext.Provider value={assign}>
+      <div className={reading ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(26rem,42%)] lg:items-start lg:gap-4' : undefined}>
+      <div className="min-w-0">
       <div id="register-list">
         {groups.map((group) => (
           <section key={group.key} className="mb-5">
@@ -303,12 +401,55 @@ export default function Register() {
                   onSetOwner={onSetOwner}
                   onSetEvidence={onSetEvidence}
                   onToggleStar={onToggleStar}
+                  work={linkedWorkFor(linkIndex, row.clause.clause_key)}
+                  linkAvailability={linkAvailability}
+                  seasonRegsRef={seasonRegsRef}
+                  memberNames={memberNames}
+                  departmentNames={departmentNames}
+                  onOpenBook={openBook}
+                  reading={row.clause.clause_key === readingKey}
                 />
               ))}
             </ul>
           </section>
         ))}
       </div>
+      </div>
+
+      {reading && (
+        <aside
+          aria-labelledby="register-reader-heading"
+          data-testid="register-reader"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') closeBook()
+          }}
+          className="fixed inset-0 z-40 overflow-auto bg-white p-3 lg:sticky lg:top-2 lg:z-auto lg:max-h-[calc(100dvh-1rem)] lg:rounded-lg lg:border lg:border-slate-300 lg:shadow-sm"
+        >
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="register-reader-heading" ref={readerHeading} tabIndex={-1} className="text-base font-semibold text-slate-900 focus:outline-none">
+              Requirements Book · <span className="font-mono">{reading.clause.printed_ref}</span>
+            </h2>
+            <div className="flex items-center gap-2">
+              <Link to={targetHref((readingTarget ?? { kind: "unrecorded" as const }), reading.clause.printed_ref)} className="text-xs underline underline-offset-2">
+                Open full screen
+              </Link>
+              <button type="button" onClick={closeBook} className="min-h-11 rounded border border-slate-300 bg-white px-3 py-1 text-sm font-medium hover:bg-slate-100 sm:min-h-0" data-testid="register-reader-close">
+                Close the book
+              </button>
+            </div>
+          </div>
+          <p className="mb-2 text-xs text-slate-600">{reading.clause.body.slice(0, 220)}{reading.clause.body.length > 220 ? '…' : ''}</p>
+          <BookReader
+            compact
+            page={readerPage}
+            ruleRef={reading.clause.printed_ref}
+            note={targetNote((readingTarget ?? { kind: "unrecorded" as const }))}
+            onPageChange={(page) => setPageTurn({ rule: reading.clause.clause_key, page })}
+          />
+        </aside>
+      )}
+      </div>
+      </AssignContext.Provider>
     </main>
   )
 }

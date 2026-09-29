@@ -28,7 +28,7 @@ export function HandoverSettings() {
       )}
       <ActionError error={setNote.error} className="mb-2" />
       <p className="mb-2 text-xs text-slate-500">
-        One note per subsystem, for whoever picks this up next year. Saved when you
+        One note per department, for whoever picks this up next year. Saved when you
         click away.
       </p>
       <ul className="space-y-2">

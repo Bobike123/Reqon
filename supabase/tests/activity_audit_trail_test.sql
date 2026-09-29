@@ -34,6 +34,8 @@ declare
   task_id  uuid;
   prop_id  uuid;
   ms_key   text := 'AUDIT-MS1';
+  dept     text;
+  clause   text;
   spec_id  uuid;
   fin_id   uuid;
   n        bigint;
@@ -64,15 +66,29 @@ begin
   perform set_config('request.jwt.claim.sub', dev::text, true);
 
   -- --- tasks: one state change -> exactly one activity row -------------------
-  insert into tasks (season_id, title, state, created_by) values (season, 'Audit task', 'todo', dev)
-    returning id into task_id;
+  -- 20260116 (task_lifecycle_and_authorization) removed the task_insert
+  -- policy entirely — a task now only exists via promote_proposal()
+  -- (SECURITY DEFINER, unchanged since 20260110), never a direct INSERT even
+  -- for a developer writing as an ordinary authenticated session, which is
+  -- exactly the path this file insists on using.
+  -- Proposals are created only by submit_proposal() for a member session; this
+  -- file needs a complete one to promote, so the fixture rows are written as the
+  -- superuser and the session goes back to the developer afterwards.
+  perform set_config('role', 'none', true);
+  select key into dept from subteams where archived_at is null order by sort_order, key limit 1;
+  select clause_key into clause from clauses order by clause_key limit 1;
+  insert into task_proposals (season_id, title, raised_by, subteam_key, due_date, milestone_key)
+    values (season, 'Audit task source', dev, dept, '2026-12-01', ms_key) returning id into prop_id;
+  insert into proposal_requirements (proposal_id, clause_key) values (prop_id, clause);
+  perform set_config('role', 'authenticated', true);
+  select (t.task).id into task_id from promote_proposal(prop_id, season) as t;
   update tasks set state = 'wip' where id = task_id;
 
-  select count(*) into n from activity where entity = 'task' and entity_id = task_id::text;
+  select count(*) into n from activity where entity = 'task' and entity_id = task_id::text and action = 'state_changed';
   select * into lines, failures from pg_temp.note(lines, failures,
     'a task state change writes exactly one activity row', n = 1, format('found %s', n));
 
-  select * into row_ from activity where entity = 'task' and entity_id = task_id::text limit 1;
+  select * into row_ from activity where entity = 'task' and entity_id = task_id::text and action = 'state_changed' limit 1;
   select * into lines, failures from pg_temp.note(lines, failures,
     'the task row names the actor, action and transition',
     row_.actor_id = dev and row_.action = 'state_changed'
@@ -80,11 +96,14 @@ begin
     row_.action || ' ' || row_.detail::text);
 
   -- --- task_proposals: decision ------------------------------------------------
-  insert into task_proposals (season_id, title, raised_by) values (season, 'Audit proposal', dev)
-    returning id into prop_id;
-  update task_proposals set state = 'decided', decision = 'Approved for audit' where id = prop_id;
+  perform set_config('role', 'none', true);
+  insert into task_proposals (season_id, title, raised_by, subteam_key, due_date, milestone_key)
+    values (season, 'Audit proposal', dev, dept, '2026-12-01', ms_key) returning id into prop_id;
+  insert into proposal_requirements (proposal_id, clause_key) values (prop_id, clause);
+  perform set_config('role', 'authenticated', true);
+  perform review_proposal(prop_id, 'reject');
 
-  select count(*) into n from activity where entity = 'proposal' and entity_id = prop_id::text;
+  select count(*) into n from activity where entity = 'proposal' and entity_id = prop_id::text and action = 'state_changed';
   select * into lines, failures from pg_temp.note(lines, failures,
     'a proposal decision writes exactly one activity row', n = 1, format('found %s', n));
 
@@ -118,7 +137,9 @@ begin
     're-saving the same value writes nothing new', n = 1, format('found %s', n));
 
   -- --- specs: measurement --------------------------------------------------------
-  update specs set measured = 612, measured_by = dev, measured_at = now() where id = spec_id;
+  -- Measurements go through the command (20260122): a direct UPDATE of the
+  -- measured columns is refused for every signed-in role.
+  perform record_spec_measurement(p_season_id => season, p_spec_id => spec_id, p_value_numeric => 612, p_measured_at => now() - interval '1 minute', p_request_id => gen_random_uuid());
 
   select count(*) into n from activity where entity = 'spec' and entity_id = spec_id::text;
   select * into lines, failures from pg_temp.note(lines, failures,

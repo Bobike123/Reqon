@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import type { PrivilegedRole } from '../../auth/permissions.ts'
 import { usePermissions } from '../../auth/usePermissions.ts'
 import { useAddMember, useMembers, useUpdateMember, type MemberState } from '../../data/useMembers.ts'
+import { useSubteams } from '../../data/useSubteams.ts'
+import { isActive } from '../../departments/types.ts'
+import { mergeSearchParams } from '../../lib/searchParams.ts'
 import { RoleBadges } from '../../roles/RoleBadges.tsx'
 import { buttonSecondary } from '../../ui/buttons.ts'
 import { ActionError, ErrorState } from '../../ui/states.tsx'
@@ -21,9 +25,14 @@ function RosterRow({
   onStatus,
   onEditRoles,
   disabled,
+  heads,
+  canManageDepartments,
 }: {
   member: RosterMember
   roles: PrivilegedRole[]
+  // Active departments this person is Head of (subteams.lead_id).
+  heads: { key: string; name: string }[]
+  canManageDepartments: boolean
   titles: readonly string[]
   // The one row the guided tour points at.
   tutorial: boolean
@@ -50,6 +59,28 @@ function RosterRow({
           <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] text-slate-700">alumni</span>
         )}
       </div>
+      {/* Headship is a third, separate thing: set on the department, not on
+          the person, so it is changed from the department's own editor. */}
+      {heads.length > 0 && (
+        <p className="group mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-700" data-testid={`headship-${member.id}`}>
+          <span>
+            <span className="text-slate-500">Head of Department: </span>
+            {heads.map((d) => d.name).join(', ')}
+            {retired && ' (no longer active — reassign)'}
+          </span>
+          {canManageDepartments &&
+            heads.map((d) => (
+              <Link
+                key={d.key}
+                to={`/settings?${mergeSearchParams(new URLSearchParams(), { edit: `department:${d.key}` }).toString()}`}
+                aria-label={`Edit ${d.name}`}
+                className="underline underline-offset-2 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 pointer-coarse:opacity-100"
+              >
+                Edit {heads.length > 1 ? d.name : 'department'}
+              </Link>
+            ))}
+        </p>
+      )}
 
       {/* Every control for this person in one row that wraps on a phone,
           instead of a lone button pushed to the edge. */}
@@ -129,8 +160,11 @@ function RosterRow({
 // (triggered here by the role dialog's outcome message), not depend on an
 // ancestor that has no other reason to re-render.
 export function RosterSettings() {
-  const { canAdminister, canManageRoles } = usePermissions()
+  const { canAdminister, canManageRoles, canManageDepartments } = usePermissions()
   const members = useMembers()
+  const subteams = useSubteams()
+  const headsOf = (memberId: string) =>
+    (subteams.data ?? []).filter((d) => isActive(d) && d.lead_id === memberId).map((d) => ({ key: d.key, name: d.name }))
   const addMember = useAddMember()
   const updateMember = useUpdateMember()
   const [newMember, setNewMember] = useState({ id: '', fullName: '', role: DEFAULT_JOB_TITLE })
@@ -184,7 +218,9 @@ export function RosterSettings() {
         A <strong className="font-medium text-slate-800">job title</strong> says what someone works
         on — Chassis, Aerodynamics, Finance. It is a label and grants nothing. A{' '}
         <strong className="font-medium text-slate-800">privileged role</strong> badge — President,
-        Vice President, Treasurer, Developer — is what the database actually lets them do.
+        Vice President, Treasurer, Developer — is what the database actually lets them do.{' '}
+        <strong className="font-medium text-slate-800">Head of Department</strong> is set on the
+        department, and lets them review its proposals and manage its tasks.
       </p>
 
       {roster.map((group) => (
@@ -214,6 +250,8 @@ export function RosterSettings() {
                   }}
                   onStatus={(status) => updateMember.mutate({ id: m.id, status })}
                   onEditRoles={() => roleSettings.openFor(m.id, m.full_name)}
+                  heads={headsOf(m.id)}
+                  canManageDepartments={canManageDepartments}
                 />
               ))}
             </ul>
