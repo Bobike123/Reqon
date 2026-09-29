@@ -109,6 +109,10 @@ beforeEach(() => {
       { proposal_id: 'p-a1', clause_key: 'A.1', season_id: 'sa' },
       { proposal_id: 'p-b1', clause_key: 'B.1', season_id: 'sb' },
     ],
+    proposal_comments: [
+      { id: 'pc-a1', proposal_id: 'p-a1', season_id: 'sa', author_id: 'm1', body: 'A discussion' },
+      { id: 'pc-b1', proposal_id: 'p-b1', season_id: 'sb', author_id: 'm1', body: 'B discussion' },
+    ],
     meetings: [
       { id: 'mt-a1', season_id: 'sa', title: 'A meeting' },
       { id: 'mt-b1', season_id: 'sb', title: 'B meeting' },
@@ -160,6 +164,7 @@ describe('season isolation', () => {
     expect(out.proposals).toEqual([db.task_proposals[0]])
     expect(out.taskRequirements).toEqual([db.task_requirements[0]])
     expect(out.proposalRequirements).toEqual([db.proposal_requirements[0]])
+    expect(out.proposalComments).toEqual([db.proposal_comments[0]])
     expect(out.meetings).toEqual([db.meetings[0]])
     expect(out.clauseStatus).toEqual([db.clause_status[0]])
     expect(out.milestones).toEqual([db.milestones[0]])
@@ -176,7 +181,7 @@ describe('season isolation', () => {
 
     // Belt and braces: no collection's JSON mentions a Season B id at all.
     const json = JSON.stringify(out)
-    for (const bId of ['cs-b1', 't-b1', 'p-b1', 'mt-b1', 'MS1-1-b', 'sec-b1', 'sp-b1', 'sm-b1', 'hn-b1', 'rules-b']) {
+    for (const bId of ['cs-b1', 't-b1', 'p-b1', 'pc-b1', 'mt-b1', 'MS1-1-b', 'sec-b1', 'sp-b1', 'sm-b1', 'hn-b1', 'rules-b']) {
       expect(json).not.toContain(bId)
     }
   })
@@ -202,6 +207,7 @@ describe('independent count verification', () => {
     expect(out.counts.clauseStatus).toBe(1)
     expect(out.counts.specMeasurements).toBe(2)
     expect(out.counts.taskRequirements).toBe(1)
+    expect(out.counts.proposalComments).toBe(1)
     expect(out.exportVersion).toBe(EXPORT_VERSION)
     expect(out.consistency).toContain('recounted')
     expect(out.consistency).toContain('not equal-count')
@@ -210,6 +216,18 @@ describe('independent count verification', () => {
   it('a mismatch on the measurement history fails too: a truncated history is not exported silently', async () => {
     forcedCount = { spec_measurements: 3 }
     await expect(buildSeasonExport('sa')).rejects.toThrow(/export spec_measurements.*exported 2 row.*counts 3/s)
+  })
+
+  it('exports only this season\'s department memberships, and counts them (version 5)', async () => {
+    db.department_members = [
+      { season_id: 'sa', subteam_key: 'MECH', member_id: 'm1' },
+      { season_id: 'sa', subteam_key: 'OPS', member_id: 'm1' },
+      { season_id: 'sb', subteam_key: 'MECH', member_id: 'm1' },
+    ]
+    const out = await buildSeasonExport('sa')
+    expect(out.exportVersion).toBe(5)
+    expect(out.departmentMembers).toHaveLength(2)
+    expect(out.counts.departmentMembers).toBe(2)
   })
 
   it('a mismatch on members (a non-scoped collection) fails too', async () => {

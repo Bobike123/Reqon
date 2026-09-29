@@ -43,6 +43,7 @@ export const queryKeys = {
   // 'unknown' bucket rather than each inventing their own placeholder.
   tasks: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'tasks'] as const,
   proposals: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'task_proposals'] as const,
+  proposalComments: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'proposal_comments'] as const,
   // Which requirements each proposal cites (proposal_requirements), by season.
   proposalRequirements: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'proposal_requirements'] as const,
   clauseStatus: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'clause_status'] as const,

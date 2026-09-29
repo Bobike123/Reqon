@@ -250,12 +250,22 @@ describe('who may change what (one contextual permission model)', () => {
     for (const title of ['Aero mine', 'Aero theirs', 'Body mine', 'Body theirs']) expect(moveSelect(title)).toBeInTheDocument()
   })
 
-  it('the President or Vice President alone edit nothing they do not own', () => {
-    departments = departments.map((d) => ({ ...d, lead_id: null }))
+  // Backend completion Phase 2 (PERMISSIONS.md §3.3): the President/VP act for a
+  // department only when it has no Head. With a Head in place they edit nothing
+  // they do not own.
+  it('the President or Vice President alone edit nothing they do not own where a Head exists', () => {
+    departments = departments.map((d) => ({ ...d, lead_id: 'someone-else' }))
     session.roles = ['president']
     renderBoard()
     expect(moveSelect('Aero theirs')).not.toBeInTheDocument()
     expect(moveSelect('Aero mine')).toBeInTheDocument() // owner of it
+  })
+
+  it('the President acts for a department that has no Head (governance fallback)', () => {
+    departments = departments.map((d) => ({ ...d, lead_id: null }))
+    session.roles = ['president']
+    renderBoard()
+    expect(moveSelect('Aero theirs')).toBeInTheDocument()
   })
 
   it('a retired member gets no controls at all', () => {

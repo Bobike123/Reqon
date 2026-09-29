@@ -166,7 +166,11 @@ begin
     ('heady heads Z, edits owner2''s task there', heady,  format('update tasks set detail = ''heady edit'' where id = %L', t_other_dep), 'write', 'ALLOWED'),
     ('treasurer alone cannot edit any task',      tre,    format('update tasks set detail = ''nope'' where id = %L', t_own), 'write', 'DENIED'),
     ('president (not a Head) cannot edit',        pre,    format('update tasks set detail = ''nope'' where id = %L', t_own), 'write', 'DENIED'),
-    ('president does not own this task either',   pre,    format('update tasks set detail = ''pres tries'' where id = %L', t_no_dept), 'write', 'DENIED'),
+    -- Backend completion Phase 2 (PERMISSIONS §1): a task with NO department is
+    -- unassigned work, which the President/VP may act on as the governance
+    -- fallback (to classify it). This row used to expect DENIED; the row above
+    -- (a department that has a Head) still refuses the President.
+    ('president acts on an unassigned task (governance fallback)', pre, format('update tasks set detail = ''pres tries'' where id = %L', t_no_dept), 'write', 'ALLOWED'),
     ('developer edits any task',                  dev,    format('update tasks set detail = ''dev edit'' where id = %L', t_other_dep), 'write', 'ALLOWED'),
     ('nobody may INSERT a task directly (owner1)',owner1, format('insert into tasks (season_id, title) values (%L, ''sneaky'')', season), 'write', 'DENIED'),
     ('nobody may INSERT a task directly (dev)',   dev,    format('insert into tasks (season_id, title) values (%L, ''sneaky dev'')', season), 'write', 'DENIED'),

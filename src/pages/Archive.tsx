@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { canArchiveTask } from '../auth/permissions.ts'
+import { canRestoreTask } from '../auth/permissions.ts'
 import { departmentChoices } from '../departments/filter.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useSubteams } from '../data/useSubteams.ts'
@@ -214,7 +214,7 @@ export default function Archive() {
                     departmentName={task.subteam_key ? (deptName.get(task.subteam_key) ?? task.subteam_key) : null}
                     ownerName={task.owner_id ? (memberName.get(task.owner_id) ?? 'Someone no longer on the roster') : null}
                     source={task.source_proposal ? (taskSources.data?.get(task.source_proposal) ?? null) : null}
-                    canRestore={actor !== null && canArchiveTask(actor, task)}
+                    canRestore={actor !== null && canRestoreTask(actor, task)}
                     restoring={restore.isPending && restoring?.id === task.id}
                     onRestore={setRestoring}
                     memberNames={memberName}

@@ -5,9 +5,11 @@ import {
   PRIVILEGED_ROLES,
   ROLE_LABELS,
   ROLE_SUMMARIES,
+  canGrantRole,
   describeRoles,
   type PrivilegedRole,
 } from '../auth/permissions.ts'
+import { usePermissions } from '../auth/usePermissions.ts'
 import { roleKeys, useApplyRoleChanges, useMemberRoles } from './useMemberRoles.ts'
 import { Dialog } from '../ui/Dialog.tsx'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
@@ -18,9 +20,10 @@ type Apply = ReturnType<typeof useApplyRoleChanges>
 
 // The President's role editor for one member, opened from Settings → Roster.
 //
-// It only PROPOSES. The database decides: role_assign / role_remove let only
-// the President and a Developer write member_roles, and a trigger refuses to
-// remove the last President. What this adds is the human part — saying what a change means
+// It only PROPOSES. The database decides: role_assign / role_remove check
+// can_grant_role(role) for every row (President: all but Developer; Vice
+// President: Treasurer and Documentation; Developer: all), and a trigger refuses
+// to remove the last President. What this adds is the human part — saying what a change means
 // before it happens, and asking twice for the ones that matter.
 export function RoleDialog({
   member,
@@ -74,6 +77,9 @@ function RoleEditor({
   onDone: (message: string) => void
 }) {
   const auth = useAuth()
+  // can_grant_role(): a Vice President changes only Treasurer and Documentation,
+  // and only a Developer changes the Developer role. The database re-checks.
+  const { roles: myRoles } = usePermissions()
   const queryClient = useQueryClient()
   const roleRows = useMemberRoles()
   const confirmHeading = useRef<HTMLHeadingElement>(null)
@@ -178,6 +184,7 @@ function RoleEditor({
                         id={id}
                         type="checkbox"
                         checked={desired.includes(role)}
+                        disabled={!canGrantRole(myRoles, role)}
                         onChange={(e) => toggle(role, e.target.checked)}
                         aria-labelledby={`${id}-name`}
                         aria-describedby={`${id}-about`}

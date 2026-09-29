@@ -10,6 +10,7 @@ export const PRIVILEGED_ROLES: readonly PrivilegedRole[] = [
   'president',
   'vicepresident',
   'treasurer',
+  'documentation',
   'developer',
 ]
 
@@ -17,15 +18,26 @@ export const ROLE_LABELS: Record<PrivilegedRole, string> = {
   president: 'President',
   vicepresident: 'Vice President',
   treasurer: 'Treasurer',
+  documentation: 'Documentation',
   developer: 'Developer',
 }
 
 // What each role may do, in one line — shown where roles are handed out.
 export const ROLE_SUMMARIES: Record<PrivilegedRole, string> = {
-  president: 'Runs Settings, and can give or take away roles.',
-  vicepresident: 'Runs Settings like the President, but cannot change roles.',
+  president: 'Runs Settings and seasons, and gives or takes away every role except Developer.',
+  vicepresident: 'Runs Settings and the Treasurer and Documentation roles; cannot switch seasons.',
   treasurer: 'Adds, edits and deletes financial entries.',
-  developer: 'Full access, for maintenance: everything the other three roles can do, roles included.',
+  documentation: 'Edits meetings, the default agenda and milestone sections. No access to finances.',
+  developer: 'Full access, for maintenance: everything the other roles can do, roles included.',
+}
+
+// can_grant_role(role) (20260126000100): who may give or take away each role.
+// Only a Developer may change the Developer role.
+export function canGrantRole(roles: readonly PrivilegedRole[], role: PrivilegedRole): boolean {
+  const has = (r: PrivilegedRole) => roles.includes(r)
+  if (role === 'developer') return has('developer')
+  if (role === 'president' || role === 'vicepresident') return has('president') || has('developer')
+  return has('president') || has('vicepresident') || has('developer')
 }
 
 // Someone on the roster who holds no privileged role.
@@ -53,11 +65,18 @@ export function describeRoles(roles: readonly PrivilegedRole[]): string {
 export type Permissions = {
   roles: readonly PrivilegedRole[]
   hasRole: (role: PrivilegedRole) => boolean
-  // is_admin(): rulebook, subsystems, roster, seasons, milestones
+  // is_admin(): rulebook, departments, roster, milestones
   canAdminister: boolean
-  // can_manage_roles(): assign and remove privileged roles
+  // can_manage_roles(): open role management (President, Vice President,
+  // Developer). Which roles may be changed is canGrantRole(roles, role).
   canManageRoles: boolean
-  // can_view_finances(): see financial records
+  // can_manage_seasons(): create, edit and switch seasons (President, Developer)
+  canManageSeasons: boolean
+  // can_manage_milestone_structure(): create, rename and delete milestone
+  // sections (President, Vice President, Developer, Documentation)
+  canManageMilestoneStructure: boolean
+  // can_view_finances(): see financial records — an explicit allowlist
+  // (President, Vice President, Treasurer, Developer), not "any role"
   canViewFinances: boolean
   // can_manage_finances(): create, edit and delete financial records
   canManageFinances: boolean
@@ -76,7 +95,8 @@ export type Permissions = {
   // it is (its department's Head, or a Developer) — see canReviewProposal
   // below, not a role-only boolean (ADR-0003, ADR-0005).
   canSuggestProposal: boolean
-  // is_admin(): call a meeting and write its agenda and minutes.
+  // can_edit_meetings(): call a meeting, write its agenda and minutes, edit
+  // the default agenda (President, Vice President, Developer, Documentation).
   canCreateMeeting: boolean
   canDeleteMeeting: boolean
   canEditMeetingTemplate: boolean
@@ -85,17 +105,21 @@ export type Permissions = {
 export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
   const held = new Set(roles)
   const hasRole = (role: PrivilegedRole) => held.has(role)
-  // The two sets the database uses: is_admin() and can_delete_records().
+  // The sets the database uses: is_admin(), can_delete_records(),
+  // can_edit_meetings() (20260126000100).
   const admin = hasRole('president') || hasRole('vicepresident') || hasRole('developer')
   const mayDelete = hasRole('president') || hasRole('developer')
+  const editsMeetings = admin || hasRole('documentation')
   return {
     roles,
     hasRole,
     // The developer passes every check, for maintenance and security work:
     // supabase/migrations/20260107000000_developer_full_access.sql.
     canAdminister: admin,
-    canManageRoles: mayDelete,
-    canViewFinances: held.size > 0,
+    canManageRoles: admin,
+    canManageSeasons: mayDelete,
+    canManageMilestoneStructure: editsMeetings,
+    canViewFinances: hasRole('president') || hasRole('vicepresident') || hasRole('treasurer') || hasRole('developer'),
     canManageFinances: hasRole('treasurer') || hasRole('developer'),
     // can_manage_departments() (20260115000000_department_lifecycle.sql).
     canManageDepartments: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
@@ -103,9 +127,9 @@ export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
     canEditSpecTargets: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
     // Proposals (submit_proposal, 20260117), board tasks and meetings (20260108000000_proposals_and_meetings.sql).
     canSuggestProposal: true,
-    canCreateMeeting: admin,
+    canCreateMeeting: editsMeetings,
     canDeleteMeeting: mayDelete,
-    canEditMeetingTemplate: mayDelete,
+    canEditMeetingTemplate: editsMeetings,
   }
 }
 
@@ -127,18 +151,31 @@ export type TaskActor = {
   // active/inactive gates ALL of the checks below (is_active_member()).
   status: 'active' | 'alumni'
   isDeveloper: boolean
-  // Department keys this member currently heads (subteams.lead_id = id,
-  // department not archived) — built by the caller from useSubteams() data,
-  // since this module owns no data fetching of its own.
+  // Department keys this member heads, directly or as the Head of the parent
+  // department (department_authority() 'head' / 'parent_head'), active only —
+  // built by the caller from useSubteams() data, since this module owns no
+  // data fetching of its own.
   headOf: readonly string[]
+  // Active President or Vice President: restores any archived task, and acts
+  // for unassigned work and for departments without a Head (below).
+  isGovernance?: boolean
+  // Departments where that no-Head fallback applies: neither the department
+  // nor its parent has a Head ('governance_fallback').
+  governs?: readonly string[]
 }
 
-function isHeadOf(actor: TaskActor, subteamKey: string | null): boolean {
-  return subteamKey !== null && actor.headOf.includes(subteamKey)
+// department_authority(key) is not null (20260126000200): the Head (directly
+// or through the parent), a Developer, or — only where no Head exists, or for
+// unassigned work (key null) — the President / Vice President.
+export function hasDepartmentAuthority(actor: TaskActor, subteamKey: string | null): boolean {
+  if (actor.status !== 'active') return false
+  if (actor.isDeveloper) return true
+  if (subteamKey === null) return actor.isGovernance === true
+  return actor.headOf.includes(subteamKey) || (actor.governs ?? []).includes(subteamKey)
 }
 
-// can_edit_task(id): active owner, active Head of the task's department, or
-// Developer — and the task must not be archived.
+// can_edit_task(id): the active owner, or department authority over the
+// task's department — and the task must not be archived.
 export function canEditTask(
   actor: TaskActor,
   task: Pick<Task, 'owner_id' | 'subteam_key' | 'archived_at'>,
@@ -146,44 +183,49 @@ export function canEditTask(
   if (actor.status !== 'active') return false
   if (task.archived_at !== null) return false
   if (task.owner_id === actor.id) return true
-  if (isHeadOf(actor, task.subteam_key)) return true
-  return actor.isDeveloper
+  return hasDepartmentAuthority(actor, task.subteam_key)
 }
 
-// guard_task_edit()'s owner-reassignment rule: Head of the task's department
-// or Developer only — never the owner reassigning themselves away, which is
-// why this is not folded into canEditTask above.
+// guard_task_edit()'s owner-reassignment rule: department authority only —
+// never the owner reassigning themselves away, which is why this is not
+// folded into canEditTask above.
 export function canReassignTaskOwner(
   actor: TaskActor,
   task: Pick<Task, 'subteam_key'>,
 ): boolean {
-  if (actor.status !== 'active') return false
-  if (isHeadOf(actor, task.subteam_key)) return true
-  return actor.isDeveloper
+  return hasDepartmentAuthority(actor, task.subteam_key)
 }
 
-// archive_task()/restore_task(): Head of the task's department or Developer
-// only — deliberately NOT the plain owner, matching ADR-0003's matrix
-// ("Archive/restore task" column has no "as owner" exception).
+// archive_task(): department authority — deliberately NOT the plain owner.
 export function canArchiveTask(
   actor: TaskActor,
   task: Pick<Task, 'subteam_key'>,
 ): boolean {
-  if (actor.status !== 'active') return false
-  if (isHeadOf(actor, task.subteam_key)) return true
-  return actor.isDeveloper
+  return hasDepartmentAuthority(actor, task.subteam_key)
 }
 
-// can_review_proposal(id) (20260117000000_traceability_and_proposal_commands.sql):
-// the active Head of the proposal's department, or a Developer. Governance
-// roles alone (President/VP) grant nothing here. Covers reviewing, parking,
-// rejecting, reopening, editing and promoting — one rule, one function,
-// exactly as in SQL. A proposal with no department (legacy) can only be
-// handled by a Developer.
-export function canReviewProposal(actor: TaskActor, proposal: Pick<Proposal, 'subteam_key'>): boolean {
+// restore_task(): department authority, or any active President / Vice
+// President (the latest rule), never the plain owner.
+export function canRestoreTask(
+  actor: TaskActor,
+  task: Pick<Task, 'subteam_key'>,
+): boolean {
   if (actor.status !== 'active') return false
-  if (isHeadOf(actor, proposal.subteam_key)) return true
-  return actor.isDeveloper
+  return actor.isGovernance === true || hasDepartmentAuthority(actor, task.subteam_key)
+}
+
+// can_review_proposal(id): department authority over the proposal's
+// department. Covers reviewing, parking, rejecting, reopening, editing and
+// promoting. President/VP act only where the department has no Head, or for
+// a proposal with no department yet.
+export function canReviewProposal(actor: TaskActor, proposal: Pick<Proposal, 'subteam_key'>): boolean {
+  return hasDepartmentAuthority(actor, proposal.subteam_key)
+}
+
+// Whether someone may review ANY proposal at all (for showing a review queue).
+export function reviewsAnyProposal(actor: TaskActor): boolean {
+  if (actor.status !== 'active') return false
+  return actor.isDeveloper || actor.isGovernance === true || actor.headOf.length > 0 || (actor.governs ?? []).length > 0
 }
 
 // submit_proposal(): any active member, for any active department.

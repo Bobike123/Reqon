@@ -16,7 +16,8 @@ function p(id: string, over: Partial<Proposal> = {}): Proposal {
     id, season_id: 's', title: id, context: null, state: 'open', owner_id: null, decision: null, decided_at: null,
     meeting_id: null, starred: false, raised_by: 'me', raised_on: '2026-01-01', updated_at: '', subteam_key: 'AERO',
     due_date: '2026-12-01', priority: 'normal', milestone_key: 'MS1', outcome: null, archived_at: null,
-    archived_by: null, archive_reason: null, legacy_incomplete: false, ...over,
+    archived_by: null, archive_reason: null, legacy_incomplete: false,
+    approved_as: null, approved_at: null, approved_by: null, approved_digest: null, approved_revision: null, revision: 1, ...over,
   }
 }
 

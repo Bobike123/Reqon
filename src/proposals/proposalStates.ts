@@ -7,6 +7,8 @@ import type { Proposal, ProposalState } from './types.ts'
 export const PROPOSAL_STATES: { value: ProposalState; label: string }[] = [
   { value: 'open', label: 'Suggested' },
   { value: 'agenda', label: 'Under review' },
+  { value: 'changes_requested', label: 'Changes requested' },
+  { value: 'approved', label: 'Approved' },
   { value: 'decided', label: 'Decided' },
   { value: 'parked', label: 'Parked' },
 ]
@@ -39,6 +41,8 @@ export function reviewActionsFor(proposal: Stage, hasTask: boolean): ReviewActio
     case 'open':
       return ['review', 'park', 'reject']
     case 'agenda':
+    case 'changes_requested':
+    case 'approved':
       return ['park', 'reject']
     case 'parked':
       return ['reopen']
@@ -62,7 +66,7 @@ export function proposalStatusLabel(proposal: Pick<Proposal, 'state' | 'outcome'
 // needs its required details.)
 export function isPromotable(proposal: Pick<Proposal, 'state' | 'archived_at' | 'legacy_incomplete'>): boolean {
   return (
-    (proposal.state === 'open' || proposal.state === 'agenda') &&
+    proposal.state === 'approved' &&
     proposal.archived_at === null &&
     !proposal.legacy_incomplete
   )

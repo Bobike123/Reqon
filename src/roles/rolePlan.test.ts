@@ -12,6 +12,7 @@ const HOLDERS: Record<PrivilegedRole, Person[]> = {
   president: [ADA],
   vicepresident: [CY],
   treasurer: [EVE],
+  documentation: [],
   developer: [DI],
 }
 

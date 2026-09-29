@@ -22,8 +22,9 @@ const DEPARTMENTS: Dept[] = [
 ]
 let departments: Dept[] = DEPARTMENTS
 vi.mock('../data/useSubteams.ts', () => ({ useSubteams: () => ({ data: departments, isLoading: false, error: null }) }))
+let memberRows = [{ id: 'me', full_name: 'Me Myself', status: 'active' }, { id: 'other', full_name: 'Other Person', status: 'active' }]
 vi.mock('../data/useMembers.ts', () => ({
-  useMembers: () => ({ data: [{ id: 'me', full_name: 'Me Myself', status: 'active' }, { id: 'other', full_name: 'Other Person', status: 'active' }], isLoading: false, error: null }),
+  useMembers: () => ({ data: memberRows, isLoading: false, error: null }),
 }))
 vi.mock('../data/useMilestones.ts', () => ({
   useMilestones: () => ({ data: [{ key: 'MS1', name: 'Plan' }], isLoading: false, error: null }),
@@ -34,8 +35,13 @@ vi.mock('../data/useClauses.ts', () => ({
 vi.mock('../data/useTasks.ts', () => ({ useTasks: () => ({ data: [], isLoading: false, error: null }) }))
 vi.mock('../data/useProposals.ts', () => ({
   useProposalRequirements: () => ({ data: [], isLoading: false, error: null }),
+  useProposalComments: () => ({ data: [], isLoading: false, error: null }),
   useSubmitProposal: () => ({ mutateAsync: vi.fn(), isPending: false, error: null }),
-  useUpdateProposal: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useReviseProposal: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useSetProposalDepartment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useAddProposalComment: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRequestProposalChanges: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useApproveProposal: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useReviewProposal: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePromoteProposal: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSetProposalRequirements: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -48,7 +54,8 @@ function p(id: string, over: Partial<Proposal> = {}): Proposal {
     id, season_id: 's', title: id, context: null, state: 'open', owner_id: null, decision: null, decided_at: null,
     meeting_id: null, starred: false, raised_by: 'other', raised_on: '2026-01-01', updated_at: '', subteam_key: 'AERO',
     due_date: '2026-12-01', priority: 'normal', milestone_key: 'MS1', outcome: null, archived_at: null,
-    archived_by: null, archive_reason: null, legacy_incomplete: false, ...over,
+    archived_by: null, archive_reason: null, legacy_incomplete: false,
+    approved_as: null, approved_at: null, approved_by: null, approved_digest: null, approved_revision: null, revision: 1, ...over,
   }
 }
 
@@ -80,6 +87,7 @@ beforeEach(() => {
   session.status = 'active'
   session.roles = []
   departments = DEPARTMENTS
+  memberRows = [{ id: 'me', full_name: 'Me Myself', status: 'active' }, { id: 'other', full_name: 'Other Person', status: 'active' }]
   rows = [
     p('mine-aero', { raised_by: 'me' }),
     p('theirs-aero'),
@@ -154,7 +162,9 @@ describe('the History path', () => {
 })
 
 describe('who sees review controls (resource-aware)', () => {
-  const reviewable = () => screen.queryAllByTestId(/^review-open-/).map((el) => el.getAttribute('data-testid')!.replace('review-open-', '')).sort()
+  const reviewable = () => screen.queryAllByTestId(/^review-open-/)
+    .filter((element) => element.textContent === 'Review')
+    .map((element) => element.getAttribute('data-testid')!.replace('review-open-', '')).sort()
 
   it('a Head reviews only their own department; everything else stays readable with an explanation', () => {
     renderPanel()
@@ -163,13 +173,22 @@ describe('who sees review controls (resource-aware)', () => {
   })
 
   it('the President and Vice President alone get no review or promotion control', () => {
-    departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: 'someone-else' }))
+    departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: 'other' }))
     for (const role of ['president', 'vicepresident']) {
       session.roles = [role]
       const { unmount } = renderPanel()
       expect(reviewable()).toEqual([])
       unmount()
     }
+  })
+
+  it('the President becomes fallback when the assigned Head is no longer active', () => {
+    departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: d.archived_at ? null : 'other' }))
+    memberRows = memberRows.map((member) => member.id === 'other' ? { ...member, status: 'alumni' } : member)
+    session.roles = ['president']
+    renderPanel()
+    expect(reviewable()).toEqual(['mine-aero', 'mine-body', 'owned-not-mine', 'theirs-aero'])
+    expect(screen.getByTestId('proposal-review-queue')).toHaveTextContent('governance fallback where no active Head exists')
   })
 
   it('a President who is ALSO the department Head gets the control for that department only', () => {
@@ -196,7 +215,7 @@ describe('who sees review controls (resource-aware)', () => {
   it('an older proposal without a department is a Developer matter for everyone else', () => {
     rows = [p('no-dept', { subteam_key: null, legacy_incomplete: true, due_date: null, milestone_key: null })]
     renderPanel()
-    expect(screen.queryByTestId('review-open-no-dept')).not.toBeInTheDocument()
+    expect(screen.getByTestId('review-open-no-dept')).toHaveTextContent('Discussion')
     expect(screen.getByTestId('proposal-hint-no-dept')).toHaveTextContent('A Developer completes the details')
     expect(screen.getByTestId('proposal-legacy-no-dept')).toHaveTextContent(/needs a department, a deadline, a milestone and at least one requirement/)
   })
@@ -206,7 +225,7 @@ describe('who sees review controls (resource-aware)', () => {
     renderPanel()
     await user.click(screen.getByTestId('review-open-mine-aero'))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveAccessibleName(/Review “mine-aero”/)
+    expect(dialog).toHaveAccessibleName(/Proposal “mine-aero”/)
     expect((dialog as HTMLDialogElement).open).toBe(true)
   })
 })

@@ -202,7 +202,9 @@ begin
     ('member        starts a season',             mem, 'insert into seasons (label) values (''ROLES-TEST-3'')', 'write', 'DENIED'),
     ('developer     starts a season',             dev, 'insert into seasons (label) values (''ROLES-TEST-4'')', 'write', 'ALLOWED'),
     ('member        flips is_current directly',   mem, format('update seasons set is_current = false where id = %L', season), 'write', 'DENIED'),
-    ('vicepresident switches the season',         vp,  format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
+    -- Backend completion Phase 2 (F-03, PERMISSIONS §2.1): only the President or a
+    -- Developer switches seasons now; this row used to expect ALLOWED.
+    ('vicepresident switches the season',         vp,  format('select set_current_season(%L)', season), 'write', 'DENIED'),
     ('president     switches the season',         pre, format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
     ('developer     switches the season',         dev, format('select set_current_season(%L)', season), 'write', 'ALLOWED'),
     ('treasurer     switches the season',         tre, format('select set_current_season(%L)', season), 'write', 'DENIED'),

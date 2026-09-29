@@ -140,13 +140,14 @@ begin
     p_season_id => season, p_title => 'Phase 11 rejected proposal', p_subteam_key => dept_a,
     p_due_date => '2026-11-01', p_milestone_key => ms_a, p_clause_keys => array[clause_a]
   )).id into v_proposal_id;
-  perform review_proposal(v_proposal_id, 'review');
-  perform review_proposal(v_proposal_id, 'reject');
+  perform review_proposal(v_proposal_id, 'review', 1);
+  perform review_proposal(v_proposal_id, 'reject', 1);
 
   select (submit_proposal(
     p_season_id => season, p_title => 'Phase 11 promoted proposal', p_subteam_key => dept_a,
     p_due_date => '2026-11-02', p_milestone_key => ms_a, p_clause_keys => array[clause_a]
   )).id into v_promoted_id;
+  perform approve_proposal(v_promoted_id, 1, 'Phase 11 fixture approval');
   select (p.task).id into v_promoted_task from promote_proposal(v_promoted_id, season) p;
 
   perform 1 from proposal_requirements pr

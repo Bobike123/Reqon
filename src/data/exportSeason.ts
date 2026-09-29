@@ -22,7 +22,9 @@ import { fetchAllRows, unwrap } from './errors.ts'
 // to revisit it.
 // 4: archived work stays included; adds requirement junctions, Book source
 // metadata, and clearly separated relevant global department history.
-export const EXPORT_VERSION = 4
+// 5: adds the season's department memberships (department_members, backend
+// completion Phase 2).
+export const EXPORT_VERSION = 5
 
 export type SeasonExport = {
   exportVersion: number
@@ -37,6 +39,9 @@ export type SeasonExport = {
   proposals: unknown[]
   taskRequirements: unknown[]
   proposalRequirements: unknown[]
+  proposalComments: unknown[]
+  // Who worked in which department this season (organisational, grants nothing).
+  departmentMembers: unknown[]
   meetings: unknown[]
   milestones: unknown[]
   milestoneSections: unknown[]
@@ -60,8 +65,8 @@ const CONSISTENCY_NOTE =
 // Only tables that actually carry a season_id. Typed as a union rather than
 // `string` so a typo cannot compile.
 type ScopedTable =
-  | 'clause_status' | 'tasks' | 'task_proposals' | 'task_requirements' | 'proposal_requirements' | 'meetings'
-  | 'milestones' | 'specs' | 'spec_measurements' | 'handover_notes' | 'activity'
+  | 'clause_status' | 'tasks' | 'task_proposals' | 'task_requirements' | 'proposal_requirements' | 'proposal_comments' | 'meetings'
+  | 'milestones' | 'specs' | 'spec_measurements' | 'handover_notes' | 'activity' | 'department_members'
 
 // Retention (Phase 5 §5.6): `activity` rows are kept indefinitely — there is
 // no scheduled deletion or archival job. The only thing that removes them is
@@ -82,6 +87,8 @@ const KEY_COLUMNS: Record<ScopedTable, readonly string[]> = {
   milestones: ['key'], specs: ['id'], spec_measurements: ['id'], handover_notes: ['id'], activity: ['id'],
   task_requirements: ['task_id', 'clause_key'],
   proposal_requirements: ['proposal_id', 'clause_key'],
+  proposal_comments: ['id'],
+  department_members: ['subteam_key', 'member_id'],
 }
 
 type CountResult = { count: number | null; error: PostgrestError | null }
@@ -161,13 +168,14 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
   )
 
   const [
-    clauseStatus, tasks, proposals, taskRequirements, proposalRequirements,
-    meetings, milestones, specs, specMeasurements, handoverNotes, activity,
+    clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, proposalComments,
+    meetings, milestones, specs, specMeasurements, handoverNotes, activity, departmentMembers,
   ] =
     await Promise.all([
       scoped('clause_status'), scoped('tasks'), scoped('task_proposals'),
-      scoped('task_requirements'), scoped('proposal_requirements'), scoped('meetings'),
+      scoped('task_requirements'), scoped('proposal_requirements'), scoped('proposal_comments'), scoped('meetings'),
       scoped('milestones'), scoped('specs'), scoped('spec_measurements'), scoped('handover_notes'), scoped('activity'),
+      scoped('department_members'),
     ])
 
   // milestone_sections has no season_id — it hangs off its milestone.
@@ -216,7 +224,7 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
   // events for departments this season actually references, and keep them in
   // a separate collection so nobody mistakes them for season-owned events.
   const relevantDepartments = new Set<string>()
-  for (const row of [...tasks, ...proposals, ...specs, ...handoverNotes, ...bookClauses] as Record<string, unknown>[]) {
+  for (const row of [...tasks, ...proposals, ...specs, ...handoverNotes, ...bookClauses, ...departmentMembers] as Record<string, unknown>[]) {
     if (typeof row.subteam_key === 'string') relevantDepartments.add(row.subteam_key)
   }
   const departmentKeys = [...relevantDepartments].sort()
@@ -254,6 +262,8 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       proposals: proposals.length,
       taskRequirements: taskRequirements.length,
       proposalRequirements: proposalRequirements.length,
+      proposalComments: proposalComments.length,
+      departmentMembers: departmentMembers.length,
       meetings: meetings.length,
       milestones: milestones.length,
       milestoneSections: milestoneSections.length,
@@ -265,7 +275,7 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       regulationDocument: regulationDocuments.length,
       bookClauses: bookClauses.length,
     },
-    members, subteams, clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, meetings,
+    members, subteams, clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, proposalComments, departmentMembers, meetings,
     milestones, milestoneSections, specs, specMeasurements, handoverNotes, activity,
     globalDepartmentActivity, regulationDocument: regulationDocuments[0] ?? null, bookClauses,
   }

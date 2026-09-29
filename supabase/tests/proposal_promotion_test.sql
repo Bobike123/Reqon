@@ -132,6 +132,7 @@ begin
 
   -- ------------------------------------------ cross-season promotion refused
   perform pg_temp.as_user(hd);
+  perform approve_proposal(prop, 1, 'Reviewed for promotion');
   begin
     perform promote_proposal(prop, season2);
     select * into lines, failures from pg_temp.note(lines, failures, 'cross-season promotion is refused', false, 'no exception was raised');
@@ -151,6 +152,7 @@ begin
   perform 1 from tasks
     where id = task1_id and season_id = season and title = 'Promote me'
       and detail = 'why it matters' and owner_id = mem and due_date = '2026-12-01'
+      and starts_on = least((now() at time zone 'Europe/Copenhagen')::date, '2026-12-01'::date)
       and state = 'todo' and priority = 'urgent' and subteam_key = dept and milestone_key = ms
       and created_by = hd and links_required and source_proposal = prop;
   select * into lines, failures from pg_temp.note(lines, failures, 'the task carries the proposal''s title, detail, department, owner, deadline, priority and milestone', found);

@@ -1,13 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
-import { canReviewProposal } from '../auth/permissions.ts'
+import { canReviewProposal, reviewsAnyProposal } from '../auth/permissions.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones } from '../data/useMilestones.ts'
 import { useAttention, useBookProgress } from '../data/useNowMetrics.ts'
 import { useProposals } from '../data/useProposals.ts'
 import { useRealtimeMilestones } from '../data/useRealtimeMilestones.ts'
 import { useRealtimeProposalRequirements } from '../data/useRealtimeProposalRequirements.ts'
+import { useRealtimeProposalComments } from '../data/useRealtimeProposalComments.ts'
 import { useRealtimeProposals } from '../data/useRealtimeProposals.ts'
 import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
 import { useSubteams } from '../data/useSubteams.ts'
@@ -291,6 +292,7 @@ export default function Now() {
   const members = useMembers()
   useRealtimeProposals()
   useRealtimeProposalRequirements()
+  useRealtimeProposalComments()
   useRealtimeMilestones()
   useRealtimeTasks()
   // A rule marked compliant elsewhere moves its chapter's bar here.
@@ -320,7 +322,7 @@ export default function Now() {
     ? (proposals.data ?? []).filter((p) => !isHistory(p) && (p.state === 'open' || p.state === 'agenda') && canReviewProposal(actor, p))
     : []
   const myProposals = myId ? (proposals.data ?? []).filter((p) => p.raised_by === myId && !isHistory(p)) : []
-  const isReviewer = actor !== null && actor.status === 'active' && (actor.isDeveloper || actor.headOf.length > 0)
+  const isReviewer = actor !== null && reviewsAnyProposal(actor)
 
   const who = (ownerId: string | null) => (ownerId ? (memberName.get(ownerId) ?? 'someone no longer on the roster') : 'unassigned')
   const dept = (key: string | null) => (key ? (deptName.get(key) ?? key) : 'no department')

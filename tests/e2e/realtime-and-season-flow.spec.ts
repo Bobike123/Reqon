@@ -45,8 +45,13 @@ test.describe('two-session realtime propagation and season switching (R38-R39)',
       await pageB.goto('/proposals')
       const proposalId = runSql(`select id from task_proposals where title = '${TITLE}'`).trim()
       await pageB.getByTestId(`review-open-${proposalId}`).click()
+      await pageB.getByLabel('Review note').fill('Approved for implementation in this department.')
       await pageB.getByTestId('review-approve').click()
       await expect(pageB.getByTestId('review-approve')).toHaveCount(0, { timeout: 10_000 })
+      await expect.poll(() => runSql(`select state from task_proposals where id = '${proposalId}'`).trim()).toBe('approved')
+      await pageB.getByTestId(`review-open-${proposalId}`).click()
+      await pageB.getByTestId('review-promote').click()
+      await expect(pageB.getByTestId('review-promote')).toHaveCount(0, { timeout: 10_000 })
 
       const taskId = runSql(`select id from tasks where source_proposal = '${proposalId}'`).trim()
       expect(taskId, 'promotion must create the task').not.toBe('')

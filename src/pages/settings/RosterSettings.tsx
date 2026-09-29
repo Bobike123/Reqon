@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import type { PrivilegedRole } from '../../auth/permissions.ts'
+import { canGrantRole, type PrivilegedRole } from '../../auth/permissions.ts'
 import { usePermissions } from '../../auth/usePermissions.ts'
 import { useAddMember, useMembers, useUpdateMember, type MemberState } from '../../data/useMembers.ts'
 import { useSubteams } from '../../data/useSubteams.ts'
@@ -25,6 +25,7 @@ function RosterRow({
   onStatus,
   onEditRoles,
   disabled,
+  statusLocked = false,
   heads,
   canManageDepartments,
 }: {
@@ -42,6 +43,7 @@ function RosterRow({
   onStatus: (status: MemberState) => void
   onEditRoles: () => void
   disabled: boolean
+  statusLocked?: boolean
 }) {
   const retired = member.status === 'alumni'
   return (
@@ -116,7 +118,8 @@ function RosterRow({
                 <select
                   id={`status-${member.id}`}
                   value={member.status}
-                  disabled={disabled}
+                  disabled={disabled || statusLocked}
+                  title={statusLocked ? 'Only someone who may change all of this person’s roles can change their status.' : undefined}
                   onChange={(e) => onStatus(e.target.value as MemberState)}
                   className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
                 >
@@ -160,7 +163,7 @@ function RosterRow({
 // (triggered here by the role dialog's outcome message), not depend on an
 // ancestor that has no other reason to re-render.
 export function RosterSettings() {
-  const { canAdminister, canManageRoles, canManageDepartments } = usePermissions()
+  const { canAdminister, canManageRoles, canManageDepartments, canManageSeasons, roles: myRoles } = usePermissions()
   const members = useMembers()
   const subteams = useSubteams()
   const headsOf = (memberId: string) =>
@@ -245,6 +248,9 @@ export function RosterSettings() {
                   canAdminister={canAdminister}
                   canManageRoles={canManageRoles}
                   disabled={updateMember.isPending}
+                  // guard_member_edit(): changing a role holder's status needs
+                  // can_grant_role() for every role they hold.
+                  statusLocked={(roleSettings.rolesByMember.get(m.id) ?? []).some((r) => !canGrantRole(myRoles, r))}
                   onJobTitle={(role) => {
                     if (role !== m.role) updateMember.mutate({ id: m.id, role })
                   }}
@@ -268,9 +274,11 @@ export function RosterSettings() {
         The President and Vice President run these settings and the Treasurer changes money.
         A Developer can do all of it, roles included — the role exists so the app can be
         maintained and repaired, so give it out sparingly.{' '}
-        {canManageRoles
-          ? 'You can give or take away roles — and the club always keeps at least one President.'
-          : 'Roles are given and taken away by the President or a Developer.'}
+        {canManageRoles && canManageSeasons
+          ? 'You can give or take away roles — only a Developer changes the Developer role, and the club always keeps at least one President.'
+          : canManageRoles
+            ? 'You can give or take away the Treasurer and Documentation roles; the President or a Developer handles the others.'
+            : 'Roles are given and taken away by the President, the Vice President or a Developer.'}
       </p>
       <p role="status" className="mt-1 min-h-4 text-xs font-medium text-emerald-800">
         {roleSettings.roleMessage}

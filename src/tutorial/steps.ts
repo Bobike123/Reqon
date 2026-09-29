@@ -48,8 +48,14 @@ export const AUDIENCES = {
   },
   treasurer: { label: 'Treasurer and Developer', includes: (can) => can.canManageFinances },
   admins: { label: 'President, Vice President and Developer', includes: (can) => can.canAdminister },
-  president: { label: 'President and Developer', includes: (can) => can.canManageRoles },
-  vicePresident: { label: 'Vice President', includes: (can) => can.canAdminister && !can.canManageRoles },
+  // Seasons and the President / Vice President / Developer roles stay with the
+  // President and a Developer (can_manage_seasons, can_grant_role).
+  president: { label: 'President and Developer', includes: (can) => can.canManageSeasons },
+  vicePresident: { label: 'Vice President', includes: (can) => can.canAdminister && !can.canManageSeasons },
+  meetingEditors: {
+    label: 'President, Vice President, Documentation and Developer',
+    includes: (can) => can.canEditMeetingTemplate,
+  },
   // The Developer holds every power in the club, so this is the one audience
   // that asks which role someone holds rather than what they may do.
   developer: { label: 'Developer', includes: (can) => can.hasRole('developer') },
@@ -397,9 +403,9 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     chapter: 'meetings',
     route: '/meetings',
     target: 'meeting-template',
-    audience: 'president',
+    audience: 'meetingEditors',
     title: 'The default agenda',
-    body: 'Every new meeting starts from this. “Edit default agenda” opens it in a dialog; unsaved text is kept if you close it. Existing meetings never change. Only you and a Developer can edit it.',
+    body: 'Every new meeting starts from this. “Edit default agenda” opens it in a dialog; unsaved text is kept if you close it. Existing meetings never change. The President, Vice President, Documentation and Developers edit it.',
   },
 
   // ---------------------------------------------------------------- Spec sheet
@@ -516,8 +522,8 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/settings',
     target: 'settings-roster',
     audience: 'vicePresident',
-    title: 'Roles are the President’s',
-    body: 'As Vice President you can change everything in Settings except roles. If someone needs a role given or taken away, ask the President or a Developer.',
+    title: 'Which roles you manage',
+    body: 'As Vice President you give or take away the Treasurer and Documentation roles. President, Vice President and Developer roles, and switching seasons, belong to the President or a Developer.',
   },
   {
     id: 'change-roles',
@@ -526,7 +532,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'change-roles',
     audience: 'president',
     title: 'Giving and taking away roles',
-    body: 'The President and any Developer can. “Change roles” opens a checklist for that person. Vice President changes save at once; President, Treasurer and Developer changes ask you to confirm first.',
+    body: 'The President changes every role but Developer, the Vice President only Treasurer and Documentation, a Developer all. “Change roles” opens a checklist; big changes ask you to confirm first.',
   },
   {
     id: 'role-rules',
@@ -544,7 +550,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'change-roles',
     audience: 'president',
     title: 'Handing over the presidency',
-    body: 'Give President to your successor and tick the hand-over box: their role is saved first and yours is removed last. From then on, only they can change roles.',
+    body: 'Give President to your successor and tick the hand-over box: their role is saved first and yours is removed last. From then on the presidency, and season changes, are theirs.',
   },
   {
     id: 'roster-controls',

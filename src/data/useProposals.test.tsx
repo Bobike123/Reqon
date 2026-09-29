@@ -7,18 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 // rules themselves against a real database.
 
 type Result = { data: unknown; error: { message: string; code?: string } | null }
-let updateResult: Result
 let rpcResults: Record<string, Result>
 let calls: { fn: string; args: Record<string, unknown> }[]
-let lastUpdatePayload: Record<string, unknown> | undefined
 
 const supabase = {
-  from: (_table: string) => ({
-    update: (payload: Record<string, unknown>) => {
-      lastUpdatePayload = payload
-      return { eq: () => ({ select: () => Promise.resolve(updateResult) }) }
-    },
-  }),
+  from: (_table: string) => ({}),
   rpc: (fn: string, args: Record<string, unknown>) => {
     calls.push({ fn, args })
     return Promise.resolve(rpcResults[fn] ?? { data: null, error: { message: `unmocked rpc ${fn}` } })
@@ -30,7 +23,8 @@ vi.mock('../auth/context.ts', () => ({
   useAuth: () => ({ status: 'member', user: { id: 'me' }, member: { id: 'me', status: 'active' }, roles: [] }),
 }))
 
-const { useUpdateProposal, useReviewProposal, useSubmitProposal, usePromoteProposal, useSetProposalRequirements } =
+const { useReviseProposal, useReviewProposal, useSubmitProposal, usePromoteProposal, useSetProposalRequirements,
+  useApproveProposal, useRequestProposalChanges, useAddProposalComment, useSetProposalDepartment } =
   await import('./useProposals.ts')
 
 function hook<T>(useHook: () => T) {
@@ -49,10 +43,8 @@ const complete = {
 }
 
 beforeEach(() => {
-  updateResult = { data: [{ id: 'p1' }], error: null }
   rpcResults = {}
   calls = []
-  lastUpdatePayload = undefined
 })
 
 describe('useSubmitProposal', () => {
@@ -105,27 +97,27 @@ describe('useReviewProposal', () => {
   it.each(['review', 'park', 'reject', 'reopen'] as const)('calls review_proposal with %s', async (action) => {
     rpcResults.review_proposal = { data: { id: 'p1' }, error: null }
     const review = hook(() => useReviewProposal())
-    await review.current.mutateAsync({ id: 'p1', action })
-    expect(calls).toEqual([{ fn: 'review_proposal', args: { p_proposal_id: 'p1', p_action: action } }])
+    await review.current.mutateAsync({ id: 'p1', action, expectedRevision: 4, note: 'because' })
+    expect(calls).toEqual([{ fn: 'review_proposal', args: { p_proposal_id: 'p1', p_action: action, p_expected_revision: 4, p_note: 'because' } }])
   })
 
   it('surfaces a refusal as raised', async () => {
     rpcResults.review_proposal = { data: null, error: { message: 'Only the Head may review it.', code: '42501' } }
     const review = hook(() => useReviewProposal())
-    await expect(review.current.mutateAsync({ id: 'p1', action: 'reject' })).rejects.toThrow()
+    await expect(review.current.mutateAsync({ id: 'p1', action: 'reject', expectedRevision: 4 })).rejects.toThrow()
   })
 })
 
 describe('usePromoteProposal', () => {
   const proposal = { id: 'p1', owner_id: 'proposed-owner' } as never
 
-  it('sends only the proposal, the season and the owner — no date and no starting lane', async () => {
+  it('sends the proposal, season, owner and the browser-local start day', async () => {
     rpcResults.promote_proposal = { data: [{ task: { id: 't1' }, created: true }], error: null }
     const promote = hook(() => usePromoteProposal())
     const result = await promote.current.mutateAsync({ proposal, ownerId: 'chosen' })
     expect(result.created).toBe(true)
     expect(calls).toEqual([
-      { fn: 'promote_proposal', args: { p_proposal_id: 'p1', p_season_id: 'season-a', p_owner_id: 'chosen' } },
+      { fn: 'promote_proposal', args: { p_proposal_id: 'p1', p_season_id: 'season-a', p_owner_id: 'chosen', p_starts_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) } },
     ])
   })
 
@@ -139,38 +131,40 @@ describe('usePromoteProposal', () => {
   })
 })
 
-describe('useUpdateProposal', () => {
-  it('maps description to context and sends only what was set', async () => {
-    const update = hook(() => useUpdateProposal())
-    await update.current.mutateAsync({ id: 'p1', description: 'new text', dueDate: '2027-01-05' })
-    expect(lastUpdatePayload).toEqual({ context: 'new text', due_date: '2027-01-05' })
+describe('useReviseProposal', () => {
+  it('sends material fields, requirements and the revision the editor saw', async () => {
+    rpcResults.revise_proposal = { data: { id: 'p1', revision: 3 }, error: null }
+    const revise = hook(() => useReviseProposal())
+    await revise.current.mutateAsync({ id: 'p1', expectedRevision: 2,
+      changes: { description: 'new text', dueDate: '2027-01-05', requirementKeys: ['A.1'] }, note: 'why' })
+    expect(calls).toEqual([{ fn: 'revise_proposal', args: {
+      p_proposal_id: 'p1', p_expected_revision: 2,
+      p_changes: { description: 'new text', due_date: '2027-01-05', requirement_keys: ['A.1'] }, p_note: 'why',
+    } }])
   })
 
-  it('never carries a stage, outcome or archive field in its type or its request', async () => {
-    const update = hook(() => useUpdateProposal())
-    await update.current.mutateAsync({ id: 'p1', decision: 'note' })
-    expect(Object.keys(lastUpdatePayload ?? {})).toEqual(['decision'])
+  it('surfaces a stale-write refusal', async () => {
+    rpcResults.revise_proposal = { data: null, error: { message: 'This proposal changed since you opened it.', code: '40001' } }
+    const revise = hook(() => useReviseProposal())
+    await expect(revise.current.mutateAsync({ id: 'p1', expectedRevision: 1, changes: { title: 'old' } })).rejects.toThrow(/changed since/)
   })
+})
 
-  it('reports "no longer exists" when zero rows match but the caller could review it', async () => {
-    updateResult = { data: [], error: null }
-    rpcResults.can_review_proposal = { data: true, error: null }
-    const update = hook(() => useUpdateProposal())
-    await expect(update.current.mutateAsync({ id: 'p1', decision: 'x' })).rejects.toThrow(/no longer exists/)
-  })
-
-  it('reports a permission refusal when zero rows match and the caller could not review it', async () => {
-    updateResult = { data: [], error: null }
-    rpcResults.can_review_proposal = { data: false, error: null }
-    const update = hook(() => useUpdateProposal())
-    await expect(update.current.mutateAsync({ id: 'p1', decision: 'x' })).rejects.toThrow(/permission|review proposals/)
-    expect(calls).toEqual([{ fn: 'can_review_proposal', args: { p_proposal_id: 'p1' } }])
-  })
-
-  it('surfaces a raised guard error directly, not as a zero-row match', async () => {
-    updateResult = { data: null, error: { message: 'A proposal must keep its department, deadline and milestone.', code: '23514' } }
-    const update = hook(() => useUpdateProposal())
-    await expect(update.current.mutateAsync({ id: 'p1', dueDate: '2027-01-01' })).rejects.toThrow(/must keep its department/)
+describe('discussion and approval commands', () => {
+  it('passes attributable comments and evidence-bearing review commands', async () => {
+    for (const fn of ['add_proposal_comment', 'request_proposal_changes', 'approve_proposal', 'set_proposal_department']) {
+      rpcResults[fn] = { data: { id: 'p1' }, error: null }
+    }
+    await hook(() => useAddProposalComment()).current.mutateAsync({ id: 'p1', body: 'Question' })
+    await hook(() => useRequestProposalChanges()).current.mutateAsync({ id: 'p1', expectedRevision: 2, note: 'Answer this' })
+    await hook(() => useApproveProposal()).current.mutateAsync({ id: 'p1', expectedRevision: 2, note: 'Reviewed' })
+    await hook(() => useSetProposalDepartment()).current.mutateAsync({ id: 'p1', departmentKey: 'BODY', reason: 'scope', expectedRevision: 2 })
+    expect(calls).toEqual([
+      { fn: 'add_proposal_comment', args: { p_proposal_id: 'p1', p_body: 'Question' } },
+      { fn: 'request_proposal_changes', args: { p_proposal_id: 'p1', p_expected_revision: 2, p_note: 'Answer this' } },
+      { fn: 'approve_proposal', args: { p_proposal_id: 'p1', p_expected_revision: 2, p_note: 'Reviewed' } },
+      { fn: 'set_proposal_department', args: { p_proposal_id: 'p1', p_subteam_key: 'BODY', p_reason: 'scope', p_expected_revision: 2 } },
+    ])
   })
 })
 
@@ -178,14 +172,14 @@ describe('useSetProposalRequirements', () => {
   it('replaces the requirement set through the command', async () => {
     rpcResults.set_proposal_requirements = { data: null, error: null }
     const set = hook(() => useSetProposalRequirements())
-    await set.current.mutateAsync({ id: 'p1', clauseKeys: ['A.1', 'B.2'] })
+    await set.current.mutateAsync({ id: 'p1', clauseKeys: ['A.1', 'B.2'], expectedRevision: 3 })
     await waitFor(() => expect(set.current.isSuccess).toBe(true))
-    expect(calls).toEqual([{ fn: 'set_proposal_requirements', args: { p_proposal_id: 'p1', p_clause_keys: ['A.1', 'B.2'] } }])
+    expect(calls).toEqual([{ fn: 'set_proposal_requirements', args: { p_proposal_id: 'p1', p_clause_keys: ['A.1', 'B.2'], p_expected_revision: 3 } }])
   })
 
   it('surfaces the database refusal', async () => {
     rpcResults.set_proposal_requirements = { data: null, error: { message: 'A proposal needs at least one requirement.', code: '23514' } }
     const set = hook(() => useSetProposalRequirements())
-    await expect(set.current.mutateAsync({ id: 'p1', clauseKeys: [] })).rejects.toThrow(/at least one requirement/)
+    await expect(set.current.mutateAsync({ id: 'p1', clauseKeys: [], expectedRevision: 3 })).rejects.toThrow(/at least one requirement/)
   })
 })

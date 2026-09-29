@@ -252,7 +252,12 @@ begin
   q1 := pg_temp.attack(vp, format('update members set status = ''alumni'' where id = %L', pre), format('select status::text from members where id = %L', pre));
   perform pg_temp.chk('F9a a Vice President cannot retire the President', q1 like '%|active', q1);
   q1 := pg_temp.attack(vp, format('update members set status = ''alumni'' where id = %L', tre), format('select status::text from members where id = %L', tre));
-  perform pg_temp.chk('F9b nor anyone else who holds a role', q1 like '%|active', q1);
+  -- Backend completion Phase 2 (PERMISSIONS §4): the VP now manages the treasurer
+  -- role, so may retire its holder; F9b used to expect the Treasurer to stay active.
+  perform pg_temp.chk('F9b a Vice President may retire a Treasurer (a role the VP manages)', q1 like 'ok|alumni', q1);
+  update members set status = 'active' where id = tre;
+  q1 := pg_temp.attack(vp, format('update members set status = ''alumni'' where id = %L', dev), format('select status::text from members where id = %L', dev));
+  perform pg_temp.chk('F9b2 but not a Developer (a role the VP does not manage)', q1 like '%|active', q1);
   q1 := pg_temp.attack(pre, format('update members set status = ''alumni'' where id = %L', tre), format('select status::text from members where id = %L', tre));
   perform pg_temp.chk('F9c the President can retire a role holder', q1 like 'ok|alumni', q1);
   q1 := pg_temp.attack(dev, format('update members set status = ''alumni'' where id = %L', tre), format('select status::text from members where id = %L', tre));

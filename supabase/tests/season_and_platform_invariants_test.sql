@@ -75,13 +75,14 @@ begin
   -- ============================================================ catalog checks
   -- Run as the owner: these read system catalogs, not application rows.
 
-  -- Realtime publication: exactly the ten subscribed tables.
+  -- Realtime publication: exactly the twelve subscribed tables
+  -- (proposal_comments added by backend completion Phase 3).
   select string_agg(tablename, ',' order by tablename) into txt
     from pg_publication_tables
    where pubname = 'supabase_realtime' and schemaname = 'public';
   select * into lines, failures from pg_temp.note(lines, failures,
-    'realtime publication holds exactly the ten subscribed tables',
-    txt = 'clause_status,milestone_sections,milestones,proposal_requirements,spec_measurements,specs,subteams,task_proposals,task_requirements,tasks',
+    'realtime publication holds exactly the twelve subscribed tables',
+    txt = 'clause_status,department_members,milestone_sections,milestones,proposal_comments,proposal_requirements,spec_measurements,specs,subteams,task_proposals,task_requirements,tasks',
     format('found: %s', coalesce(txt, '(none)')));
 
   -- SECURITY DEFINER without a pinned search_path can be hijacked by a
@@ -99,10 +100,17 @@ begin
   -- The transactional RPCs: signed-in only.
   select string_agg(fn, ', ') into txt
     from unnest(array[
-      'public.promote_proposal(uuid,uuid,uuid)',
+      'public.promote_proposal(uuid,uuid,uuid,date)',
       'public.submit_proposal(uuid,text,text,date,text,text[],text,task_priority,uuid)',
-      'public.review_proposal(uuid,text)',
-      'public.set_proposal_requirements(uuid,text[])',
+      'public.review_proposal(uuid,text,integer,text)',
+      'public.set_proposal_requirements(uuid,text[],integer)',
+      'public.set_proposal_department(uuid,text,text,integer)',
+      'public.add_proposal_comment(uuid,text)',
+      'public.revise_proposal(uuid,integer,jsonb,text)',
+      'public.request_proposal_changes(uuid,integer,text)',
+      'public.approve_proposal(uuid,integer,text)',
+      'public.approve_and_promote(uuid,uuid,integer,text,uuid,date)',
+      'public.set_proposal_star(uuid,boolean)',
       'public.link_task_requirement(uuid,text)',
       'public.unlink_task_requirement(uuid,text)',
       'public.apply_role_plan(jsonb)',
@@ -114,10 +122,17 @@ begin
 
   select string_agg(fn, ', ') into txt
     from unnest(array[
-      'public.promote_proposal(uuid,uuid,uuid)',
+      'public.promote_proposal(uuid,uuid,uuid,date)',
       'public.submit_proposal(uuid,text,text,date,text,text[],text,task_priority,uuid)',
-      'public.review_proposal(uuid,text)',
-      'public.set_proposal_requirements(uuid,text[])',
+      'public.review_proposal(uuid,text,integer,text)',
+      'public.set_proposal_requirements(uuid,text[],integer)',
+      'public.set_proposal_department(uuid,text,text,integer)',
+      'public.add_proposal_comment(uuid,text)',
+      'public.revise_proposal(uuid,integer,jsonb,text)',
+      'public.request_proposal_changes(uuid,integer,text)',
+      'public.approve_proposal(uuid,integer,text)',
+      'public.approve_and_promote(uuid,uuid,integer,text,uuid,date)',
+      'public.set_proposal_star(uuid,boolean)',
       'public.link_task_requirement(uuid,text)',
       'public.unlink_task_requirement(uuid,text)',
       'public.apply_role_plan(jsonb)',

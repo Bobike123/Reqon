@@ -111,7 +111,9 @@ begin
 
   begin
     perform apply_role_plan(jsonb_build_array(
-      jsonb_build_object('member_id', mem, 'role', 'developer', 'action', 'add'),
+      -- documentation, not developer: since backend completion Phase 2 only a Developer
+      -- may grant developer, and this check is about the last-president guard.
+      jsonb_build_object('member_id', mem, 'role', 'documentation', 'action', 'add'),
       jsonb_build_object('member_id', pre, 'role', 'president', 'action', 'remove')
     ));
     select * into lines, failures from pg_temp.note(lines, failures, 'a plan that removes the last president is refused', false, 'no exception was raised');
@@ -123,7 +125,7 @@ begin
   end;
   perform 1 from member_roles where member_id = pre and role = 'president';
   select * into lines, failures from pg_temp.note(lines, failures, 'the president role was never actually removed', found);
-  perform 1 from member_roles where member_id = mem and role = 'developer';
+  perform 1 from member_roles where member_id = mem and role = 'documentation';
   select * into lines, failures from pg_temp.note(lines, failures,
     'the earlier grant in that SAME refused plan was rolled back too — not "apply until the first refusal"', not found);
 

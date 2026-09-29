@@ -40,16 +40,18 @@ export type RolePlan = {
 }
 
 const GAINS: Record<PrivilegedRole, string> = {
-  president: 'can change every setting and give or take away anyone’s roles',
-  vicepresident: 'can change the roster, departments, milestones and seasons',
+  president: 'can change every setting and season, and give or take away every role except Developer',
+  vicepresident: 'can change the roster, departments and milestones, and give or take away the Treasurer and Documentation roles',
   treasurer: 'can add, edit and delete financial entries',
+  documentation: 'can edit meetings, the default agenda and milestone sections',
   developer: 'can do everything in the club, roles and money included',
 }
 
 const LOSES: Record<PrivilegedRole, string> = {
-  president: 'can no longer give or take away roles',
-  vicepresident: 'can no longer change the roster, departments, milestones or seasons',
+  president: 'can no longer give or take away roles or switch seasons',
+  vicepresident: 'can no longer change the roster, departments or milestones, or give or take away roles',
   treasurer: 'can no longer change financial entries',
+  documentation: 'can no longer edit meetings, the default agenda or milestone sections',
   developer: 'loses full access to the club’s data',
 }
 

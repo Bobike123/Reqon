@@ -594,6 +594,18 @@ select set_config('request.jwt.claim.sub', '$1', true);
 SQL
 }
 
+# Phase 3: promotion is gated by an approval of the exact current revision.
+# These are new fixtures, so approving them here records real test evidence;
+# nothing is inferred for the pre-Phase-3 legacy proposals above.
+for proposal in "$PROP_ID" "$PROP_A" "$PROP_B"; do
+  psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+begin;
+$(as_user_sql "$HEAD_ID")
+select approve_proposal('$proposal', 1, 'Concurrency fixture reviewed');
+commit;
+SQL
+done
+
 RACE_SQL="begin;
 $(as_user_sql "$HEAD_ID")
 select pg_sleep(0.3);
@@ -696,6 +708,142 @@ commit;"
 }
 head_race "promotion-first" "$PROP_A" "promote" 1
 head_race "head-change-first" "$PROP_B" "change" 0
+
+# --------------------------------------- approval/revision/promotion races
+# Phase 3 commands all lock the department before the proposal row. Exercise
+# both deterministic orderings so approval can never cover content that was
+# not reviewed, and promotion can never copy content changed concurrently.
+create_proposal_race_fixture() {
+  local title="$1"
+  psql_in -v ON_ERROR_STOP=1 -qAt -c "
+with p as (
+  insert into task_proposals (season_id, title, raised_by, subteam_key, due_date, milestone_key)
+  values ('$SEASON_ID', '$title', '$OTHER_ID', '$DEPT_KEY', '2026-12-01', 'VC-MS1')
+  returning id
+)
+insert into proposal_requirements (proposal_id, clause_key)
+select p.id, r.clause_key from p
+cross join lateral (select clause_key from proposal_requirements where proposal_id = '$PROP_ID' limit 1) r
+returning proposal_id;" | tr -d '[:space:]'
+}
+
+approve_revise_race() {
+  local label="$1" first="$2" expected="$3"
+  local proposal approve_pre="" approve_post="" revise_pre="" revise_post=""
+  proposal=$(create_proposal_race_fixture "Approve-revise $label")
+  if [ "$first" = "approve" ]; then
+    approve_post="select pg_sleep(1.8);"
+    revise_pre="select pg_sleep(0.6);"
+  else
+    approve_pre="select pg_sleep(0.6);"
+    revise_post="select pg_sleep(1.8);"
+  fi
+  local approve_sql="begin;
+$(as_user_sql "$HEAD_ID")
+$approve_pre
+select (approve_proposal('$proposal', 1, 'Concurrent approval evidence')).state;
+$approve_post
+commit;"
+  local revise_sql="begin;
+$(as_user_sql "$OTHER_ID")
+$revise_pre
+select (revise_proposal('$proposal', 1, '{\"title\":\"Concurrent revision\"}'::jsonb, 'Member revision')).revision;
+$revise_post
+commit;"
+  echo "==> racing approval against revision ($label)"
+  psql_in -f - <<<"$approve_sql" > "$WORK/approve_revise_${label}_approve.txt" 2>&1 &
+  local ra=$!
+  psql_in -f - <<<"$revise_sql" > "$WORK/approve_revise_${label}_revise.txt" 2>&1 &
+  local rr=$!
+  wait "$ra" "$rr" || true
+
+  local got
+  got=$(psql_in -tA -c "select revision || '|' || state || '|' || coalesce(approved_revision::text, '-') || '|' || title from task_proposals where id = '$proposal'" | tr -d '[:space:]')
+  if [ "$got" != "$expected" ]; then
+    echo "!! FAIL ($label): expected $expected after approval/revision race, got $got"
+    echo "--- approval ---"; cat "$WORK/approve_revise_${label}_approve.txt"
+    echo "--- revision ---"; cat "$WORK/approve_revise_${label}_revise.txt"
+    RACE_OK=0
+  else
+    echo "    ok  $label: $got; approval and revision were serialized"
+  fi
+}
+approve_revise_race "approval-first" "approve" "1|approved|1|Approve-reviseapproval-first"
+approve_revise_race "revision-first" "revise" "2|open|-|Concurrentrevision"
+
+promote_revise_race() {
+  local label="$1" first="$2" expected="$3"
+  local proposal promote_pre="" promote_post="" revise_pre="" revise_post=""
+  proposal=$(create_proposal_race_fixture "Promote-revise $label")
+  psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+begin;
+$(as_user_sql "$HEAD_ID")
+select approve_proposal('$proposal', 1, 'Approved before the promotion race');
+commit;
+SQL
+  if [ "$first" = "promote" ]; then
+    promote_post="select pg_sleep(1.8);"
+    revise_pre="select pg_sleep(0.6);"
+  else
+    promote_pre="select pg_sleep(0.6);"
+    revise_post="select pg_sleep(1.8);"
+  fi
+  local promote_sql="begin;
+$(as_user_sql "$HEAD_ID")
+$promote_pre
+select (x.task).id, x.created from promote_proposal('$proposal', '$SEASON_ID') x;
+$promote_post
+commit;"
+  local revise_sql="begin;
+$(as_user_sql "$HEAD_ID")
+$revise_pre
+select (revise_proposal('$proposal', 1, '{\"title\":\"Reviewed concurrent revision\"}'::jsonb, 'Reviewer revision')).revision;
+$revise_post
+commit;"
+  echo "==> racing promotion against an approved-content revision ($label)"
+  psql_in -f - <<<"$promote_sql" > "$WORK/promote_revise_${label}_promote.txt" 2>&1 &
+  local rp=$!
+  psql_in -f - <<<"$revise_sql" > "$WORK/promote_revise_${label}_revise.txt" 2>&1 &
+  local rr=$!
+  wait "$rp" "$rr" || true
+
+  local got
+  got=$(psql_in -tA -c "select p.revision || '|' || p.state || '|' || coalesce(p.approved_revision::text, '-') || '|' || count(t.id) from task_proposals p left join tasks t on t.source_proposal = p.id where p.id = '$proposal' group by p.id" | tr -d '[:space:]')
+  if [ "$got" != "$expected" ]; then
+    echo "!! FAIL ($label): expected $expected after promotion/revision race, got $got"
+    echo "--- promotion ---"; cat "$WORK/promote_revise_${label}_promote.txt"
+    echo "--- revision ---"; cat "$WORK/promote_revise_${label}_revise.txt"
+    RACE_OK=0
+  else
+    echo "    ok  $label: $got; no task was made from unapproved concurrent content"
+  fi
+}
+promote_revise_race "promotion-first" "promote" "1|decided|1|1"
+promote_revise_race "revision-first" "revise" "2|agenda|-|0"
+
+APPROVE_RACE_PROP=$(create_proposal_race_fixture "Approve-approve retry")
+APPROVE_RACE_SQL="begin;
+$(as_user_sql "$HEAD_ID")
+select pg_sleep(0.3);
+select (approve_proposal('$APPROVE_RACE_PROP', 1, 'One recorded approval')).state;
+commit;"
+echo "==> racing two approvals of the same revision"
+psql_in -f - <<<"$APPROVE_RACE_SQL" > "$WORK/approve_approve_a.txt" 2>&1 & APPROVE_A=$!
+psql_in -f - <<<"$APPROVE_RACE_SQL" > "$WORK/approve_approve_b.txt" 2>&1 & APPROVE_B=$!
+wait "$APPROVE_A" "$APPROVE_B" || true
+APPROVE_RACE_RESULT=$(psql_in -tA -c "
+select p.state || '|' || p.approved_revision || '|' ||
+  (select count(*) from proposal_comments c where c.proposal_id = p.id and c.kind = 'approval') || '|' ||
+  (select count(*) from activity a where a.entity = 'proposal' and a.entity_id = p.id::text and a.action = 'approved')
+from task_proposals p where p.id = '$APPROVE_RACE_PROP';" | tr -d '[:space:]')
+if [ "$APPROVE_RACE_RESULT" != "approved|1|1|1" ]; then
+  echo "!! FAIL: two concurrent approvals did not converge on one evidence record ($APPROVE_RACE_RESULT)"
+  echo "--- approval A ---"; cat "$WORK/approve_approve_a.txt"
+  echo "--- approval B ---"; cat "$WORK/approve_approve_b.txt"
+  RACE_OK=0
+else
+  echo "    ok  concurrent approval retries produced one approval comment and one approval audit row"
+fi
 
 # ---------------------------------------------- submit vs department archive
 # submit_proposal() holds the department row (FOR SHARE) until it commits, and
@@ -895,6 +1043,106 @@ else
 fi
 # Superuser fixture cleanup (not a product path): put the department's Head back.
 psql_in -v ON_ERROR_STOP=1 -c "update subteams set lead_id = nullif('$ARCH_PRIOR_LEAD', '')::uuid where key = '$DEPT_KEY'" >/dev/null
+
+# -------------------------- department assignment races (backend completion Phase 2)
+# set_task_department() and add_department_member() hold the target department
+# row FOR SHARE until they commit; guard_department_archive() takes the same row
+# FOR UPDATE before counting. So:
+#   move-first:    the archive waits, then is refused (an active task now lives
+#                  there); the task stays moved.
+#   archive-first: the move waits, then is refused (the department is archived);
+#                  the task stays where it was.
+#   add-first:     the archive waits, then succeeds (members never block an
+#                  archive); the membership row exists, as history.
+#   archive-first: the add waits, then is refused; no membership row.
+# The fixtures are SUBdepartments of one active top-level department, so they do
+# not count toward the ten-department cap.
+echo "==> fixture for the department-assignment races (a Developer, a member, five subdepartments, two tasks)"
+P2_DEV='00000000-0000-4000-8000-0000000000b1'
+P2_MEM='00000000-0000-4000-8000-0000000000b2'
+P2_TASK_A='00000000-0000-4000-8000-0000000000b3'
+P2_TASK_B='00000000-0000-4000-8000-0000000000b4'
+P2_PARENT=$(psql_in -tA -c "select key from subteams where archived_at is null and parent_key is null order by sort_order, key limit 1" | tr -d '[:space:]')
+psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+insert into auth.users (id, email) values ('$P2_DEV', 'verify-p2-dev@roles.test'), ('$P2_MEM', 'verify-p2-mem@roles.test');
+insert into members (id, full_name, role) values ('$P2_DEV', 'Verify P2 Developer', 'Software'), ('$P2_MEM', 'Verify P2 Member', 'Software');
+insert into member_roles (member_id, role) values ('$P2_DEV', 'developer');
+insert into subteams (key, name, parent_key) values
+  ('P2R_SRC', 'P2 race source', '$P2_PARENT'),
+  ('P2R_T1', 'P2 race target 1', '$P2_PARENT'),
+  ('P2R_T2', 'P2 race target 2', '$P2_PARENT'),
+  ('P2R_M1', 'P2 race members 1', '$P2_PARENT'),
+  ('P2R_M2', 'P2 race members 2', '$P2_PARENT');
+insert into tasks (id, season_id, title, subteam_key, state) values
+  ('$P2_TASK_A', '$SEASON_ID', 'P2 race task A', 'P2R_SRC', 'wip'),
+  ('$P2_TASK_B', '$SEASON_ID', 'P2 race task B', 'P2R_SRC', 'wip');
+SQL
+
+p2_race() {
+  local label="$1" command_sql="$2" dept="$3" first="$4" check_sql="$5" expect="$6" refusal_file="$7" refusal_text="$8"
+  local cmd_pre="" cmd_post="" arch_pre="" arch_post=""
+  if [ "$first" = "command" ]; then
+    cmd_post="select pg_sleep(1.8);"; arch_pre="select pg_sleep(0.6);"
+  else
+    cmd_pre="select pg_sleep(0.6);"; arch_post="select pg_sleep(1.8);"
+  fi
+  local cmd_session arch_session
+  cmd_session="begin;
+$(as_user_sql "$P2_DEV")
+$cmd_pre
+$command_sql
+$cmd_post
+commit;"
+  arch_session="begin;
+$(as_user_sql "$PRESIDENT_ID")
+$arch_pre
+update subteams set archived_at = now(), archive_reason = 'verify-db p2 race' where key = '$dept' returning key;
+$arch_post
+commit;"
+  echo "==> racing $label"
+  psql_in -f - <<<"$cmd_session" > "$WORK/p2_${first}_${dept}_command.txt" 2>&1 &
+  local rc=$!
+  psql_in -f - <<<"$arch_session" > "$WORK/p2_${first}_${dept}_archive.txt" 2>&1 &
+  local ra=$!
+  wait "$rc" "$ra" || true
+  local got ok=1
+  got=$(psql_in -tA -c "$check_sql" | tr -d '[:space:]')
+  [ "$got" = "$expect" ] || { echo "!! FAIL ($label): expected $expect, got $got"; ok=0; }
+  if [ -n "$refusal_file" ]; then
+    command grep -q "$refusal_text" "$WORK/p2_${first}_${dept}_${refusal_file}.txt" || { echo "!! FAIL ($label): the $refusal_file session was not refused with '$refusal_text'"; ok=0; }
+  fi
+  if [ "$ok" != "1" ]; then
+    echo "--- command ---"; cat "$WORK/p2_${first}_${dept}_command.txt"
+    echo "--- archive ---"; cat "$WORK/p2_${first}_${dept}_archive.txt"
+    RACE_OK=0
+  else
+    echo "    ok  $label: $got"
+  fi
+}
+p2_race "set_task_department vs department archive (move-first)" \
+  "select (set_task_department('$P2_TASK_A', 'P2R_T1', 'verify-db race')).subteam_key;" "P2R_T1" "command" \
+  "select (select subteam_key from tasks where id = '$P2_TASK_A') || '|' || (select (archived_at is null)::text from subteams where key = 'P2R_T1')" \
+  "P2R_T1|true" "archive" "task(s) still reference it"
+p2_race "set_task_department vs department archive (archive-first)" \
+  "select (set_task_department('$P2_TASK_B', 'P2R_T2', 'verify-db race')).subteam_key;" "P2R_T2" "archive" \
+  "select (select subteam_key from tasks where id = '$P2_TASK_B') || '|' || (select (archived_at is null)::text from subteams where key = 'P2R_T2')" \
+  "P2R_SRC|false" "command" "active department"
+p2_race "add_department_member vs department archive (add-first)" \
+  "select add_department_member('$SEASON_ID', 'P2R_M1', '$P2_MEM');" "P2R_M1" "command" \
+  "select (select count(*) from department_members where subteam_key = 'P2R_M1')::text || '|' || (select (archived_at is null)::text from subteams where key = 'P2R_M1')" \
+  "1|false" "" ""
+p2_race "add_department_member vs department archive (archive-first)" \
+  "select add_department_member('$SEASON_ID', 'P2R_M2', '$P2_MEM');" "P2R_M2" "archive" \
+  "select (select count(*) from department_members where subteam_key = 'P2R_M2')::text || '|' || (select (archived_at is null)::text from subteams where key = 'P2R_M2')" \
+  "0|false" "command" "is archived"
+# Superuser fixture cleanup (not a product path): the race rows would otherwise
+# sit in every later test file's view of the departments.
+psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+delete from department_members where subteam_key like 'P2R_%';
+delete from tasks where id in ('$P2_TASK_A', '$P2_TASK_B');
+delete from subteams where key like 'P2R_%';
+delete from member_roles where member_id = '$P2_DEV';
+SQL
 
 echo "==> running supabase/tests/*.sql"
 # Each test file reports its verdict by deliberately raising an exception —

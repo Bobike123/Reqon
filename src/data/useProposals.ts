@@ -6,14 +6,16 @@ import { submissionProblems, PROBLEM_LABEL, type NewProposal } from '../proposal
 import type { Proposal } from '../proposals/types.ts'
 import { useSeasonId } from '../season/context.ts'
 import { DataError } from '../core/errors.ts'
+import { todayIso } from '../lib/dates.ts'
+import type { Database, Json } from '../lib/database.types.ts'
 import { fetchAllRows, unwrap } from './errors.ts'
 import type { Task } from './useTasks.ts'
-import { useOptimisticListMutation } from './optimistic.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
 export type { Proposal, ProposalState } from '../proposals/types.ts'
 export type { NewProposal } from '../proposals/submission.ts'
+export type ProposalComment = Database['public']['Tables']['proposal_comments']['Row']
 
 export function useProposalsForSeason(seasonId: string | undefined): UseQueryResult<Proposal[], Error> {
   return useSeasonScopedQuery<Proposal[]>(queryKeys.proposals(seasonId), seasonId, (sid) =>
@@ -36,37 +38,43 @@ export function useProposals(): UseQueryResult<Proposal[], Error> {
   return useProposalsForSeason(useSeasonId())
 }
 
-export type ProposalEdit = {
-  id: string
-  // Editable in every unarchived state on purpose: a proposal must never become a
-  // dead end because of the status it happens to be in. The stage itself is NOT
-  // here — it moves only through useReviewProposal (review_proposal()).
-  decision?: string | null
-  ownerId?: string | null
-  title?: string
-  description?: string | null
-  starred?: boolean
-  // Reviewer edits (department Head or Developer): the database refuses to clear
-  // a deadline or milestone and refuses a milestone from another season.
-  dueDate?: string
-  priority?: 'normal' | 'urgent'
-  milestoneKey?: string
-  // Developer only (guard_proposal_edit): supplies the department of an older
-  // proposal that never had one.
-  departmentKey?: string
+export function useProposalComments(): UseQueryResult<ProposalComment[], Error> {
+  const seasonId = useSeasonId()
+  return useSeasonScopedQuery<ProposalComment[]>(queryKeys.proposalComments(seasonId), seasonId, (sid) =>
+    fetchAllRows(
+      'load proposal discussion',
+      (row) => row.id,
+      (from, to) =>
+        supabase
+          .from('proposal_comments')
+          .select('*')
+          .eq('season_id', sid)
+          .order('created_at')
+          .order('id')
+          .range(from, to),
+    ),
+  )
 }
 
-function editColumns(edit: ProposalEdit) {
+export type ProposalChanges = {
+  title?: string
+  description?: string | null
+  ownerId?: string | null
+  dueDate?: string | null
+  priority?: 'normal' | 'urgent'
+  milestoneKey?: string | null
+  requirementKeys?: string[]
+}
+
+function changePayload(changes: ProposalChanges): Json {
   return {
-    ...(edit.decision !== undefined ? { decision: edit.decision } : {}),
-    ...(edit.ownerId !== undefined ? { owner_id: edit.ownerId } : {}),
-    ...(edit.title !== undefined ? { title: edit.title } : {}),
-    ...(edit.description !== undefined ? { context: edit.description } : {}),
-    ...(edit.starred !== undefined ? { starred: edit.starred } : {}),
-    ...(edit.dueDate !== undefined ? { due_date: edit.dueDate } : {}),
-    ...(edit.priority !== undefined ? { priority: edit.priority } : {}),
-    ...(edit.milestoneKey !== undefined ? { milestone_key: edit.milestoneKey } : {}),
-    ...(edit.departmentKey !== undefined ? { subteam_key: edit.departmentKey } : {}),
+    ...(changes.title !== undefined ? { title: changes.title } : {}),
+    ...(changes.description !== undefined ? { description: changes.description } : {}),
+    ...(changes.ownerId !== undefined ? { owner_id: changes.ownerId } : {}),
+    ...(changes.dueDate !== undefined ? { due_date: changes.dueDate } : {}),
+    ...(changes.priority !== undefined ? { priority: changes.priority } : {}),
+    ...(changes.milestoneKey !== undefined ? { milestone_key: changes.milestoneKey } : {}),
+    ...(changes.requirementKeys !== undefined ? { requirement_keys: changes.requirementKeys } : {}),
   }
 }
 
@@ -79,43 +87,80 @@ function useRefreshProposalData() {
     if (!seasonId) return
     void queryClient.invalidateQueries({ queryKey: queryKeys.proposals(seasonId) })
     void queryClient.invalidateQueries({ queryKey: queryKeys.proposalRequirements(seasonId) })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.proposalComments(seasonId) })
     if (options.tasks) void queryClient.invalidateQueries({ queryKey: queryKeys.tasks(seasonId) })
   }
 }
 
-export function useUpdateProposal() {
-  const seasonId = useSeasonId()
+export function useReviseProposal() {
+  const refresh = useRefreshProposalData()
+  return useMutation<Proposal, Error, { id: string; expectedRevision: number; changes: ProposalChanges; note?: string }>({
+    mutationFn: async ({ id, expectedRevision, changes, note }) =>
+      unwrap(
+        'save that proposal revision',
+        await supabase.rpc('revise_proposal', {
+          p_proposal_id: id,
+          p_expected_revision: expectedRevision,
+          p_changes: changePayload(changes),
+          ...(note?.trim() ? { p_note: note.trim() } : {}),
+        }),
+      ),
+    onSuccess: () => refresh(),
+  })
+}
 
-  return useOptimisticListMutation<Proposal, ProposalEdit>({
-    queryKey: queryKeys.proposals(seasonId),
-    identify: (row, edit) => row.id === edit.id,
+export function useSetProposalDepartment() {
+  const refresh = useRefreshProposalData()
+  return useMutation<Proposal, Error, { id: string; departmentKey: string; reason: string; expectedRevision: number }>({
+    mutationFn: async ({ id, departmentKey, reason, expectedRevision }) =>
+      unwrap(
+        'move that proposal',
+        await supabase.rpc('set_proposal_department', {
+          p_proposal_id: id,
+          p_subteam_key: departmentKey,
+          p_reason: reason,
+          p_expected_revision: expectedRevision,
+        }),
+      ),
+    onSuccess: () => refresh(),
+  })
+}
 
-    write: async (edit) => {
-      // `decided_at` is stamped by a trigger, never sent from here.
-      const { data, error } = await supabase
-        .from('task_proposals')
-        .update(editColumns(edit))
-        .eq('id', edit.id)
-        .select('id')
-      // A protected-column attempt or an invariant refusal is a raised error
-      // from guard_proposal_edit and surfaces exactly as thrown.
-      if (error) throw new DataError('review proposals', error)
-      if (data && data.length > 0) return
-      // proposal_update's RLS refuses by matching no rows rather than failing.
-      // Ask the database whether THIS proposal was editable by this caller, so
-      // "you may not" and "it no longer exists" never read the same.
-      const { data: allowed, error: askError } = await supabase.rpc('can_review_proposal', {
-        p_proposal_id: edit.id,
-      })
-      if (askError) throw new DataError('check whether the change was saved', askError)
-      if (allowed === true) {
-        throw new DataError('save that change: the proposal is archived or no longer exists', null)
-      }
-      throw new DataError('review proposals', null, { permission: true })
-    },
+export function useAddProposalComment() {
+  const refresh = useRefreshProposalData()
+  return useMutation<ProposalComment, Error, { id: string; body: string }>({
+    mutationFn: async ({ id, body }) =>
+      unwrap('add to the proposal discussion', await supabase.rpc('add_proposal_comment', {
+        p_proposal_id: id,
+        p_body: body,
+      })),
+    onSuccess: () => refresh(),
+  })
+}
 
-    apply: (rows, edit) =>
-      rows.map((row) => (row.id === edit.id ? { ...row, ...editColumns(edit) } : row)),
+export function useRequestProposalChanges() {
+  const refresh = useRefreshProposalData()
+  return useMutation<Proposal, Error, { id: string; expectedRevision: number; note: string }>({
+    mutationFn: async ({ id, expectedRevision, note }) =>
+      unwrap('request proposal changes', await supabase.rpc('request_proposal_changes', {
+        p_proposal_id: id,
+        p_expected_revision: expectedRevision,
+        p_note: note,
+      })),
+    onSuccess: () => refresh(),
+  })
+}
+
+export function useApproveProposal() {
+  const refresh = useRefreshProposalData()
+  return useMutation<Proposal, Error, { id: string; expectedRevision: number; note: string }>({
+    mutationFn: async ({ id, expectedRevision, note }) =>
+      unwrap('approve that proposal', await supabase.rpc('approve_proposal', {
+        p_proposal_id: id,
+        p_expected_revision: expectedRevision,
+        p_note: note,
+      })),
+    onSuccess: () => refresh(),
   })
 }
 
@@ -124,19 +169,24 @@ export function useUpdateProposal() {
 // trusted over any local guess and the list is refetched, not patched.
 export function useReviewProposal() {
   const refresh = useRefreshProposalData()
-  return useMutation<Proposal, Error, { id: string; action: ReviewAction }>({
-    mutationFn: async ({ id, action }) =>
+  return useMutation<Proposal, Error, { id: string; action: ReviewAction; expectedRevision: number; note?: string }>({
+    mutationFn: async ({ id, action, expectedRevision, note }) =>
       unwrap(
         'review that proposal',
-        await supabase.rpc('review_proposal', { p_proposal_id: id, p_action: action }),
+        await supabase.rpc('review_proposal', {
+          p_proposal_id: id,
+          p_action: action,
+          p_expected_revision: expectedRevision,
+          ...(note?.trim() ? { p_note: note.trim() } : {}),
+        }),
       ),
     onSuccess: () => refresh(),
   })
 }
 
-// Converting a proposal into a task, in one database transaction
-// (promote_proposal(), 20260117): only the proposal's department Head or a
-// Developer, from an open or under-review proposal, copying its department,
+// Converting an approved proposal into a task, in one database transaction:
+// only current department authority may promote, and the database re-checks
+// the approved revision and digest while locked before copying its department,
 // owner, deadline, priority, milestone and requirements. The task carries
 // `source_proposal` so the board can always answer "where did this come from?".
 //
@@ -170,6 +220,7 @@ export function usePromoteProposal() {
         await supabase.rpc('promote_proposal', {
           p_proposal_id: proposal.id,
           p_season_id: seasonId,
+          p_starts_on: todayIso(),
           ...(owner ? { p_owner_id: owner } : {}),
         }),
       )
@@ -228,11 +279,12 @@ export function useSubmitProposal() {
 // and an edit path for a Head). At least one requirement is always required.
 export function useSetProposalRequirements() {
   const refresh = useRefreshProposalData()
-  return useMutation<void, Error, { id: string; clauseKeys: string[] }>({
-    mutationFn: async ({ id, clauseKeys }) => {
+  return useMutation<void, Error, { id: string; clauseKeys: string[]; expectedRevision: number }>({
+    mutationFn: async ({ id, clauseKeys, expectedRevision }) => {
       const { error } = await supabase.rpc('set_proposal_requirements', {
         p_proposal_id: id,
         p_clause_keys: clauseKeys,
+        p_expected_revision: expectedRevision,
       })
       if (error) throw new DataError('save the requirements', error)
     },

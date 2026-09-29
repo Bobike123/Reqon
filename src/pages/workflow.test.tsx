@@ -19,7 +19,8 @@ function proposalRow(over: Record<string, unknown> = {}): Record<string, unknown
     starred: false, raised_by: 'm1', raised_on: '2026-01-01', decided_at: null, meeting_id: null,
     updated_at: '2026-01-01', subteam_key: 'AERO', due_date: '2026-12-01', priority: 'normal',
     milestone_key: 'MS1-1', outcome: null, archived_at: null, archived_by: null, archive_reason: null,
-    legacy_incomplete: false, ...over,
+    legacy_incomplete: false, revision: 1, approved_revision: null, approved_by: null,
+    approved_at: null, approved_as: null, approved_digest: null, ...over,
   }
 }
 
@@ -34,6 +35,7 @@ function reset() {
     seasons: [SEASON],
     members: [MEMBER, MEMBER2],
     task_proposals: [],
+    proposal_comments: [],
     proposal_requirements: [],
     tasks: [],
     clauses: [CLAUSE],
@@ -163,6 +165,127 @@ function setProposalRequirements(args: Record<string, unknown>) {
   return { data: null, error: null }
 }
 
+function proposalError(message: string, code: string) {
+  return { data: null, error: { message, code } }
+}
+
+function findProposal(args: Record<string, unknown>) {
+  return (db.task_proposals as Record<string, unknown>[]).find((p) => p.id === args.p_proposal_id)
+}
+
+function checkRevision(proposal: Record<string, unknown>, args: Record<string, unknown>) {
+  return proposal.revision === args.p_expected_revision
+    ? null
+    : proposalError('This proposal changed in another session. Reload it and try again.', '40001')
+}
+
+function addProposalComment(args: Record<string, unknown>, kind = 'comment', revision?: number) {
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const body = String(args.p_body ?? args.p_note ?? '').trim()
+  if (!body) return proposalError('A discussion entry cannot be empty.', '22023')
+  const entry = {
+    id: `proposal-comments-${nextId++}`,
+    proposal_id: proposal.id,
+    season_id: proposal.season_id,
+    author_id: 'm1',
+    revision: revision ?? proposal.revision,
+    kind,
+    body,
+    created_at: new Date().toISOString(),
+  }
+  db.proposal_comments.push(entry)
+  return { data: entry, error: null }
+}
+
+function clearApproval(proposal: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...proposal,
+    approved_revision: null,
+    approved_by: null,
+    approved_at: null,
+    approved_as: null,
+    approved_digest: null,
+  }
+}
+
+function reviseProposal(args: Record<string, unknown>) {
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const stale = checkRevision(proposal, args)
+  if (stale) return stale
+  const changes = (args.p_changes ?? {}) as Record<string, unknown>
+  const requirementKeys = changes.requirement_keys as string[] | undefined
+  if (requirementKeys) {
+    if (requirementKeys.length === 0) return proposalError('A proposal needs at least one requirement.', '23514')
+    db.proposal_requirements = db.proposal_requirements.filter((link) => link.proposal_id !== proposal.id)
+    for (const key of new Set(requirementKeys)) db.proposal_requirements.push({ proposal_id: proposal.id, clause_key: key })
+  }
+  const columns: Record<string, string> = {
+    title: 'title', description: 'context', owner_id: 'owner_id', due_date: 'due_date',
+    priority: 'priority', milestone_key: 'milestone_key',
+  }
+  let updated = { ...proposal }
+  for (const [input, column] of Object.entries(columns)) {
+    if (Object.hasOwn(changes, input)) updated[column] = changes[input]
+  }
+  updated = recomputeLegacy(clearApproval({
+    ...updated,
+    revision: Number(proposal.revision) + 1,
+    state: proposal.state === 'changes_requested' ? 'agenda' : proposal.state,
+  }))
+  db.task_proposals = db.task_proposals.map((row) => row.id === proposal.id ? updated : row)
+  if (String(args.p_note ?? '').trim()) addProposalComment({ ...args, p_body: args.p_note }, 'revision', Number(updated.revision))
+  return { data: updated, error: null }
+}
+
+function setProposalDepartment(args: Record<string, unknown>) {
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const stale = checkRevision(proposal, args)
+  if (stale) return stale
+  const updated = clearApproval({
+    ...proposal,
+    subteam_key: args.p_subteam_key,
+    revision: Number(proposal.revision) + 1,
+    state: proposal.state === 'changes_requested' ? 'agenda' : proposal.state,
+  })
+  db.task_proposals = db.task_proposals.map((row) => row.id === proposal.id ? updated : row)
+  addProposalComment({ ...args, p_body: args.p_reason }, 'department_change', Number(updated.revision))
+  return { data: updated, error: null }
+}
+
+function requestProposalChanges(args: Record<string, unknown>) {
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const stale = checkRevision(proposal, args)
+  if (stale) return stale
+  const updated = clearApproval({ ...proposal, state: 'changes_requested' })
+  db.task_proposals = db.task_proposals.map((row) => row.id === proposal.id ? updated : row)
+  addProposalComment({ ...args, p_body: args.p_note }, 'changes_requested')
+  return { data: updated, error: null }
+}
+
+function approveProposal(args: Record<string, unknown>) {
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const stale = checkRevision(proposal, args)
+  if (stale) return stale
+  if (proposal.legacy_incomplete) return proposalError('This older proposal is missing required details.', '22023')
+  const updated = {
+    ...proposal,
+    state: 'approved',
+    approved_revision: proposal.revision,
+    approved_by: 'm1',
+    approved_at: new Date().toISOString(),
+    approved_as: 'department_head',
+    approved_digest: `fixture-revision-${proposal.revision}`,
+  }
+  db.task_proposals = db.task_proposals.map((row) => row.id === proposal.id ? updated : row)
+  addProposalComment({ ...args, p_body: args.p_note }, 'approval')
+  return { data: updated, error: null }
+}
+
 // Mirrors review_proposal(): the transitions the database allows.
 function reviewProposal(args: Record<string, unknown>) {
   const changes: Record<string, Record<string, unknown>> = {
@@ -172,18 +295,22 @@ function reviewProposal(args: Record<string, unknown>) {
     reopen: { state: 'open', outcome: null, archived_at: null, archive_reason: null },
   }
   const change = changes[args.p_action as string]
+  const proposal = findProposal(args)
+  if (!proposal) return proposalError('proposal not found', '23503')
+  const stale = checkRevision(proposal, args)
+  if (stale) return stale
   let updated: Record<string, unknown> | null = null
   db.task_proposals = (db.task_proposals as Record<string, unknown>[]).map((p) => {
     if (p.id !== args.p_proposal_id) return p
-    updated = { ...p, ...change }
+    updated = clearApproval({ ...p, ...change })
     return updated
   })
   return updated ? { data: updated, error: null } : { data: null, error: { message: 'proposal not found', code: '23503' } }
 }
 
-// Mirrors promote_proposal() (20260117): one call, idempotent on an
+// Mirrors promote_proposal(): one call, idempotent on an
 // already-promoted proposal, refusing an older proposal that is still incomplete
-// and any proposal that is not open or under review, copying the proposal's own
+// and any proposal without approval of its current revision, copying its own
 // fields.
 function promoteProposal(args: Record<string, unknown>) {
   const proposal = (db.task_proposals as Record<string, unknown>[]).find((p) => p.id === args.p_proposal_id)
@@ -197,8 +324,8 @@ function promoteProposal(args: Record<string, unknown>) {
   if (proposal.legacy_incomplete) {
     return { data: null, error: { message: 'This older proposal is missing required details. Complete them before promoting it.', code: '22023' } }
   }
-  if (proposal.archived_at || !['open', 'agenda'].includes(proposal.state as string)) {
-    return { data: null, error: { message: 'Only a suggested or under-review proposal can be promoted.', code: '22023' } }
+  if (proposal.archived_at || proposal.state !== 'approved' || proposal.approved_revision !== proposal.revision) {
+    return { data: null, error: { message: 'Approve the current proposal revision before promoting it.', code: '22023' } }
   }
   const task: Record<string, unknown> = {
     id: `tasks-${nextId++}`,
@@ -207,6 +334,7 @@ function promoteProposal(args: Record<string, unknown>) {
     detail: proposal.context ?? null,
     owner_id: args.p_owner_id ?? proposal.owner_id ?? null,
     due_date: proposal.due_date,
+    starts_on: args.p_starts_on,
     subteam_key: proposal.subteam_key,
     milestone_key: proposal.milestone_key,
     state: 'todo',
@@ -229,6 +357,11 @@ const supabase = {
   rpc: async (fn: string, args?: Record<string, unknown>) => {
     if (fn === 'promote_proposal') return promoteProposal(args ?? {})
     if (fn === 'submit_proposal') return submitProposal(args ?? {})
+    if (fn === 'revise_proposal') return reviseProposal(args ?? {})
+    if (fn === 'set_proposal_department') return setProposalDepartment(args ?? {})
+    if (fn === 'add_proposal_comment') return addProposalComment(args ?? {})
+    if (fn === 'request_proposal_changes') return requestProposalChanges(args ?? {})
+    if (fn === 'approve_proposal') return approveProposal(args ?? {})
     if (fn === 'review_proposal') return reviewProposal(args ?? {})
     if (fn === 'set_proposal_requirements') return setProposalRequirements(args ?? {})
     if (fn === 'can_review_proposal') return { data: true, error: null }
@@ -324,19 +457,29 @@ describe('ACCEPTANCE: Proposals -> raise -> review -> approve -> task -> Board',
     await screen.findByTestId(`proposal-${proposalId}`)
 
     // --- 2. The Head of its department reviews it, adds a note, approves ------
-    const dialog = await openReview(user, proposalId)
-    await user.type(dialog.getByLabelText('Decision note (optional)'), 'Keep 450 mm; ask the Organization to confirm.')
+    let dialog = await openReview(user, proposalId)
+    await user.type(dialog.getByLabelText('Review note'), 'Keep 450 mm; ask the Organization to confirm.')
     await user.click(dialog.getByTestId('review-approve'))
 
+    await waitFor(() => expect(db.task_proposals[0]).toMatchObject({ state: 'approved', approved_revision: 1, approved_by: 'm1' }))
+    expect(db.tasks).toHaveLength(0)
+    expect(db.proposal_comments).toEqual([expect.objectContaining({
+      proposal_id: proposalId, author_id: 'm1', revision: 1, kind: 'approval',
+      body: 'Keep 450 mm; ask the Organization to confirm.',
+    })])
+
+    // Approval records the exact revision; promotion is a separate, retry-safe act.
+    dialog = await openReview(user, proposalId)
+    await user.click(dialog.getByTestId('review-promote'))
     await waitFor(() => expect(db.tasks).toHaveLength(1))
     expect(db.tasks[0]).toMatchObject({
       title: 'Fairing width tolerance', state: 'todo', source_proposal: proposalId, created_by: 'm1',
       season_id: 'season-a', subteam_key: 'AERO', due_date: '2026-12-01',
     })
-    // The note was saved BEFORE approval, and the approval is a recorded outcome.
+    // The approval evidence remains attributable after the proposal is promoted.
     expect(db.task_proposals[0]).toMatchObject({
       state: 'decided', outcome: 'approved', archive_reason: 'promoted',
-      decision: 'Keep 450 mm; ask the Organization to confirm.',
+      approved_revision: 1, approved_by: 'm1', approved_as: 'department_head',
     })
 
     // --- 3. The active proposal is gone from the queue, the task is discoverable
@@ -422,37 +565,50 @@ describe('a proposal is never a dead end', () => {
     await user.selectOptions(dialog.getByLabelText('Milestone'), 'MS1-1')
     await user.type(dialog.getByLabelText('Find a requirement'), 'B.1')
     await user.click(dialog.getByRole('checkbox', { name: /B\.1\.1\.1/ }))
-    await waitFor(() => expect(dialog.getByTestId('review-approve')).toBeEnabled())
-    await user.click(dialog.getByTestId('review-approve'))
+    expect(dialog.getByTestId('review-approve')).toBeDisabled()
+    await user.click(dialog.getByTestId('review-save'))
+
+    await waitFor(() => expect(db.task_proposals[0]).toMatchObject({ legacy_incomplete: false, revision: 2 }))
+    let reopened = await openReview(user, 'l')
+    await user.type(reopened.getByLabelText('Review note'), 'The required details are now complete.')
+    await user.click(reopened.getByTestId('review-approve'))
+    await waitFor(() => expect(db.task_proposals[0]).toMatchObject({ state: 'approved', approved_revision: 2 }))
+
+    reopened = await openReview(user, 'l')
+    await user.click(reopened.getByTestId('review-promote'))
 
     await waitFor(() => expect(db.tasks).toHaveLength(1))
     expect(db.tasks[0]).toMatchObject({ source_proposal: 'l', due_date: '2026-11-15', milestone_key: 'MS1-1' })
     expect(db.proposal_requirements).toEqual([{ proposal_id: 'l', clause_key: 'B.1.1.1' }])
   })
 
-  it('offers no review control for a department the viewer does not head, and says who decides', async () => {
+  it('offers discussion but no review authority for a department the viewer does not head, and says who decides', async () => {
     db.task_proposals = [proposalRow({ id: 'o', title: 'Bodywork idea', subteam_key: 'BODY' })]
     renderApp('/proposals')
     await screen.findByTestId('proposal-o')
-    expect(screen.queryByTestId('review-open-o')).not.toBeInTheDocument()
+    expect(screen.getByTestId('review-open-o')).toHaveTextContent('Discuss or revise')
     expect(screen.getByTestId('proposal-hint-o')).toHaveTextContent('The Head of Bodywork, or a Developer')
   })
 
-  it('shows a refusal from the database and keeps the dialog and its values', async () => {
+  it('shows a promotion refusal from the database and preserves the approved proposal', async () => {
     const user = userEvent.setup()
     db.task_proposals = [proposalRow({ id: 'a', title: 'Refused one', state: 'open' })]
     db.proposal_requirements = [{ proposal_id: 'a', clause_key: 'B.1.1.1' }]
     renderApp('/proposals')
-    const dialog = await openReview(user, 'a')
-    await user.type(dialog.getByLabelText('Decision note (optional)'), 'my note')
-    denyNextPromote = true
+    let dialog = await openReview(user, 'a')
+    await user.type(dialog.getByLabelText('Review note'), 'my note')
     await user.click(dialog.getByTestId('review-approve'))
+    await waitFor(() => expect(db.task_proposals[0].state).toBe('approved'))
+
+    dialog = await openReview(user, 'a')
+    denyNextPromote = true
+    await user.click(dialog.getByTestId('review-promote'))
     expect(await screen.findByText(/Only the Head of this proposal's department, or a Developer, may promote it/)).toBeInTheDocument()
     expect(db.tasks).toHaveLength(0)
-    // The dialog is still open and what was typed is still there.
+    // A rejected write does not close the dialog or roll back the valid approval.
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(dialog.getByLabelText('Decision note (optional)')).toHaveValue('my note')
-    expect(db.task_proposals[0].state).toBe('open')
+    expect(dialog.getByTestId('review-approved')).toHaveTextContent('Revision 1 was approved')
+    expect(db.task_proposals[0]).toMatchObject({ state: 'approved', approved_revision: 1 })
   })
 })
 
@@ -529,17 +685,21 @@ describe('the proposal form', () => {
 describe('duplicate protection', () => {
   it('does not create a second task, and the approved proposal moves to History with its task linked', async () => {
     const user = userEvent.setup()
-    db.task_proposals = [proposalRow({ id: 't1', title: 'Order tyres', state: 'agenda', decision: 'do it' })]
+    db.task_proposals = [proposalRow({
+      id: 't1', title: 'Order tyres', state: 'approved', decision: 'do it', approved_revision: 1,
+      approved_by: 'm1', approved_at: '2026-09-01T00:00:00Z', approved_as: 'department_head',
+      approved_digest: 'fixture-revision-1',
+    })]
     db.proposal_requirements = [{ proposal_id: 't1', clause_key: 'B.1.1.1' }]
     renderApp('/proposals')
     const dialog = await openReview(user, 't1')
-    await user.click(dialog.getByTestId('review-approve'))
+    await user.click(dialog.getByTestId('review-promote'))
     await waitFor(() => expect(db.tasks).toHaveLength(1))
 
     await waitFor(() => expect(screen.queryByTestId('proposal-t1')).not.toBeInTheDocument())
     await user.click(within(screen.getByTestId('proposal-views')).getByRole('button', { name: /History/ }))
     expect(await screen.findByTestId('proposal-promoted-t1')).toHaveTextContent('Created the task “Order tyres”')
-    expect(screen.queryByTestId('review-open-t1')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View discussion' })).toBeInTheDocument()
     expect(db.tasks).toHaveLength(1)
     expect(insertCount.tasks).toBe(1)
   })
@@ -548,7 +708,11 @@ describe('duplicate protection', () => {
     // A retry, a stale tab or a reload-and-click-again reaches the mutation
     // even when the screen no longer offers the button. Call it twice directly
     // and prove only one task is ever inserted.
-    const proposal = proposalRow({ id: 't9', title: 'Order tyres', state: 'agenda', decision: 'do it' })
+    const proposal = proposalRow({
+      id: 't9', title: 'Order tyres', state: 'approved', decision: 'do it', approved_revision: 1,
+      approved_by: 'm1', approved_at: '2026-09-01T00:00:00Z', approved_as: 'department_head',
+      approved_digest: 'fixture-revision-1',
+    })
     db.task_proposals = [proposal]
 
     const { usePromoteProposal } = await import('../data/useProposals.ts')
@@ -625,4 +789,3 @@ describe('task board', () => {
     expect(document.activeElement).toBe(move)
   })
 })
-

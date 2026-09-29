@@ -8,11 +8,10 @@ import { describeBlockers, draftFrom, promotionBlockers } from './promotion.ts'
 import { proposalStatusLabel, reviewActionsFor } from './proposalStates.ts'
 
 // ONE proposal card, used by BOTH the Proposals screen and the Now screen. It
-// only PRESENTS a proposal and offers one control: Review, for the people who
-// may review it (`canReview`, mirroring can_review_proposal(): the proposal's
-// department Head, or a Developer). Everything a reviewer does — edit, approve,
-// park, reject, reopen — happens in the ReviewDialog, so the card never offers a
-// control the database would refuse, and a member simply reads the same facts.
+// only PRESENTS a proposal and opens one shared discussion/review dialog.
+// Everyone active may discuss, the author may revise before approval, and
+// review actions appear only for department authority. The database repeats
+// every authority check.
 
 type Props = {
   proposal: Proposal
@@ -25,6 +24,8 @@ type Props = {
   milestoneName?: string
   requirementCount: number
   canReview: boolean
+  canDiscuss: boolean
+  isAuthor: boolean
   onReview: (proposal: Proposal) => void
   // The one card the guided tour points at.
   tutorial?: boolean
@@ -39,6 +40,8 @@ export function ProposalCard({
   milestoneName,
   requirementCount,
   canReview,
+  canDiscuss,
+  isAuthor,
   onReview,
   tutorial = false,
 }: Props) {
@@ -49,7 +52,7 @@ export function ProposalCard({
   const suggester = nameOf(proposal.raised_by)
   const archived = proposal.archived_at !== null
   const blockers = promotionBlockers(draftFrom(proposal, requirementCount))
-  const reviewable = canReview && !promoted && (!archived || reviewActionsFor(proposal, false).length > 0)
+  const reviewable = canDiscuss && (!archived || reviewActionsFor(proposal, promoted).length > 0 || promoted)
 
   return (
     <li
@@ -101,18 +104,21 @@ export function ProposalCard({
 
       <div className="mt-2 flex flex-wrap items-center gap-2" data-tutorial={tutorial ? 'proposal-promote' : undefined}>
         {promoted ? (
-          <span
-            className="pc-fade-in inline-flex flex-wrap items-center gap-2 rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
-            data-testid={`proposal-promoted-${proposal.id}`}
-          >
-            Created the task “{taskFromProposal?.title}”
-            <Link
-              to={`/board?task=${encodeURIComponent(taskFromProposal?.id ?? '')}`}
-              className="inline-flex min-h-11 items-center rounded font-medium text-slate-900 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+          <>
+            <span
+              className="pc-fade-in inline-flex flex-wrap items-center gap-2 rounded bg-slate-100 px-2 py-1 text-xs text-slate-700"
+              data-testid={`proposal-promoted-${proposal.id}`}
             >
-              Open on Board
-            </Link>
-          </span>
+              Created the task “{taskFromProposal?.title}”
+              <Link
+                to={`/board?task=${encodeURIComponent(taskFromProposal?.id ?? '')}`}
+                className="inline-flex min-h-11 items-center rounded font-medium text-slate-900 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+              >
+                Open on Board
+              </Link>
+            </span>
+            {canDiscuss && <button type="button" className="text-xs font-medium underline underline-offset-2" onClick={() => onReview(proposal)}>View discussion</button>}
+          </>
         ) : reviewable ? (
           <button
             type="button"
@@ -121,18 +127,19 @@ export function ProposalCard({
             data-tutorial={tutorial ? 'proposal-decision' : undefined}
             className="min-h-11 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
           >
-            Review
+            {canReview ? 'Review' : isAuthor ? 'Discuss or revise' : 'Discussion'}
           </button>
-        ) : !canReview && !archived ? (
-          <p className="text-xs text-slate-500" data-testid={`proposal-hint-${proposal.id}`}>
-            {!departmentName
-              ? 'A Developer completes the details of this older proposal before it can become a board task.'
-              : departmentHasHead
-                ? `The Head of ${departmentName}, or a Developer, decides whether this becomes a board task.`
-                : `${departmentName} has no Head appointed yet, so only a Developer can decide whether this becomes a board task.`}
-          </p>
         ) : null}
       </div>
+      {!canReview && !archived && (
+        <p className="mt-2 text-xs text-slate-500" data-testid={`proposal-hint-${proposal.id}`}>
+          {!departmentName
+            ? 'A Developer completes the details of this older proposal before it can become a board task.'
+            : departmentHasHead
+              ? `The Head of ${departmentName}, or a Developer, decides whether this becomes a board task.`
+              : `${departmentName} has no active Head. The President or Vice President decides for it; a Developer can also act.`}
+        </p>
+      )}
     </li>
   )
 }

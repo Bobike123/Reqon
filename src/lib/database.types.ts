@@ -324,6 +324,80 @@ export type Database = {
           },
         ]
       }
+      department_members: {
+        Row: {
+          added_at: string
+          added_by: string | null
+          member_id: string
+          season_id: string
+          subteam_key: string
+        }
+        Insert: {
+          added_at?: string
+          added_by?: string | null
+          member_id: string
+          season_id: string
+          subteam_key: string
+        }
+        Update: {
+          added_at?: string
+          added_by?: string | null
+          member_id?: string
+          season_id?: string
+          subteam_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "department_members_added_by_fkey"
+            columns: ["added_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_members_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_members_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_members_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "department_members_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "department_members_subteam_key_fkey"
+            columns: ["subteam_key"]
+            isOneToOne: false
+            referencedRelation: "subteams"
+            referencedColumns: ["key"]
+          },
+          {
+            foreignKeyName: "department_members_subteam_key_fkey"
+            columns: ["subteam_key"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["key"]
+          },
+        ]
+      }
       finance_entries: {
         Row: {
           amount_cents: number
@@ -751,6 +825,75 @@ export type Database = {
           },
           {
             foreignKeyName: "milestones_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+        ]
+      }
+      proposal_comments: {
+        Row: {
+          author_id: string
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          proposal_id: string
+          revision: number
+          season_id: string
+        }
+        Insert: {
+          author_id: string
+          body: string
+          created_at?: string
+          id?: string
+          kind?: string
+          proposal_id: string
+          revision: number
+          season_id: string
+        }
+        Update: {
+          author_id?: string
+          body?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          proposal_id?: string
+          revision?: number
+          season_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposal_comments_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_comments_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "task_proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_comments_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_comments_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposal_comments_season_id_fkey"
             columns: ["season_id"]
             isOneToOne: false
             referencedRelation: "v_subteam_progress"
@@ -1202,6 +1345,7 @@ export type Database = {
           key: string
           lead_id: string | null
           name: string
+          parent_key: string | null
           sort_order: number
         }
         Insert: {
@@ -1214,6 +1358,7 @@ export type Database = {
           key: string
           lead_id?: string | null
           name: string
+          parent_key?: string | null
           sort_order?: number
         }
         Update: {
@@ -1226,6 +1371,7 @@ export type Database = {
           key?: string
           lead_id?: string | null
           name?: string
+          parent_key?: string | null
           sort_order?: number
         }
         Relationships: [
@@ -1243,10 +1389,29 @@ export type Database = {
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "subteams_parent_key_fkey"
+            columns: ["parent_key"]
+            isOneToOne: false
+            referencedRelation: "subteams"
+            referencedColumns: ["key"]
+          },
+          {
+            foreignKeyName: "subteams_parent_key_fkey"
+            columns: ["parent_key"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["key"]
+          },
         ]
       }
       task_proposals: {
         Row: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
@@ -1263,6 +1428,7 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           raised_by: string | null
           raised_on: string
+          revision: number
           season_id: string
           starred: boolean
           state: Database["public"]["Enums"]["topic_state"]
@@ -1271,6 +1437,11 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          approved_as?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_digest?: string | null
+          approved_revision?: number | null
           archive_reason?: string | null
           archived_at?: string | null
           archived_by?: string | null
@@ -1287,6 +1458,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           raised_by?: string | null
           raised_on?: string
+          revision?: number
           season_id: string
           starred?: boolean
           state?: Database["public"]["Enums"]["topic_state"]
@@ -1295,6 +1467,11 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          approved_as?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
+          approved_digest?: string | null
+          approved_revision?: number | null
           archive_reason?: string | null
           archived_at?: string | null
           archived_by?: string | null
@@ -1311,6 +1488,7 @@ export type Database = {
           priority?: Database["public"]["Enums"]["task_priority"]
           raised_by?: string | null
           raised_on?: string
+          revision?: number
           season_id?: string
           starred?: boolean
           state?: Database["public"]["Enums"]["topic_state"]
@@ -1319,6 +1497,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "task_proposals_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "task_proposals_archived_by_fkey"
             columns: ["archived_by"]
@@ -1762,7 +1947,91 @@ export type Database = {
       }
     }
     Functions: {
+      add_department_member: {
+        Args: {
+          p_member_id: string
+          p_season_id: string
+          p_subteam_key: string
+        }
+        Returns: boolean
+      }
+      add_proposal_comment: {
+        Args: { p_body: string; p_proposal_id: string }
+        Returns: {
+          author_id: string
+          body: string
+          created_at: string
+          id: string
+          kind: string
+          proposal_id: string
+          revision: number
+          season_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "proposal_comments"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       apply_role_plan: { Args: { p_changes: Json }; Returns: undefined }
+      approve_and_promote: {
+        Args: {
+          p_expected_revision: number
+          p_note: string
+          p_owner_id?: string
+          p_proposal_id: string
+          p_season_id: string
+          p_starts_on?: string
+        }
+        Returns: {
+          created: boolean
+          task: Database["public"]["Tables"]["tasks"]["Row"]
+        }[]
+      }
+      approve_proposal: {
+        Args: {
+          p_expected_revision: number
+          p_note: string
+          p_proposal_id: string
+        }
+        Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          revision: number
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       archive_stale_done_tasks: {
         Args: never
         Returns: {
@@ -1880,13 +2149,25 @@ export type Database = {
         }[]
       }
       can_delete_records: { Args: never; Returns: boolean }
+      can_edit_meetings: { Args: never; Returns: boolean }
       can_edit_spec_targets: { Args: never; Returns: boolean }
       can_edit_task: { Args: { p_task_id: string }; Returns: boolean }
+      can_grant_role: {
+        Args: { p_role: Database["public"]["Enums"]["privileged_role"] }
+        Returns: boolean
+      }
+      can_manage_department_members: {
+        Args: { p_key: string }
+        Returns: boolean
+      }
       can_manage_departments: { Args: never; Returns: boolean }
       can_manage_finances: { Args: never; Returns: boolean }
+      can_manage_milestone_structure: { Args: never; Returns: boolean }
       can_manage_roles: { Args: never; Returns: boolean }
+      can_manage_seasons: { Args: never; Returns: boolean }
       can_review_proposal: { Args: { p_proposal_id: string }; Returns: boolean }
       can_view_finances: { Args: never; Returns: boolean }
+      change_reason_detail: { Args: never; Returns: Json }
       correct_spec_measurement: {
         Args: {
           p_measured_at?: string
@@ -1922,8 +2203,10 @@ export type Database = {
         }
       }
       dearmor: { Args: { "": string }; Returns: string }
+      department_authority: { Args: { p_key: string }; Returns: string }
       gen_random_uuid: { Args: never; Returns: string }
       gen_salt: { Args: { "": string }; Returns: string }
+      has_department_authority: { Args: { p_key: string }; Returns: boolean }
       has_role: {
         Args: { wanted: Database["public"]["Enums"]["privileged_role"] }
         Returns: boolean
@@ -1968,6 +2251,11 @@ export type Database = {
       lock_proposal_for_command: {
         Args: { p_proposal_id: string }
         Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
@@ -1984,6 +2272,7 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           raised_by: string | null
           raised_on: string
+          revision: number
           season_id: string
           starred: boolean
           state: Database["public"]["Enums"]["topic_state"]
@@ -2007,11 +2296,16 @@ export type Database = {
           p_owner_id?: string
           p_proposal_id: string
           p_season_id: string
+          p_starts_on?: string
         }
         Returns: {
           created: boolean
           task: Database["public"]["Tables"]["tasks"]["Row"]
         }[]
+      }
+      proposal_content_digest: {
+        Args: { p_proposal_id: string }
+        Returns: string
       }
       reconciliation_apply: { Args: { p_manifest: Json }; Returns: Json }
       reconciliation_preflight: {
@@ -2068,9 +2362,60 @@ export type Database = {
         }
       }
       refresh_spec_current: { Args: { p_spec_id: string }; Returns: undefined }
+      remove_department_member: {
+        Args: {
+          p_member_id: string
+          p_season_id: string
+          p_subteam_key: string
+        }
+        Returns: boolean
+      }
       reorder_departments: {
         Args: { p_ordered_keys: string[] }
         Returns: undefined
+      }
+      request_proposal_changes: {
+        Args: {
+          p_expected_revision: number
+          p_note: string
+          p_proposal_id: string
+        }
+        Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          revision: number
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       restore_task: {
         Args: { p_task_id: string }
@@ -2107,8 +2452,18 @@ export type Database = {
         }
       }
       review_proposal: {
-        Args: { p_action: string; p_proposal_id: string }
+        Args: {
+          p_action: string
+          p_expected_revision: number
+          p_note?: string
+          p_proposal_id: string
+        }
         Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
@@ -2125,6 +2480,51 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           raised_by: string | null
           raised_on: string
+          revision: number
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      revise_proposal: {
+        Args: {
+          p_changes: Json
+          p_expected_revision: number
+          p_note?: string
+          p_proposal_id: string
+        }
+        Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          revision: number
           season_id: string
           starred: boolean
           state: Database["public"]["Enums"]["topic_state"]
@@ -2140,9 +2540,130 @@ export type Database = {
         }
       }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }
+      set_proposal_department: {
+        Args: {
+          p_expected_revision: number
+          p_proposal_id: string
+          p_reason: string
+          p_subteam_key: string
+        }
+        Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          revision: number
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       set_proposal_requirements: {
-        Args: { p_clause_keys: string[]; p_proposal_id: string }
+        Args: {
+          p_clause_keys: string[]
+          p_expected_revision: number
+          p_proposal_id: string
+        }
         Returns: undefined
+      }
+      set_proposal_star: {
+        Args: { p_proposal_id: string; p_starred: boolean }
+        Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          context: string | null
+          decided_at: string | null
+          decision: string | null
+          due_date: string | null
+          id: string
+          legacy_incomplete: boolean
+          meeting_id: string | null
+          milestone_key: string | null
+          outcome: Database["public"]["Enums"]["proposal_outcome"] | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          raised_by: string | null
+          raised_on: string
+          revision: number
+          season_id: string
+          starred: boolean
+          state: Database["public"]["Enums"]["topic_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "task_proposals"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_task_department: {
+        Args: { p_reason: string; p_subteam_key: string; p_task_id: string }
+        Returns: {
+          archive_reason: string | null
+          archived_at: string | null
+          archived_by: string | null
+          completed_at: string | null
+          completion_source: string | null
+          created_at: string
+          created_by: string | null
+          detail: string | null
+          due_date: string | null
+          id: string
+          links_required: boolean
+          milestone_key: string | null
+          owner_id: string | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          season_id: string
+          section_id: string | null
+          source_proposal: string | null
+          starred: boolean
+          starts_on: string | null
+          state: Database["public"]["Enums"]["task_state"]
+          subteam_key: string | null
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tasks"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       spec_goal_status: {
         Args: {
@@ -2192,6 +2713,11 @@ export type Database = {
           p_title: string
         }
         Returns: {
+          approved_as: string | null
+          approved_at: string | null
+          approved_by: string | null
+          approved_digest: string | null
+          approved_revision: number | null
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
@@ -2208,6 +2734,7 @@ export type Database = {
           priority: Database["public"]["Enums"]["task_priority"]
           raised_by: string | null
           raised_on: string
+          revision: number
           season_id: string
           starred: boolean
           state: Database["public"]["Enums"]["topic_state"]
@@ -2231,11 +2758,22 @@ export type Database = {
       clause_state: "open" | "wip" | "compliant" | "verified" | "blocked" | "na"
       finance_kind: "income" | "expense"
       member_state: "active" | "alumni"
-      privileged_role: "developer" | "treasurer" | "president" | "vicepresident"
+      privileged_role:
+        | "developer"
+        | "treasurer"
+        | "president"
+        | "vicepresident"
+        | "documentation"
       proposal_outcome: "approved" | "rejected"
       task_priority: "normal" | "urgent"
       task_state: "todo" | "wip" | "blocked" | "done" | "cancelled"
-      topic_state: "open" | "agenda" | "decided" | "parked"
+      topic_state:
+        | "open"
+        | "agenda"
+        | "decided"
+        | "parked"
+        | "changes_requested"
+        | "approved"
     }
     CompositeTypes: {
       department_reconciliation_entry: {
@@ -2372,11 +2910,24 @@ export const Constants = {
       clause_state: ["open", "wip", "compliant", "verified", "blocked", "na"],
       finance_kind: ["income", "expense"],
       member_state: ["active", "alumni"],
-      privileged_role: ["developer", "treasurer", "president", "vicepresident"],
+      privileged_role: [
+        "developer",
+        "treasurer",
+        "president",
+        "vicepresident",
+        "documentation",
+      ],
       proposal_outcome: ["approved", "rejected"],
       task_priority: ["normal", "urgent"],
       task_state: ["todo", "wip", "blocked", "done", "cancelled"],
-      topic_state: ["open", "agenda", "decided", "parked"],
+      topic_state: [
+        "open",
+        "agenda",
+        "decided",
+        "parked",
+        "changes_requested",
+        "approved",
+      ],
     },
   },
 } as const

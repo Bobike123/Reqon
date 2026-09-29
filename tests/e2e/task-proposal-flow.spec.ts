@@ -48,11 +48,16 @@ test.describe('full task/proposal flow (R9-R16, R37-R38, R42-R43)', () => {
     await login(page, m.users.headA.email, m.password)
     await page.goto('/proposals')
     await page.getByTestId(`review-open-${proposalId}`).click()
+    await page.getByLabel('Review note').fill('Approved for implementation in this department.')
     await page.getByTestId('review-approve').click()
+    await expect(page.getByTestId('review-approve')).toHaveCount(0, { timeout: 10_000 })
+    await expect.poll(() => runSql(`select state from task_proposals where id = '${proposalId}'`).trim()).toBe('approved')
+    await page.getByTestId(`review-open-${proposalId}`).click()
+    await page.getByTestId('review-promote').click()
     // A promoted proposal leaves the open queue (R13.4); rather than chase
     // which tab/view now shows it, confirm the dialog closed and let the
     // database checks below (the actual source of truth) do the asserting.
-    await expect(page.getByTestId('review-approve')).toHaveCount(0, { timeout: 10_000 })
+    await expect(page.getByTestId('review-promote')).toHaveCount(0, { timeout: 10_000 })
 
     // ---- 3. Exactly one task, correct provenance and links -----------------------------
     const taskRows = runSql(`select id, title, subteam_key, milestone_key, state, priority, owner_id, source_proposal from tasks where source_proposal = '${proposalId}'`)

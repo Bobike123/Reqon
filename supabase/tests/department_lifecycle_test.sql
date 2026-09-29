@@ -217,7 +217,7 @@ begin
   -- =========================================================== archive guards
   insert into tasks (season_id, title, subteam_key, state) values (season, 'DL active work', 'DL_P', 'todo');
   got := pg_temp.attempt(pre, 'update subteams set archived_at = now(), archive_reason = ''t'' where key = ''DL_P''');
-  if got <> 'ERROR 23514: Cannot archive department "DL_P": 1 task(s) still reference it. Reassign or finish them first.' then
+  if got <> 'ERROR 23514: Cannot archive department "DL_P": 1 task(s) still reference it. Move them to another department or finish them first.' then
     failures := failures || format('archive with active task: expected the stranded-work error, got %s', got);
   end if;
   update tasks set state = 'done' where subteam_key = 'DL_P';

@@ -70,14 +70,27 @@ const rolesOf = (id: string) =>
 // passes both since 20260107000000_developer_full_access.sql.
 const isAdmin = (m: Member) =>
   rolesOf(m.id).some((r) => r === 'president' || r === 'vicepresident' || r === 'developer')
-const canManageRoles = (m: Member) => rolesOf(m.id).some((r) => r === 'president' || r === 'developer')
+// can_manage_roles() / can_grant_role() / can_manage_seasons() as redefined by
+// backend completion Phase 2 (20260126000100): the VP opens role management but
+// only changes Treasurer and Documentation; only a Developer changes Developer;
+// seasons belong to the President and a Developer.
+const canManageRoles = (m: Member) =>
+  rolesOf(m.id).some((r) => r === 'president' || r === 'vicepresident' || r === 'developer')
+const canGrant = (m: Member, role: string) => {
+  const has = (r: string) => rolesOf(m.id).includes(r)
+  if (role === 'developer') return has('developer')
+  if (role === 'president' || role === 'vicepresident') return has('president') || has('developer')
+  return has('president') || has('vicepresident') || has('developer')
+}
+const canManageSeasons = (m: Member) => rolesOf(m.id).some((r) => r === 'president' || r === 'developer')
 
 function policyAllows(table: string, op: string, filters: Record<string, unknown>): boolean {
   if (table === 'members' && op === 'insert') return isAdmin(caller)
   if (table === 'members' && op === 'update') return filters.id === caller.id || isAdmin(caller)
   if (table === 'members' && op === 'delete') return false
-  if (['subteams', 'seasons', 'milestones', 'clauses', 'regulation_documents'].includes(table)) return isAdmin(caller)
-  if (table === 'member_roles') return (op === 'insert' || op === 'delete') && canManageRoles(caller)
+  if (table === 'seasons') return canManageSeasons(caller)
+  if (['subteams', 'milestones', 'clauses', 'regulation_documents'].includes(table)) return isAdmin(caller)
+  if (table === 'member_roles') return (op === 'insert' || op === 'delete') && canGrant(caller, String(filters.role))
   return true
 }
 
@@ -108,7 +121,7 @@ function makeBuilder(table: string) {
       if (table === 'member_roles') for (const r of doomed) writes.push(`delete member_roles ${r.member_id} ${r.role}`)
       return { data: doomed, error: null }
     }
-    if (ctx.op !== 'select' && ctx.op !== 'update' && !policyAllows(table, ctx.op, ctx.filters)) {
+    if (ctx.op !== 'select' && ctx.op !== 'update' && !policyAllows(table, ctx.op, { ...ctx.filters, ...(ctx.payload ?? {}) })) {
       return { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
     }
     if (table === 'member_roles' && ctx.op === 'insert') {
@@ -177,8 +190,8 @@ function makeBuilder(table: string) {
   return b
 }
 
-// Mirrors apply_role_plan() (20260111000000_atomic_role_plan.sql): one call,
-// can_manage_roles() checked once for the whole plan, applied in order, ALL
+// Mirrors apply_role_plan() (20260111000000, redefined 20260126000100): one call,
+// can_manage_roles() for the plan and can_grant_role() for every row, applied in order, ALL
 // or NOTHING — a last-president removal partway through discards every
 // change this SAME call made, not just that one step.
 function applyRolePlan(args: Record<string, unknown>) {
@@ -189,6 +202,11 @@ function applyRolePlan(args: Record<string, unknown>) {
   const before = (db.member_roles as RoleRow[]).map((r) => ({ ...r }))
   const beforeWrites = writes.length
   for (const change of changes) {
+    if (!canGrant(caller, change.role)) {
+      db.member_roles = before
+      writes.length = beforeWrites
+      return { data: null, error: { message: `You may not grant or remove the ${change.role} role.`, code: '42501' } }
+    }
     if (change.action === 'add') {
       const already = (db.member_roles as RoleRow[]).some(
         (r) => r.member_id === change.member_id && r.role === change.role,
@@ -238,11 +256,11 @@ const supabase = {
     if (fn === 'can_manage_departments') return { data: isAdmin(caller), error: null }
     rpcCalls.push({ fn, args })
     // Everything else here is set_current_season, which the real function
-    // refuses to anyone but the president or vice-president in SQL.
-    if (!isAdmin(caller)) {
+    // refuses to anyone but the President or a Developer (can_manage_seasons()).
+    if (!canManageSeasons(caller)) {
       return {
         data: null,
-        error: { message: 'Only the president or vice-president may change the current season', code: '42501' },
+        error: { message: 'Only the President or a Developer may change the current season', code: '42501' },
       }
     }
     // One transaction: clear then set.
@@ -311,24 +329,37 @@ describe('who sees what', () => {
     // The roster rows arrive with the members query, after the forms.
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including who holds which role/)).toBeInTheDocument()
+    expect(screen.getByText(/including roles \(only a Developer changes the Developer role\)/)).toBeInTheDocument()
   })
 
-  it('the vice-president sees the same admin controls and every role, but no way to change roles', async () => {
+  // Backend completion Phase 2: the Vice President now manages the Treasurer and
+  // Documentation roles, and no longer starts or switches seasons (F-03, F-04).
+  it('the vice-president sees the admin controls and role management, but no season controls', async () => {
     caller = VP
     renderSettings()
     expect(await screen.findByText('Add someone to the roster')).toBeInTheDocument()
     expect(screen.getByText('Departments')).toBeInTheDocument()
     expect(screen.getByText('Milestone dates and points')).toBeInTheDocument()
-    expect(screen.getByText('Start a new season')).toBeInTheDocument()
-    // Wait for the roster rows, or the absence checks below prove nothing.
+    expect(screen.queryByText('Start a new season')).not.toBeInTheDocument()
     await screen.findByTestId('member-m2')
-    expect(changeRolesButtons()).toHaveLength(0)
+    expect(changeRolesButtons().length).toBeGreaterThan(0)
     expect(await within(screen.getByTestId('member-m1')).findByText('President')).toBeInTheDocument()
     expect(
-      screen.getByText(/except roles, which only the President or a Developer can give or take away/),
+      screen.getByText(/except seasons and the President, Vice President and Developer roles/),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Roles are given and taken away by the President/)).toBeInTheDocument()
+    expect(screen.getByText(/You can give or take away the Treasurer and Documentation roles/)).toBeInTheDocument()
+  })
+
+  it('the vice-president may tick only Treasurer and Documentation', async () => {
+    caller = VP
+    const user = userEvent.setup()
+    renderSettings()
+    const dialog = await openRoles(user, 'Bo Wrench')
+    expect(dialog.getByRole('checkbox', { name: 'Treasurer' })).toBeEnabled()
+    expect(dialog.getByRole('checkbox', { name: 'Documentation' })).toBeEnabled()
+    expect(dialog.getByRole('checkbox', { name: 'President' })).toBeDisabled()
+    expect(dialog.getByRole('checkbox', { name: 'Vice President' })).toBeDisabled()
+    expect(dialog.getByRole('checkbox', { name: 'Developer' })).toBeDisabled()
   })
 
   for (const [label, who, shown] of [
@@ -363,7 +394,7 @@ describe('who sees what', () => {
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including who holds which role/)).toBeInTheDocument()
+    expect(screen.getByText(/including roles \(only a Developer changes the Developer role\)/)).toBeInTheDocument()
   })
 
   it('a job title of "President" grants nothing', async () => {
@@ -407,7 +438,9 @@ describe('role management', () => {
     expect(await within(screen.getByTestId('member-m2')).findByText('Vice President')).toBeInTheDocument()
   })
 
+  // Only a Developer may grant Developer since backend completion Phase 2.
   it('granting Developer asks first, because it is full access', async () => {
+    caller = DEV
     const user = userEvent.setup()
     renderSettings()
     const dialog = await openRoles(user, 'Bo Wrench')
@@ -509,14 +542,13 @@ describe('role management', () => {
   })
 
   it('a refusal is shown as a permission error, and the dialog keeps what was chosen', async () => {
+    // A Developer (the only one who may grant Developer) loses the role on
+    // another device while the dialog is open.
+    caller = DEV
     const user = userEvent.setup()
     renderSettings()
     const dialog = await openRoles(user, 'Bo Wrench')
-    // Meanwhile, on another device, the presidency moves to Cy.
-    db.member_roles = [
-      ...(db.member_roles as RoleRow[]).filter((r) => r.member_id !== 'm1'),
-      { member_id: 'm3', role: 'president' },
-    ]
+    db.member_roles = (db.member_roles as RoleRow[]).filter((r) => r.member_id !== 'm4')
     await user.click(dialog.getByRole('checkbox', { name: 'Developer' }))
     await user.click(dialog.getByRole('button', { name: 'Review change' }))
     await user.click(dialog.getByRole('button', { name: 'Confirm change' }))
@@ -546,7 +578,7 @@ describe('role management', () => {
     const apply = hook(() => useApplyRoleChanges())
     await expect(
       apply.current.mutateAsync([{ memberId: 'm3', memberName: 'Someone', role: 'president', action: 'add' }]),
-    ).rejects.toThrow(/don't have permission to change privileged roles/)
+    ).rejects.toThrow(/may not grant or remove the president role/)
     expect(rolesOf('m3')).toEqual(['vicepresident'])
   })
 
@@ -575,7 +607,7 @@ describe('role management', () => {
     const apply = hook(() => useApplyRoleChanges())
     await expect(
       apply.current.mutateAsync([{ memberId: 'm1', memberName: 'Someone', role: 'president', action: 'remove' }]),
-    ).rejects.toThrow(/don't have permission to change privileged roles/)
+    ).rejects.toThrow(/may not grant or remove the president role/)
     expect(rolesOf('m1')).toEqual(['president'])
   })
 
@@ -612,7 +644,7 @@ describe('administration is enforced by the database', () => {
     it(`refuses the season switch for a ${label}`, async () => {
       caller = who
       const setCurrent = hook(() => useSetCurrentSeason())
-      await expect(setCurrent.current.mutateAsync('sb')).rejects.toThrow(/president or vice-president/)
+      await expect(setCurrent.current.mutateAsync('sb')).rejects.toThrow(/Only the President or a Developer/)
       expect(db.seasons.find((s) => s.id === 'sa')?.is_current).toBe(true)
     })
   }
@@ -1009,7 +1041,7 @@ describe('export', () => {
 
   it('is scoped to one season and carries identifying metadata', async () => {
     const out = await buildSeasonExport('sa')
-    expect(out.exportVersion).toBe(4) // 4: archived work, junctions, Book metadata, global history (Phase 11)
+    expect(out.exportVersion).toBe(5) // 5: + department memberships (backend completion Phase 2)
     expect(typeof out.exportedAt).toBe('string')
     expect(typeof out.consistency).toBe('string')
     expect(out.season).toMatchObject({ id: 'sa', label: '2026/27' })

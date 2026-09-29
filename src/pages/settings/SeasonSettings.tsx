@@ -3,7 +3,7 @@ import { useCreateSeason, useSeasons, useSetCurrentSeason } from '../../data/use
 import { ActionError, ErrorState } from '../../ui/states.tsx'
 
 // The season list, switching the current one, and starting a new one.
-export function SeasonSettings({ canAdminister }: { canAdminister: boolean }) {
+export function SeasonSettings({ canManageSeasons }: { canManageSeasons: boolean }) {
   const seasons = useSeasons()
   const createSeason = useCreateSeason()
   const setCurrent = useSetCurrentSeason()
@@ -35,7 +35,7 @@ export function SeasonSettings({ canAdminister }: { canAdminister: boolean }) {
                 current
               </span>
             )}
-            {canAdminister && !s.is_current && (
+            {canManageSeasons && !s.is_current && (
               <button
                 type="button"
                 disabled={setCurrent.isPending}
@@ -54,7 +54,7 @@ export function SeasonSettings({ canAdminister }: { canAdminister: boolean }) {
         with two current seasons — or none. Old seasons stay readable.
       </p>
 
-      {canAdminister && (
+      {canManageSeasons && (
         <form onSubmit={submitSeason} className="mt-3 rounded-lg border border-slate-200 bg-white p-3" data-tutorial="new-season">
           <h3 className="text-sm font-medium text-slate-900">Start a new season</h3>
           <p className="mt-0.5 mb-2 text-xs text-slate-600">

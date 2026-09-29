@@ -165,7 +165,7 @@ begin
   perform pg_temp.chk('the President cannot delete a proposal', pg_temp.act(pre, format('delete from task_proposals where id = %L', p)) <> 'ok');
   q1 := pg_temp.act(mem, format('update task_proposals set title = ''mine'' where id = %L', p));
   perform pg_temp.chk('the author cannot edit their own proposal (Head or Developer only)',
-    q1 = 'ok'
+    q1 = '42501'
     and (select title from task_proposals where id = p) = 'Trimmed title');
   bad := '';
   for row_ in select unnest(array['state = ''decided''', 'outcome = ''approved''', 'archived_at = now()', 'archive_reason = ''promoted''',
@@ -175,36 +175,37 @@ begin
   end loop;
   perform pg_temp.chk('the Head cannot forge state, outcome, archive, legacy flag, author, season or decided_at', bad = '', bad);
   perform pg_temp.chk('a Head cannot move a proposal to another department', pg_temp.act(hd, format('update task_proposals set subteam_key = %L where id = %L', dB, p)) = '42501');
-  q1 := pg_temp.act(hd, format('update task_proposals set title = ''Head edit'', context = ''ctx'', due_date = ''2027-01-05'', priority = ''urgent'', owner_id = %L where id = %L', own, p));
-  perform pg_temp.chk('a Head can edit title, description, deadline, priority and owner',
+  q1 := pg_temp.act(hd, format('select revise_proposal(%L, 1, %L::jsonb)', p,
+    jsonb_build_object('title', 'Head edit', 'description', 'ctx', 'due_date', '2027-01-05', 'priority', 'urgent', 'owner_id', own)));
+  perform pg_temp.chk('a Head revises title, description, deadline, priority and owner through the revision command',
     q1 = 'ok'
-    and (select title || priority::text from task_proposals where id = p) = 'Head editurgent');
-  perform pg_temp.chk('a Head cannot clear the deadline of a complete proposal', pg_temp.act(hd, format('update task_proposals set due_date = null where id = %L', p)) = '23514');
-  perform pg_temp.chk('a Head cannot set a milestone from another season', pg_temp.act(hd, format('update task_proposals set milestone_key = ''PC-B1'' where id = %L', p)) = '23514');
-  q1 := pg_temp.act(hd2, format('update task_proposals set title = ''hijack'' where id = %L', p));
+    and (select title || priority::text || revision::text from task_proposals where id = p) = 'Head editurgent2', q1);
+  perform pg_temp.chk('a Head cannot clear the deadline of a complete proposal', pg_temp.act(hd, format('select revise_proposal(%L, 2, ''{"due_date":null}''::jsonb)', p)) = '23502');
+  perform pg_temp.chk('a Head cannot set a milestone from another season', pg_temp.act(hd, format('select revise_proposal(%L, 2, ''{"milestone_key":"PC-B1"}''::jsonb)', p)) = '23514');
+  q1 := pg_temp.act(hd2, format('select revise_proposal(%L, 2, ''{"title":"hijack"}''::jsonb)', p));
   perform pg_temp.chk('the Head of another department cannot edit it',
-    q1 = 'ok' and (select title from task_proposals where id = p) = 'Head edit');
-  q1 := pg_temp.act(pre, format('update task_proposals set title = ''pres'' where id = %L', p));
+    q1 = '42501' and (select title from task_proposals where id = p) = 'Head edit');
+  q1 := pg_temp.act(pre, format('select revise_proposal(%L, 2, ''{"title":"pres"}''::jsonb)', p));
   perform pg_temp.chk('the President cannot edit it',
-    q1 = 'ok' and (select title from task_proposals where id = p) = 'Head edit');
-  q1 := pg_temp.act(dev, format('update task_proposals set title = ''Dev edit'' where id = %L', p));
+    q1 = '42501' and (select title from task_proposals where id = p) = 'Head edit');
+  q1 := pg_temp.act(dev, format('select revise_proposal(%L, 2, ''{"title":"Dev edit"}''::jsonb)', p));
   perform pg_temp.chk('the Developer can edit it',
-    q1 = 'ok' and (select title from task_proposals where id = p) = 'Dev edit');
+    q1 = 'ok' and (select title || revision::text from task_proposals where id = p) = 'Dev edit3', q1);
 
   -- ======================================================== REVIEW COMMANDS
-  perform pg_temp.chk('a member cannot review', pg_temp.val(mem, format('select review_proposal(%L, ''review'')::text', p)) = 'E:42501');
-  perform pg_temp.chk('the President cannot review', pg_temp.val(pre, format('select review_proposal(%L, ''review'')::text', p)) = 'E:42501');
-  perform pg_temp.chk('the Head of another department cannot review', pg_temp.val(hd2, format('select review_proposal(%L, ''review'')::text', p)) = 'E:42501');
-  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''review'')', p));
-  perform pg_temp.chk('the Head takes a proposal under review', q1 = 'ok' and (select state::text from task_proposals where id = p) = 'agenda');
-  perform pg_temp.chk('review is refused from the wrong state', pg_temp.val(hd, format('select review_proposal(%L, ''review'')::text', p)) = 'E:22023');
-  perform pg_temp.chk('an unknown action is refused', pg_temp.val(hd, format('select review_proposal(%L, ''approve'')::text', p)) = 'E:22023');
-  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''park'')', p));
+  perform pg_temp.chk('a member cannot review', pg_temp.val(mem, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
+  perform pg_temp.chk('the President cannot review', pg_temp.val(pre, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
+  perform pg_temp.chk('the Head of another department cannot review', pg_temp.val(hd2, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
+  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''review'', 3)', p));
+  perform pg_temp.chk('the Head takes a proposal under review', q1 = 'ok' and (select state::text from task_proposals where id = p) = 'agenda', q1);
+  perform pg_temp.chk('review is refused from the wrong state', pg_temp.val(hd, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:22023');
+  perform pg_temp.chk('an unknown action is refused', pg_temp.val(hd, format('select review_proposal(%L, ''approve'', 3)::text', p)) = 'E:22023');
+  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''park'', 3)', p));
   perform pg_temp.chk('the Head parks it', q1 = 'ok' and (select state::text from task_proposals where id = p) = 'parked');
   perform pg_temp.chk('a parked proposal cannot be promoted', pg_temp.val(hd, format('select (promote_proposal(%L, %L)).created::text', p, sA)) = 'E:22023');
-  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reopen'')', p));
+  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reopen'', 3)', p));
   perform pg_temp.chk('the Head reopens a parked proposal', q1 = 'ok' and (select state::text from task_proposals where id = p) = 'open');
-  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reject'')', p));
+  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reject'', 3)', p));
   perform pg_temp.chk('the Head rejects it: decided, outcome rejected, archived by the Head, no task',
     q1 = 'ok'
     and (select state::text || outcome::text || archive_reason || (archived_at is not null)::text || coalesce(archived_by::text, '') from task_proposals where id = p) = 'decidedrejectedrejectedtrue' || hd::text
@@ -215,14 +216,15 @@ begin
   perform pg_temp.chk('rejection is audited with its outcome',
     (select count(*) from activity where entity = 'proposal' and entity_id = p::text and action = 'outcome_changed' and detail->>'to' = 'rejected') = 1
     and (select count(*) from activity where entity = 'proposal' and entity_id = p::text and action = 'archived' and detail->>'reason' = 'rejected') = 1);
-  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reopen'')', p));
+  q1 := pg_temp.act(hd, format('select review_proposal(%L, ''reopen'', 3)', p));
   perform pg_temp.chk('the Head reopens a rejected proposal (outcome and archive cleared)',
     q1 = 'ok'
     and (select state::text || coalesce(outcome::text, '-') || coalesce(archived_at::text, '-') from task_proposals where id = p) = 'open--');
   perform pg_temp.chk('a direct UPDATE of state is refused even for the Developer', pg_temp.act(dev, format('update task_proposals set state = ''decided'' where id = %L', p)) = '42501');
 
   -- ======================================================== PROMOTION (happy)
-  perform pg_temp.chk('the Developer may promote any department''s proposal', pg_temp.val(dev, format('select (promote_proposal(%L, %L)).created::text', p, sA)) = 'true');
+  perform pg_temp.chk('the Developer may approve any department''s proposal', pg_temp.val(dev, format('select (approve_proposal(%L, 3, ''Developer review'')).state::text', p)) = 'approved');
+  perform pg_temp.chk('the Developer may promote any department''s approved proposal', pg_temp.val(dev, format('select (promote_proposal(%L, %L)).created::text', p, sA)) = 'true');
   select id into t1 from tasks where source_proposal = p;
   perform pg_temp.chk('the promoted task keeps its milestone and department and is links_required',
     (select links_required and milestone_key = 'PC-A1' and subteam_key = dA from tasks where id = t1));
@@ -343,29 +345,32 @@ begin
   perform pg_temp.chk('even the Developer cannot promote a legacy proposal while it is incomplete', pg_temp.val(dev, format('select (promote_proposal(%L, %L)).created::text', p_leg, sA)) = 'E:22023');
   q1 := pg_temp.act(hd, format('update task_proposals set subteam_key = %L where id = %L', dA, p_leg));
   perform pg_temp.chk('a Head cannot supply the missing department',
-    q1 = 'ok' and (select subteam_key from task_proposals where id = p_leg) is null);
-  q1 := pg_temp.act(dev, format('update task_proposals set subteam_key = %L where id = %L', dA, p_leg));
+    q1 = '42501' and (select subteam_key from task_proposals where id = p_leg) is null);
+  q1 := pg_temp.act(dev, format('select set_proposal_department(%L, %L, ''complete legacy proposal'', 1)', p_leg, dA));
   perform pg_temp.chk('the Developer supplies the department',
     q1 = 'ok' and (select subteam_key from task_proposals where id = p_leg) = dA);
   perform pg_temp.chk('a legacy proposal with a department but no details is still not promotable', pg_temp.val(hd, format('select (promote_proposal(%L, %L)).created::text', p_leg2, sA)) = 'E:22023');
-  q1 := pg_temp.act(hd, format('update task_proposals set due_date = ''2027-02-01'', milestone_key = ''PC-A1'' where id = %L', p_leg2));
+  q1 := pg_temp.act(hd, format('select revise_proposal(%L, 1, ''{"due_date":"2027-02-01","milestone_key":"PC-A1"}''::jsonb)', p_leg2));
   perform pg_temp.chk('the Head supplies deadline and milestone, the flag stays until a requirement exists',
     q1 = 'ok'
     and (select legacy_incomplete from task_proposals where id = p_leg2));
-  perform pg_temp.chk('an empty requirement list does not repair it', pg_temp.act(hd, format('select set_proposal_requirements(%L, ''{}'')', p_leg2)) = '23514');
-  q1 := pg_temp.act(hd, format('select set_proposal_requirements(%L, array[%L])', p_leg2, c4));
+  perform pg_temp.chk('an empty requirement list does not repair it', pg_temp.act(hd, format('select set_proposal_requirements(%L, ''{}'', 2)', p_leg2)) = '23514');
+  q1 := pg_temp.act(hd, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg2, c4));
   perform pg_temp.chk('the Head supplies a requirement: the flag clears and a repair event is written',
     q1 = 'ok'
     and not (select legacy_incomplete from task_proposals where id = p_leg2)
     and (select count(*) from activity where entity = 'proposal' and entity_id = p_leg2::text and action = 'legacy_repaired') = 1);
+  perform pg_temp.chk('the repaired proposal can now be approved', pg_temp.val(hd, format('select (approve_proposal(%L, 3, ''Legacy details reviewed'')).state::text', p_leg2)) = 'approved');
   perform pg_temp.chk('the repaired proposal can now be promoted', pg_temp.val(hd, format('select (promote_proposal(%L, %L)).created::text', p_leg2, sA)) = 'true');
   perform pg_temp.chk('the President and a member cannot change requirements',
-    pg_temp.act(pre, format('select set_proposal_requirements(%L, array[%L])', p_leg, c1)) = '42501'
-    and pg_temp.act(mem, format('select set_proposal_requirements(%L, array[%L])', p_leg, c1)) = '42501');
+    pg_temp.act(pre, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg, c1)) = '42501'
+    and pg_temp.act(mem, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg, c1)) = '42501');
 
   -- ========================================= ROLLBACK AFTER A FORCED FAILURE
   r := pg_temp.val(mem, format('select (submit_proposal(%L, %L, %L, %L::date, %L, %L::text[])).id::text', sA, 'Will fail to promote', dA, '2026-12-01', 'PC-A1', array[c3]));
   p3 := r::uuid;
+  perform pg_temp.chk('the Head approves the exact revision before promotion',
+    pg_temp.val(hd, format('select (approve_proposal(%L, 1, ''Ready after review'')).state::text', p3)) = 'approved');
   create function public.zz_force_link_failure() returns trigger language plpgsql as $f$
   begin raise exception 'forced link failure' using errcode = 'P0001'; end $f$;
   execute format('create trigger zz_force_link_failure before insert on task_requirements for each row when (new.clause_key = %L) execute function public.zz_force_link_failure()', c3);
@@ -374,7 +379,7 @@ begin
   select count(*) into a2 from activity where entity_id = p3::text or (detail->>'proposal_id') = p3::text;
   perform pg_temp.chk('...and rolls back the task, its links, the proposal state and the audit rows together',
     not exists (select 1 from tasks where source_proposal = p3)
-    and (select state::text || coalesce(outcome::text, '-') || coalesce(archived_at::text, '-') from task_proposals where id = p3) = 'open--'
+    and (select state::text || coalesce(outcome::text, '-') || coalesce(archived_at::text, '-') from task_proposals where id = p3) = 'approved--'
     and a1 = a2, format('activity %s -> %s', a1, a2));
   drop trigger zz_force_link_failure on task_requirements;
   drop function public.zz_force_link_failure();
@@ -392,7 +397,7 @@ begin
     and (select count(*) from activity where entity = 'proposal' and entity_id = p3::text and action = 'outcome_changed' and detail->>'to' = 'approved') = 1);
   perform pg_temp.chk('provenance survives: the task points at the archived, approved proposal',
     (select source_proposal from tasks where id = t3) = p3 and (select archive_reason || outcome::text from task_proposals where id = p3) = 'promotedapproved');
-  perform pg_temp.chk('an approved proposal cannot be reopened', pg_temp.val(hd, format('select review_proposal(%L, ''reopen'')::text', p3)) = 'E:22023');
+  perform pg_temp.chk('a promoted proposal cannot be reopened', pg_temp.val(hd, format('select review_proposal(%L, ''reopen'', 1)::text', p3)) = 'E:22023');
   perform pg_temp.chk('no path deletes a promoted proposal, so the task keeps its provenance', pg_temp.act(dev, format('delete from task_proposals where id = %L', p3)) <> 'ok');
   -- Phase 11 gives each junction its own checked, derived season_id (so a
   -- realtime DELETE can be filtered without a parent-row lookup); see
@@ -408,7 +413,7 @@ begin
   manifest := format('{"departments":[{"key":"%s","action":"archive"}]}', dC);
   q1 := pg_temp.val(pre, format('select ok::text || ''|'' || unresolved_proposals::text from reconciliation_preflight(%L::jsonb) where key = %L', manifest, dC));
   perform pg_temp.chk('reconciliation preflight counts and refuses the unresolved proposal', q1 = 'false|1', q1);
-  perform pg_temp.act(dev, format('select review_proposal(%L, ''reject'')', p_block));
+  perform pg_temp.act(dev, format('select review_proposal(%L, ''reject'', 1)', p_block));
   q1 := pg_temp.act(pre, format('update subteams set archived_at = now(), archive_reason = ''x'' where key = %L', dC));
   perform pg_temp.chk('once the proposal is resolved the department can be archived',
     q1 = 'ok'

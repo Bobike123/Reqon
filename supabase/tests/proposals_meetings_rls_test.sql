@@ -14,7 +14,7 @@
 --
 --  What it proves, per role:
 --    suggest a proposal         everyone, and only in their own name
---    review / decide a proposal president, vice-president, developer
+--    edit a proposal directly  nobody (commands enforce the role matrix)
 --    promote (insert a task)    NOBODY, directly — see the note below
 --    move/edit a task           owner, Head of its department, or Developer
 --                                only (task_authorization_test.sql covers
@@ -27,11 +27,11 @@
 --    edit the meeting template  president, developer only
 --    read the template          everyone on the roster
 --
---  Corrected 20260117 (traceability_and_proposal_commands): a proposal is
+--  Corrected 20260127 (proposal_review_commands): a proposal is
 --  created only by submit_proposal() and changed only by its department Head
---  (or a Developer) through can_review_proposal(); the President/VP alone have
---  no proposal power, direct INSERT/DELETE is closed for everyone, and state
---  moves only through review_proposal()/promote_proposal(). See
+--  (or fallback/Developer) through revision/review commands; direct
+--  INSERT/UPDATE/DELETE is closed for everyone, and state moves only through
+--  review/approval/promotion commands. See
 --  proposal_commands_test.sql for the positive side of every one of these.
 --
 --  Corrected 20260116 (task_lifecycle_and_authorization): promoting a
@@ -150,9 +150,11 @@ begin
     ('member    reads proposals',            mem, 'select count(*) from task_proposals', 'read', 'ALLOWED'),
     ('member    decides a proposal',         mem, format('update task_proposals set state = ''decided'' where id = %L', prop), 'write', 'DENIED'),
     ('treasurer decides a proposal',         tre, format('update task_proposals set state = ''decided'' where id = %L', prop), 'write', 'DENIED'),
-    ('vicepresident edits a proposal (no department power)', vp,  format('update task_proposals set decision = ''vp'' where id = %L', prop), 'write', 'DENIED'),
-    ('president edits a proposal (no department power)', pre, format('update task_proposals set decision = ''yes'' where id = %L', prop), 'write', 'DENIED'),
-    ('developer edits a proposal decision note', dev, format('update task_proposals set decision = ''dev note'' where id = %L', prop), 'write', 'ALLOWED'),
+    -- Phase 3 closes generic UPDATE entirely: fallback and Developer authority
+    -- is exercised through the audited, revision-aware commands instead.
+    ('vicepresident cannot edit a proposal directly', vp, format('update task_proposals set decision = ''vp'' where id = %L', prop), 'write', 'DENIED'),
+    ('president cannot edit a proposal directly', pre, format('update task_proposals set decision = ''yes'' where id = %L', prop), 'write', 'DENIED'),
+    ('developer cannot edit a proposal directly', dev, format('update task_proposals set decision = ''dev note'' where id = %L', prop), 'write', 'DENIED'),
     ('developer forces state by direct UPDATE', dev, format('update task_proposals set state = ''decided'' where id = %L', prop), 'write', 'DENIED'),
 
     -- =========== BYPASSING promote_proposal() BY INSERTING DIRECTLY ========
@@ -200,7 +202,9 @@ begin
     ('member    reads the template',         mem, 'select count(*) from meeting_template', 'read', 'ALLOWED'),
     ('member    edits the template',         mem, 'update meeting_template set body = ''mine'' where id', 'write', 'DENIED'),
     ('treasurer edits the template',         tre, 'update meeting_template set body = ''mine'' where id', 'write', 'DENIED'),
-    ('vicepresident edits the template',     vp,  'update meeting_template set body = ''mine'' where id', 'write', 'DENIED'),
+    -- Backend completion Phase 2 (can_edit_meetings): the Vice President now edits
+    -- the default agenda too; this row used to expect DENIED.
+    ('vicepresident edits the template',     vp,  'update meeting_template set body = ''vp wrote this'' where id', 'write', 'ALLOWED'),
     ('president edits the template',         pre, 'update meeting_template set body = ''president wrote this'' where id', 'write', 'ALLOWED'),
     ('developer edits the template',         dev, 'update meeting_template set body = ''developer wrote this'' where id', 'write', 'ALLOWED'),
 

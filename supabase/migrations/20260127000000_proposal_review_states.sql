@@ -1,0 +1,35 @@
+-- =============================================================================
+--  Backend completion Phase 3, step 1 of 4: the two review states.
+--  (docs/backend-completion/PERMISSIONS.md §5.1, PLAN.md §4 Phase 3.)
+--
+--  WHAT WAS MISSING. A proposal could go open -> agenda -> promoted with no
+--  recorded approval and no way for the responsible Head to ask the author for
+--  changes. The latest instructions require discussion between the member and
+--  the Head, an explicit approval before promotion, and an approval that cannot
+--  outlive a material edit.
+--
+--  AFTER. topic_state gains
+--     changes_requested   the Head asked the author to revise (or withdrew an
+--                         approval); waiting for the author
+--     approved            the responsible Head (or the no-Head fallback, or a
+--                         Developer) approved one exact revision; promotable
+--  Nothing uses them in this file: a new enum value cannot be used in the
+--  transaction that adds it, so the columns, table and commands that read them
+--  are created by 20260127000100 / 0200.
+--
+--  IMPLEMENTATION NOTE (migration policy)
+--    Purpose        Add two enum labels.
+--    Existing data  None touched. Every existing proposal keeps its state; the
+--                   12 hosted legacy proposals stay legacy_incomplete. No
+--                   approval is invented for proposals that were promoted
+--                   before approvals existed.
+--    Authorization  None by itself.
+--    Locking        ALTER TYPE ... ADD VALUE: brief lock on the type.
+--    Rollback       Postgres cannot drop an enum label. Forward recovery only:
+--                   leave the labels unused (no row can reach them once the
+--                   commands are reverted).
+--    Deploy order   Before 20260127000100.
+-- =============================================================================
+
+alter type topic_state add value if not exists 'changes_requested';
+alter type topic_state add value if not exists 'approved';

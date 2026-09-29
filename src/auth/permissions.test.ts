@@ -4,6 +4,10 @@ import {
   ROLE_LABELS,
   canArchiveTask,
   canEditTask,
+  canGrantRole,
+  canRestoreTask,
+  hasDepartmentAuthority,
+  reviewsAnyProposal,
   canReassignTaskOwner,
   canReviewProposal,
   canSubmitProposal,
@@ -15,14 +19,21 @@ import {
 
 // The same matrix supabase/tests/roles_rls_test.sql proves against the
 // database. This file only checks that the UI's mirror agrees with it.
-const MATRIX: Record<PrivilegedRole | 'member', {
-  canAdminister: boolean; canManageRoles: boolean; canViewFinances: boolean; canManageFinances: boolean; canEditSpecTargets: boolean
-}> = {
-  developer:     { canAdminister: true,  canManageRoles: true,  canViewFinances: true,  canManageFinances: true,  canEditSpecTargets: true  },
-  treasurer:     { canAdminister: false, canManageRoles: false, canViewFinances: true,  canManageFinances: true,  canEditSpecTargets: false },
-  president:     { canAdminister: true,  canManageRoles: true,  canViewFinances: true,  canManageFinances: false, canEditSpecTargets: true  },
-  vicepresident: { canAdminister: true,  canManageRoles: false, canViewFinances: true,  canManageFinances: false, canEditSpecTargets: true  },
-  member:        { canAdminister: false, canManageRoles: false, canViewFinances: false, canManageFinances: false, canEditSpecTargets: false },
+// Backend completion Phase 2 (PERMISSIONS.md §2.1): the Vice President now
+// manages roles (within canGrantRole), seasons are President/Developer only,
+// finance visibility is an explicit allowlist, and Documentation edits meetings.
+type Row = {
+  canAdminister: boolean; canManageRoles: boolean; canManageSeasons: boolean; canViewFinances: boolean
+  canManageFinances: boolean; canEditSpecTargets: boolean; canCreateMeeting: boolean; canDeleteMeeting: boolean
+  canManageMilestoneStructure: boolean
+}
+const MATRIX: Record<PrivilegedRole | 'member', Row> = {
+  developer:     { canAdminister: true,  canManageRoles: true,  canManageSeasons: true,  canViewFinances: true,  canManageFinances: true,  canEditSpecTargets: true,  canCreateMeeting: true,  canDeleteMeeting: true,  canManageMilestoneStructure: true  },
+  treasurer:     { canAdminister: false, canManageRoles: false, canManageSeasons: false, canViewFinances: true,  canManageFinances: true,  canEditSpecTargets: false, canCreateMeeting: false, canDeleteMeeting: false, canManageMilestoneStructure: false },
+  president:     { canAdminister: true,  canManageRoles: true,  canManageSeasons: true,  canViewFinances: true,  canManageFinances: false, canEditSpecTargets: true,  canCreateMeeting: true,  canDeleteMeeting: true,  canManageMilestoneStructure: true  },
+  vicepresident: { canAdminister: true,  canManageRoles: true,  canManageSeasons: false, canViewFinances: true,  canManageFinances: false, canEditSpecTargets: true,  canCreateMeeting: true,  canDeleteMeeting: false, canManageMilestoneStructure: true  },
+  documentation: { canAdminister: false, canManageRoles: false, canManageSeasons: false, canViewFinances: false, canManageFinances: false, canEditSpecTargets: false, canCreateMeeting: true,  canDeleteMeeting: false, canManageMilestoneStructure: true  },
+  member:        { canAdminister: false, canManageRoles: false, canManageSeasons: false, canViewFinances: false, canManageFinances: false, canEditSpecTargets: false, canCreateMeeting: false, canDeleteMeeting: false, canManageMilestoneStructure: false },
 }
 
 describe('the permission matrix', () => {
@@ -32,17 +43,42 @@ describe('the permission matrix', () => {
       expect({
         canAdminister: p.canAdminister,
         canManageRoles: p.canManageRoles,
+        canManageSeasons: p.canManageSeasons,
         canViewFinances: p.canViewFinances,
         canManageFinances: p.canManageFinances,
         canEditSpecTargets: p.canEditSpecTargets,
+        canCreateMeeting: p.canCreateMeeting,
+        canDeleteMeeting: p.canDeleteMeeting,
+        canManageMilestoneStructure: p.canManageMilestoneStructure,
       }).toEqual(expected)
     })
   }
 
-  it('the president and the developer manage roles', () => {
-    const managers = (['developer', 'treasurer', 'president', 'vicepresident'] as PrivilegedRole[])
+  it('the President, the Vice President and the Developer open role management', () => {
+    const managers = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
       .filter((r) => permissionsFor([r]).canManageRoles)
-    expect(managers).toEqual(['developer', 'president'])
+    expect(managers).toEqual(['developer', 'president', 'vicepresident'])
+  })
+
+  it('mirrors can_grant_role(): only a Developer changes the Developer role, the VP only Treasurer and Documentation', () => {
+    const grantable = (holder: PrivilegedRole) =>
+      (['president', 'vicepresident', 'treasurer', 'documentation', 'developer'] as PrivilegedRole[]).filter((r) => canGrantRole([holder], r))
+    expect(grantable('developer')).toEqual(['president', 'vicepresident', 'treasurer', 'documentation', 'developer'])
+    expect(grantable('president')).toEqual(['president', 'vicepresident', 'treasurer', 'documentation'])
+    expect(grantable('vicepresident')).toEqual(['treasurer', 'documentation'])
+    expect(grantable('treasurer')).toEqual([])
+    expect(grantable('documentation')).toEqual([])
+  })
+
+  it('only the President and the Developer switch seasons', () => {
+    const switchers = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
+      .filter((r) => permissionsFor([r]).canManageSeasons)
+    expect(switchers).toEqual(['developer', 'president'])
+  })
+
+  it('holding the Documentation role alone shows no finances', () => {
+    expect(permissionsFor(['documentation']).canViewFinances).toBe(false)
+    expect(permissionsFor(['documentation', 'treasurer']).canViewFinances).toBe(true)
   })
 
   it('the treasurer and the developer manage money', () => {
@@ -112,11 +148,36 @@ describe('task-level authorization (ADR-0003)', () => {
     expect(canEditTask(head, { ...task, archived_at: '2026-09-01T00:00:00Z' })).toBe(false)
   })
 
-  it('a task with no department can only be edited by its owner or the Developer', () => {
+  it('a task with no department: its owner, the Developer, or the President/VP (unassigned work)', () => {
     const noDept = { ...task, subteam_key: null }
+    const governance: TaskActor = { id: 'pres', status: 'active', isDeveloper: false, headOf: [], isGovernance: true, governs: [] }
     expect(canEditTask(owner, noDept)).toBe(true)
     expect(canEditTask(developer, noDept)).toBe(true)
+    expect(canEditTask(governance, noDept)).toBe(true)
     expect(canEditTask(head, noDept)).toBe(false)
+  })
+
+  it('the President/VP act only where no Head exists (governs), and restore anywhere', () => {
+    const governance: TaskActor = { id: 'pres', status: 'active', isDeveloper: false, headOf: [], isGovernance: true, governs: ['OPS'] }
+    expect(canEditTask(governance, task)).toBe(false)
+    expect(canArchiveTask(governance, task)).toBe(false)
+    expect(canEditTask(governance, { ...task, subteam_key: 'OPS' })).toBe(true)
+    expect(canArchiveTask(governance, { ...task, subteam_key: 'OPS' })).toBe(true)
+    expect(canRestoreTask(governance, task)).toBe(true)
+    expect(canRestoreTask({ ...governance, status: 'alumni' }, task)).toBe(false)
+  })
+
+  it('restoring: the Head, the President/VP or a Developer — never the plain owner', () => {
+    expect(canRestoreTask(owner, task)).toBe(false)
+    expect(canRestoreTask(head, task)).toBe(true)
+    expect(canRestoreTask(otherHead, task)).toBe(false)
+    expect(canRestoreTask(developer, task)).toBe(true)
+  })
+
+  it('a Head of the parent department holds the subdepartment too (headOf lists both)', () => {
+    const parentHead: TaskActor = { id: 'ph', status: 'active', isDeveloper: false, headOf: ['MECH', 'MECH_CHASSIS'] }
+    expect(hasDepartmentAuthority(parentHead, 'MECH_CHASSIS')).toBe(true)
+    expect(hasDepartmentAuthority(parentHead, 'ELEC')).toBe(false)
   })
 
   it('the owner cannot reassign their own task away — only the Head or Developer can', () => {
@@ -149,10 +210,18 @@ describe('proposal authority (ADR-0003, ADR-0005)', () => {
     expect(canReviewProposal(otherHead, inGeom)).toBe(false)
   })
 
-  it('the President or Vice President alone have no proposal power — a role is not a headship', () => {
-    const president = permissionsFor(['president'])
-    expect(president.canAdminister).toBe(true)
+  it('the President or Vice President have no proposal power where the department has a Head', () => {
+    const president: TaskActor = { id: 'pres', status: 'active', isDeveloper: false, headOf: [], isGovernance: true, governs: [] }
+    expect(canReviewProposal(president, inGeom)).toBe(false)
     expect(canReviewProposal(member, inGeom)).toBe(false)
+  })
+
+  it('... but decide for a department with no Head, and for a proposal with no department', () => {
+    const president: TaskActor = { id: 'pres', status: 'active', isDeveloper: false, headOf: [], isGovernance: true, governs: ['GEOM'] }
+    expect(canReviewProposal(president, inGeom)).toBe(true)
+    expect(canReviewProposal(president, { subteam_key: null })).toBe(true)
+    expect(reviewsAnyProposal(president)).toBe(true)
+    expect(reviewsAnyProposal(member)).toBe(false)
   })
 
   it('a Developer may review any proposal', () => {
@@ -160,7 +229,7 @@ describe('proposal authority (ADR-0003, ADR-0005)', () => {
     expect(canReviewProposal(developer, { subteam_key: null })).toBe(true)
   })
 
-  it('an older proposal with no department is a Developer matter only', () => {
+  it('an older proposal with no department is not a Head\'s to decide', () => {
     expect(canReviewProposal(head, { subteam_key: null })).toBe(false)
   })
 

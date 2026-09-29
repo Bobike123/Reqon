@@ -29,9 +29,9 @@ import { SeasonExport } from './settings/SeasonExport.tsx'
 //   subteams     INSERT  -> department_insert   (can_manage_departments(): president, vice-president, developer)
 //   subteams     UPDATE  -> department_update   (can_manage_departments()) — no DELETE policy: archive, never delete
 //   milestones   ALL     -> admin_write         (is_admin())
-//   seasons      ALL     -> admin_write         (is_admin())
-//   season switch        -> set_current_season() raises unless is_admin()
-//   member_roles INSERT  -> role_assign         (can_manage_roles(): president or developer)
+//   seasons      INSERT/UPDATE/DELETE -> season_* (can_manage_seasons(): president or developer)
+//   season switch        -> set_current_season() raises unless can_manage_seasons()
+//   member_roles INSERT  -> role_assign         (can_grant_role(role): see PERMISSIONS.md §4)
 //   member_roles DELETE  -> role_remove         (same, and never the last president)
 //
 // What to show comes from usePermissions() — this file never inspects roles to
@@ -71,7 +71,7 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 export default function Settings() {
-  const { canAdminister, canManageRoles, canManageDepartments, roles: myRoles } = usePermissions()
+  const { canAdminister, canManageRoles, canManageDepartments, canManageSeasons, roles: myRoles } = usePermissions()
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain('reading')}>
@@ -85,8 +85,10 @@ export default function Settings() {
           from which buttons happen to be missing. */}
       <Notice>
         Signed in as <strong className="font-medium text-slate-900">{describeRoles(myRoles)}</strong>.{' '}
-        {canManageRoles
-          ? 'You can change everything on this page, including who holds which role.'
+        {canManageRoles && canManageSeasons
+          ? 'You can change everything on this page, including roles (only a Developer changes the Developer role).'
+          : canManageRoles
+            ? 'You can change everything on this page except seasons and the President, Vice President and Developer roles, which belong to the President or a Developer.'
           : canAdminister
             ? 'You can change everything on this page except roles, which only the President or a Developer can give or take away.'
             : 'Roster, department, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
@@ -123,7 +125,7 @@ export default function Settings() {
       </Section>
 
       <Section title="Seasons" tutorialId="settings-seasons">
-        <SeasonSettings canAdminister={canAdminister} />
+        <SeasonSettings canManageSeasons={canManageSeasons} />
       </Section>
 
       <Section title="Export" tutorialId="settings-export">

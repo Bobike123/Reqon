@@ -1,0 +1,32 @@
+-- =============================================================================
+--  Backend completion Phase 2, step 1 of 7: the Documentation role value.
+--  (docs/backend-completion/PLAN.md §4 2.1, PERMISSIONS.md §1, §4.)
+--
+--  WHAT WAS MISSING. The user asked for a Documentation role that may edit
+--  meetings and the default agenda (notes.md; MIGRATION_REVIEW "Documentation
+--  can edit meetings"). privileged_role had no such value.
+--
+--  AFTER. privileged_role gains 'documentation'. Nothing uses it in this file:
+--  a new enum value cannot be used inside the transaction that adds it, so the
+--  helpers that read it (can_edit_meetings, can_grant_role,
+--  can_manage_milestone_structure) are created by 20260126000100.
+--
+--  IMPLEMENTATION NOTE (migration policy)
+--    Purpose        Add one enum label.
+--    Existing data  None touched. No member is given the role; appointing a
+--                   holder is a user decision (OD-12).
+--    Authorization  None by itself. The value grants nothing until a helper
+--                   names it, and can_view_finances() is narrowed to an
+--                   explicit allowlist in the next file, so holding only this
+--                   role never exposes finance (F-13).
+--    Locking        ALTER TYPE ... ADD VALUE: brief lock on the type, no table
+--                   rewrite.
+--    Rollback       Postgres cannot drop an enum label. Forward recovery only:
+--                   leave the label unused (every helper treats a missing grant
+--                   as "no"), or rebuild the type in a later migration.
+--    Deploy order   Before 20260126000100. Harmless for the current client,
+--                   whose role lists come from its own constant, until the
+--                   Phase 2 client (which knows the label) is deployed.
+-- =============================================================================
+
+alter type privileged_role add value if not exists 'documentation';

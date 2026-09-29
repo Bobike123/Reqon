@@ -2,13 +2,13 @@ import type { UseQueryResult } from '@tanstack/react-query'
 import { useCallback, useId, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
-import { canReviewProposal } from '../auth/permissions.ts'
+import { canReviewProposal, reviewsAnyProposal } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
 import type { RealtimeState } from '../data/realtime.ts'
 import { useClauses } from '../data/useClauses.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones } from '../data/useMilestones.ts'
-import { useProposalRequirements, useSubmitProposal, type NewProposal, type Proposal } from '../data/useProposals.ts'
+import { useProposalComments, useProposalRequirements, useSubmitProposal, type NewProposal, type Proposal } from '../data/useProposals.ts'
 import { useSubteams } from '../data/useSubteams.ts'
 import { useTaskActor } from '../data/useTaskActor.ts'
 import { useTasks } from '../data/useTasks.ts'
@@ -38,8 +38,8 @@ import { useUrlParams } from '../lib/useUrlParams.ts'
 // department navigation, the reviewer's queue, the member's own status, the
 // form, the filters, the card and the review dialog are separate, and every
 // write goes through a Phase 3 database command via the data hooks
-// (submit_proposal, review_proposal, promote_proposal,
-// set_proposal_requirements) — never several writes assembled here.
+// (submit, comment, revise, request changes, approve and promote) — never
+// several writes assembled here.
 //
 // Where you are (department, All/My, queue/history) lives in the address, so a
 // refresh or a shared link keeps it. Who sees the review queue follows the
@@ -68,6 +68,7 @@ export function ProposalsPanel({
   const milestones = useMilestones()
   const clauses = useClauses()
   const links = useProposalRequirements()
+  const comments = useProposalComments()
   const actor = useTaskActor()
   const submitProposal = useSubmitProposal()
   const wide = layout === 'wide'
@@ -117,6 +118,11 @@ export function ProposalsPanel({
     for (const link of links.data ?? []) map.set(link.proposal_id, [...(map.get(link.proposal_id) ?? []), link.clause_key])
     return map
   }, [links.data])
+  const commentsByProposal = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof comments.data>>()
+    for (const entry of comments.data ?? []) map.set(entry.proposal_id, [...(map.get(entry.proposal_id) ?? []), entry])
+    return map
+  }, [comments.data])
 
   // New selections offer only what is valid now: active departments, active
   // members, and this season's milestones.
@@ -143,18 +149,24 @@ export function ProposalsPanel({
   const choices = useMemo(() => departmentChoices(departmentList, all, view), [departmentList, all, view])
 
   const nameOfDepartment = useCallback((key: string | null) => (key ? departmentList.find((d) => d.key === key)?.name : undefined), [departmentList])
-  const hasHead = useCallback((key: string | null) => Boolean(key && departmentList.find((d) => d.key === key)?.lead_id), [departmentList])
+  const hasHead = useCallback((key: string | null) => {
+    if (!key) return false
+    const department = departmentList.find((item) => item.key === key)
+    const parent = department?.parent_key ? departmentList.find((item) => item.key === department.parent_key) : undefined
+    const activeIds = new Set((members.data ?? []).filter((member) => member.status === 'active').map((member) => member.id))
+    return Boolean((department?.lead_id && activeIds.has(department.lead_id)) || (parent?.lead_id && activeIds.has(parent.lead_id)))
+  }, [departmentList, members.data])
   const nameOfMilestone = useCallback((key: string | null) => (key ? milestones.data?.find((m) => m.key === key)?.name : undefined), [milestones.data])
   const nameOfMember = useCallback((id: string | null) => (id ? (members.data ?? []).find((m) => m.id === id)?.full_name : undefined), [members.data])
 
-  // The reviewer's queue: open proposals this person may decide, by the same
+  // The reviewer's queue: unresolved proposals this person may decide, by the same
   // rule the Review button uses. A Head of several departments sees all of them.
-  const reviewer = actor !== null && actor.status === 'active' && (actor.isDeveloper || actor.headOf.length > 0)
+  const reviewer = actor !== null && reviewsAnyProposal(actor)
   const reviewQueue = useMemo(
     () =>
       actor
         ? all
-            .filter((p) => !isHistory(p) && (p.state === 'open' || p.state === 'agenda') && canReviewProposal(actor, p))
+            .filter((p) => !isHistory(p) && ['open', 'agenda', 'changes_requested', 'approved'].includes(p.state) && canReviewProposal(actor, p))
             .sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'))
         : [],
     [all, actor],
@@ -215,6 +227,8 @@ export function ProposalsPanel({
             milestoneName={nameOfMilestone(proposal.milestone_key)}
             requirementCount={keysByProposal.get(proposal.id)?.length ?? 0}
             canReview={actor !== null && canReviewProposal(actor, proposal)}
+            canDiscuss={actor?.status === 'active'}
+            isAuthor={viewerId === proposal.raised_by}
             onReview={setReviewing}
             tutorial={index === 0}
           />
@@ -234,7 +248,7 @@ export function ProposalsPanel({
       <p className="mt-0.5 text-xs text-slate-600">
         {actor?.isDeveloper
           ? 'As a Developer you may decide proposals in any department.'
-          : `Suggested and under-review proposals in ${actor && actor.headOf.length === 1 ? 'the department' : 'the departments'} you head: ${(actor?.headOf ?? []).map((k) => nameOfDepartment(k) ?? k).join(', ')}.`}
+          : `Proposals you may decide${actor?.headOf.length ? ` as Head for ${(actor.headOf).map((k) => nameOfDepartment(k) ?? k).join(', ')}` : ''}${actor?.governs?.length ? `${actor.headOf.length ? ', and' : ''} as governance fallback where no active Head exists: ${actor.governs.map((k) => nameOfDepartment(k) ?? k).join(', ')}` : ''}.`}
       </p>
       {queueByDepartment.size > 1 && (
         <ul className="mt-2 flex flex-wrap gap-1.5 text-xs" aria-label="Waiting per department">
@@ -406,6 +420,9 @@ export function ProposalsPanel({
         milestones={milestoneOptions}
         requirementOptions={requirementOptions}
         requirementKeys={reviewing ? (keysByProposal.get(reviewing.id) ?? []) : []}
+        comments={reviewing ? (commentsByProposal.get(reviewing.id) ?? []) : []}
+        canReview={reviewing !== null && actor !== null && canReviewProposal(actor, reviewing)}
+        isAuthor={reviewing !== null && viewerId === reviewing.raised_by}
         isDeveloper={actor?.isDeveloper ?? false}
         hasTask={reviewing ? tasksByProposal.has(reviewing.id) : false}
         onClose={() => setReviewing(null)}
@@ -427,8 +444,9 @@ function ProposalTally({ proposals, promoted }: { proposals: Proposal[]; promote
       <ol className="mt-2 space-y-1 text-sm">
         {[
           ['Suggested', count('open')],
-          ['Under review', count('agenda')],
-          ['Approved (task created)', promoted],
+          ['Under review / changes requested', count('agenda') + count('changes_requested')],
+          ['Approved, awaiting task', count('approved')],
+          ['Board task created', promoted],
         ].map(([label, n], index) => (
           <li key={label as string} className="flex items-baseline justify-between gap-3">
             <span className="text-slate-800">
@@ -442,8 +460,8 @@ function ProposalTally({ proposals, promoted }: { proposals: Proposal[]; promote
         ))}
       </ol>
       <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-pretty text-slate-600">
-        The Head of the proposal&apos;s department, or a Developer, reviews these and approves the ones the club takes on.{' '}
-        Parked proposals (<span className="tabular-nums">{count('parked')}</span>) stay in the queue, marked; rejected and approved ones move to History.
+        The department&apos;s Head reviews these; where there is no active Head, the President or Vice President acts, and a Developer can also act.{' '}
+        Parked proposals (<span className="tabular-nums">{count('parked')}</span>) stay in the queue, marked; rejected and promoted proposals move to History.
       </p>
     </div>
   )

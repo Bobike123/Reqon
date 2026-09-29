@@ -81,6 +81,7 @@ begin
     values (season, 'Audit task source', dev, dept, '2026-12-01', ms_key) returning id into prop_id;
   insert into proposal_requirements (proposal_id, clause_key) values (prop_id, clause);
   perform set_config('role', 'authenticated', true);
+  perform approve_proposal(prop_id, 1, 'Audit fixture approval');
   select (t.task).id into task_id from promote_proposal(prop_id, season) as t;
   update tasks set state = 'wip' where id = task_id;
 
@@ -101,7 +102,7 @@ begin
     values (season, 'Audit proposal', dev, dept, '2026-12-01', ms_key) returning id into prop_id;
   insert into proposal_requirements (proposal_id, clause_key) values (prop_id, clause);
   perform set_config('role', 'authenticated', true);
-  perform review_proposal(prop_id, 'reject');
+  perform review_proposal(prop_id, 'reject', 1);
 
   select count(*) into n from activity where entity = 'proposal' and entity_id = prop_id::text and action = 'state_changed';
   select * into lines, failures from pg_temp.note(lines, failures,

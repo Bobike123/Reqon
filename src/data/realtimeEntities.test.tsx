@@ -33,6 +33,7 @@ vi.mock('./realtime.ts', () => ({
 const { QueryClientProvider } = await import('@tanstack/react-query')
 const { useRealtimeTasks } = await import('./useRealtimeTasks.ts')
 const { useRealtimeProposals } = await import('./useRealtimeProposals.ts')
+const { useRealtimeProposalComments } = await import('./useRealtimeProposalComments.ts')
 const { useRealtimeSpecs } = await import('./useRealtimeSpecs.ts')
 const { useRealtimeTaskRequirements } = await import('./useRealtimeTaskRequirements.ts')
 const { useRealtimeMilestoneSections } = await import('./useRealtimeMilestoneSections.ts')
@@ -126,6 +127,18 @@ describe('useRealtimeProposals', () => {
     expect(capturedTable).toBe('task_proposals')
     capturedOnChange?.({ eventType: 'UPDATE', new: { id: 'p1', title: 'New' }, old: null }, 'season-a')
     expect(qc.getQueryData(queryKeys.proposals('season-a'))).toEqual([{ id: 'p1', title: 'New' }])
+  })
+})
+
+describe('useRealtimeProposalComments', () => {
+  it('invalidates the season discussion and activity when a comment arrives', () => {
+    const qc = new QueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    mount(() => useRealtimeProposalComments(), qc)
+    expect(capturedTable).toBe('proposal_comments')
+    capturedOnChange?.({ eventType: 'INSERT', new: { id: 'c1', proposal_id: 'p1' }, old: null }, 'season-a')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.proposalComments('season-a') })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.activityAll('season-a') })
   })
 })
 

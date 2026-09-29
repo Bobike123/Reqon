@@ -214,7 +214,7 @@ vi.mock('./useCurrentSeason.ts', () => ({
   useCurrentSeason: () => ({ data: { id: 'season-a', label: '2026/27' } }),
 }))
 
-const { useProposals, usePromoteProposal, useReviewProposal, useSubmitProposal, useUpdateProposal } = await import(
+const { useProposals, usePromoteProposal, useReviewProposal, useSubmitProposal } = await import(
   './useProposals.ts'
 )
 const { useCreateMeeting, useDeleteMeeting, useSaveMeetingTemplate, useUpdateMeeting } = await import(
@@ -326,23 +326,10 @@ for (const [role, may] of Object.entries(MATRIX)) {
       expect(db.task_proposals.at(-1)).toMatchObject({ raised_by: 'me' })
     })
 
-    it(`${may.review ? 'may' : 'may not'} edit a proposal's note`, async () => {
-      await ready()
-      const update = hook(() => useUpdateProposal())
-      const run = update.current.mutateAsync({ id: 'p1', decision: 'Worth doing' })
-      if (may.review) {
-        await expect(run).resolves.not.toThrow()
-        expect(db.task_proposals[0].decision).toBe('Worth doing')
-      } else {
-        await expect(run).rejects.toThrow(refusal)
-        expect(db.task_proposals[0].decision).toBeNull()
-      }
-    })
-
     it(`${may.review ? 'may' : 'may not'} reject a proposal`, async () => {
       await ready()
       const review = hook(() => useReviewProposal())
-      const run = review.current.mutateAsync({ id: 'p1', action: 'reject' })
+      const run = review.current.mutateAsync({ id: 'p1', action: 'reject', expectedRevision: 1 })
       if (may.review) {
         await expect(run).resolves.toBeTruthy()
         expect(db.task_proposals[0]).toMatchObject({ state: 'decided', outcome: 'rejected' })
@@ -471,16 +458,6 @@ describe('two people editing the same meeting', () => {
 describe('a row someone else already removed', () => {
   beforeEach(() => {
     caller.roles = ['developer']
-  })
-
-  it('editing a vanished proposal reports it is gone — not a permission refusal, not a save', async () => {
-    await ready()
-    db.task_proposals = []
-    const update = hook(() => useUpdateProposal())
-    const error = await update.current.mutateAsync({ id: 'p1', decision: 'too late' }).catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(Error)
-    expect((error as Error).message).toMatch(/no longer exists/)
-    expect(isPermissionError(error as Error)).toBe(false)
   })
 
   it('editing a vanished meeting reports it is gone — not a permission refusal, not a save', async () => {
