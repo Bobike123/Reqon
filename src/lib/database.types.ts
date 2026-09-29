@@ -71,6 +71,91 @@ export type Database = {
           },
         ]
       }
+      book_chapters: {
+        Row: {
+          category: string | null
+          code: string
+          has_numbered_rules: boolean
+          heading: string
+          label: string
+          page: number | null
+          regs_ref: string
+          sort_order: number
+        }
+        Insert: {
+          category?: string | null
+          code: string
+          has_numbered_rules: boolean
+          heading: string
+          label: string
+          page?: number | null
+          regs_ref: string
+          sort_order: number
+        }
+        Update: {
+          category?: string | null
+          code?: string
+          has_numbered_rules?: boolean
+          heading?: string
+          label?: string
+          page?: number | null
+          regs_ref?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_chapters_regs_ref_fkey"
+            columns: ["regs_ref"]
+            isOneToOne: false
+            referencedRelation: "regulation_documents"
+            referencedColumns: ["regs_ref"]
+          },
+        ]
+      }
+      book_subchapters: {
+        Row: {
+          chapter_code: string
+          has_numbered_rules: boolean
+          heading: string
+          kind: string
+          label: string
+          number: number
+          page: number | null
+          regs_ref: string
+          sort_order: number
+        }
+        Insert: {
+          chapter_code: string
+          has_numbered_rules: boolean
+          heading: string
+          kind: string
+          label: string
+          number: number
+          page?: number | null
+          regs_ref: string
+          sort_order: number
+        }
+        Update: {
+          chapter_code?: string
+          has_numbered_rules?: boolean
+          heading?: string
+          kind?: string
+          label?: string
+          number?: number
+          page?: number | null
+          regs_ref?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "book_subchapters_regs_ref_chapter_code_fkey"
+            columns: ["regs_ref", "chapter_code"]
+            isOneToOne: false
+            referencedRelation: "book_chapters"
+            referencedColumns: ["regs_ref", "code"]
+          },
+        ]
+      }
       clause_status: {
         Row: {
           clause_key: string
@@ -1611,6 +1696,30 @@ export type Database = {
             referencedColumns: ["season_id"]
           },
         ]
+      }
+      v_book_progress: {
+        Row: {
+          blocked: number | null
+          chapter_code: string | null
+          chapter_sort: number | null
+          has_numbered_rules: boolean | null
+          heading: string | null
+          imported_rules: number | null
+          in_progress: number | null
+          kind: string | null
+          label: string | null
+          level: string | null
+          not_applicable: number | null
+          number: number | null
+          out_of_scope: boolean | null
+          page: number | null
+          regs_ref: string | null
+          requirements: number | null
+          resolved: number | null
+          season_id: string | null
+          sort_order: number | null
+        }
+        Relationships: []
       }
       v_current_season: {
         Row: {

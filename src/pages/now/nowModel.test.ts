@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Milestone } from '../../data/useMilestones.ts'
-import type { Attention, SubteamProgress } from '../../metrics/types.ts'
+import type { Attention, BookProgress } from '../../metrics/types.ts'
 import type { Proposal } from '../../data/useProposals.ts'
 import {
   attentionFor,
   blockedCount,
-  departmentOverview,
-  liveObligations,
+  bookProgressTree,
+  bookTotals,
   myOpenTasks,
   upcomingDeadlines,
   ms1Points,
@@ -21,10 +21,6 @@ const TODAY = new Date('2026-09-09T12:00:00Z')
 function ms(key: string, due: string | null, points: number): Milestone {
   return { key, season_id: 's', ordinal: 1, name: key, aim: null, article_ref: null,
     opens_on: null, due_on: due, max_points: points, is_blocking: false, notes: null } as Milestone
-}
-function sub(key: string, duties: number, resolved: number, parked = false, blocked = 0): SubteamProgress {
-  return { key, name: key, book_section: 'B', is_parked: parked, lead_id: null, season_id: 's',
-    duties, resolved, in_progress: 0, blocked, total_rules: duties } as SubteamProgress
 }
 function att(reason: string): Attention {
   return { kind: 'clause', ref: 'X', title: 't', owner_id: null, season_id: 's',
@@ -59,14 +55,8 @@ describe('next deadline', () => {
   })
 })
 
-describe('live obligations', () => {
-  it('sums duties and resolved, excluding parked subteams', () => {
-    const out = liveObligations([sub('DOCS', 129, 5), sub('RACEOP', 58, 3, true)])
-    expect(out).toEqual({ resolved: 5, total: 129 })
-  })
-
-  it('is zero/zero with no data, and does not divide by zero', () => {
-    expect(liveObligations([])).toEqual({ resolved: 0, total: 0 })
+describe('percent with nothing to count', () => {
+  it('does not divide by zero', () => {
     expect(percent(0, 0)).toBe(0)
   })
 })
@@ -126,31 +116,57 @@ describe('percent', () => {
   })
 })
 
-describe('department overview (Now)', () => {
-  const dept = (key: string, over: Record<string, unknown> = {}) =>
-    ({ key, name: key, is_parked: false, lead_id: null, sort_order: 0, archived_at: null, ...over }) as never
-  const t = (id: string, subteam_key: string, state: string, over: Record<string, unknown> = {}) =>
-    ({ id, subteam_key, state, archived_at: null, due_date: null, owner_id: null, ...over }) as never
+describe('requirements progress by book chapter (Now)', () => {
+  const row = (over: Partial<BookProgress>): BookProgress =>
+    ({ season_id: 's', regs_ref: 'R', level: 'chapter', chapter_code: 'A', kind: null, number: null,
+       label: 'SECTION A', heading: 'H', page: 1, chapter_sort: 1, sort_order: 0, has_numbered_rules: true,
+       imported_rules: 0, requirements: 0, resolved: 0, not_applicable: 0, in_progress: 0, blocked: 0, ...over }) as BookProgress
+  const rows = [
+    // Deliberately out of order: the tree must follow the book, not the query.
+    row({ level: 'subchapter', chapter_code: 'A', kind: 'article', number: 2, label: 'ARTICLE 2', sort_order: 2,
+          imported_rules: 5, requirements: 0 }),
+    row({ chapter_code: 'D', label: 'SECTION D', chapter_sort: 4, page: 82, out_of_scope: true }),
+    row({ chapter_code: 'K', label: 'SECTION K', chapter_sort: 11 }),
+    row({ chapter_code: 'A', imported_rules: 15, requirements: 10, resolved: 4, not_applicable: 1 }),
+    row({ level: 'subchapter', chapter_code: 'A', kind: 'article', number: 1, label: 'ARTICLE 1', sort_order: 1,
+          imported_rules: 10, requirements: 10, resolved: 4, not_applicable: 1 }),
+    row({ chapter_code: 'J', label: 'SECTION J', chapter_sort: 10, has_numbered_rules: false }),
+    row({ level: 'subchapter', chapter_code: 'J', kind: 'annex', number: 1, label: 'ANNEX 1', chapter_sort: 10,
+          sort_order: 3, has_numbered_rules: false }),
+  ]
 
-  it('keeps work completion and requirement compliance as two separate measures, and leaves archived departments out', () => {
-    const rows = departmentOverview(
-      [dept('B', { sort_order: 2 }), dept('A', { sort_order: 1, lead_id: 'm1' }), dept('OLD', { archived_at: '2026-01-01T00:00:00Z' })],
-      [t('1', 'A', 'done'), t('2', 'A', 'todo'), t('3', 'A', 'done', { archived_at: '2026-08-01T00:00:00Z' }), t('4', 'OLD', 'done')],
-      [t('2', 'A', 'todo', { due_date: '2026-09-01' }), t('5', 'A', 'blocked')],
-      [sub('A', 10, 4, false, 1)],
-      '2026-09-09',
-    )
-    expect(rows.map((r) => r.key)).toEqual(['A', 'B'])
-    const a = rows[0]
-    expect(a.hasHead).toBe(true)
-    // Archived-but-done work still counts as done.
-    expect(a.work).toMatchObject({ done: 2, total: 3 })
-    expect(a.open).toEqual({ todo: 1, wip: 0, blocked: 1 })
-    expect(a.overdue).toBe(1)
-    expect(a.requirements).toEqual({ resolved: 4, duties: 10, blockedRules: 1 })
-    // No compliance row: "not available", never zero.
-    expect(rows[1].requirements).toBeNull()
-    expect(rows[1].hasHead).toBe(false)
+  it('lists every chapter in book order, each with its own subchapters in book order', () => {
+    const tree = bookProgressTree(rows)
+    expect(tree.map((c) => c.id)).toEqual(['A', 'K', 'D', 'J'])
+    expect(tree[0].subchapters.map((s) => s.id)).toEqual(['A.1', 'A.2'])
+    expect(tree[3].subchapters.map((s) => s.id)).toEqual(['J.annex-1'])
+  })
+
+  it('takes the chapter numbers from the chapter row itself, and reports not-applicable separately', () => {
+    const [a] = bookProgressTree(rows)
+    expect(a.status).toBe('measured')
+    expect(a.counts).toMatchObject({ requirements: 10, resolved: 4, notApplicable: 1 })
+    expect(a.percent).toBe(40)
+    expect(a.registerFilter).toBe('A')
+    expect(a.subchapters[0].registerFilter).toBe('A.1')
+  })
+
+  it('tells missing data apart from a confirmed zero', () => {
+    const [a, k, d, j] = bookProgressTree(rows)
+    expect(a.subchapters[1].status).toBe('no-requirements')
+    expect(a.subchapters[1].percent).toBeNull()
+    expect(d.status).toBe('out-of-scope')
+    expect(d.page).toBe(82)
+    expect(d.registerFilter).toBeNull()
+    expect(k.status).toBe('not-imported')
+    expect(j.status).toBe('no-rules-in-book')
+    expect(j.subchapters[0].status).toBe('no-rules-in-book')
+    expect(j.subchapters[0].registerFilter).toBeNull()
+  })
+
+  it('adds up the whole book from its chapters, so no requirement is counted twice', () => {
+    expect(bookTotals(bookProgressTree(rows))).toMatchObject({ requirements: 10, resolved: 4, notApplicable: 1, importedRules: 15 })
+    expect(bookTotals([])).toMatchObject({ requirements: 0, resolved: 0 })
   })
 })
 

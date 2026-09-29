@@ -105,6 +105,14 @@ export function applyFilters(rows: RegisterRow[], filters: Filters): RegisterRow
   })
 }
 
+// ?chapter= on the Register: 'A' is a whole book section, 'A.3' one of its
+// articles. Anything else is ignored rather than guessed at.
+export function parseChapterParam(raw: string | null): { section: string; article: number | null } | null {
+  const m = raw ? /^([A-Z])(?:\.(\d{1,3}))?$/.exec(raw) : null
+  if (!m) return null
+  return { section: m[1], article: m[2] === undefined ? null : Number(m[2]) }
+}
+
 // --- Groupings --------------------------------------------------------------
 // The point of the screen. 1,146 rules as one list is unusable; the same rules
 // re-filed by the question you are actually asking is not.

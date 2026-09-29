@@ -130,12 +130,12 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     body: 'Overdue and blocked work, your open tasks, open proposals and the next submission. Each tile opens its list, already filtered. “…” is still loading; “—” could not load — never zero.',
   },
   {
-    id: 'now-departments',
+    id: 'now-requirements',
     chapter: 'now',
     route: '/',
-    target: 'now-departments',
-    title: 'Departments',
-    body: 'Two separate measures: Work (Board tasks done) and Requirements (rules compliant, verified or not applicable). Finishing tasks never marks a rule compliant. Open a row for its work and links.',
+    target: 'now-requirements',
+    title: 'Requirements progress',
+    body: 'Team rules resolved per chapter of the Requirements Book (compliant, verified or not applicable). Open a chapter for its articles; click one to see its rules in the Register. Tasks never mark rules compliant.',
   },
   {
     id: 'now-actions',

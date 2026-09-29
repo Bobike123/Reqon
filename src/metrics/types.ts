@@ -5,6 +5,8 @@ import type { Database } from '../lib/database.types.ts'
 // name them without importing a React Query hook module — same reason as
 // tasks/types.ts.
 export type SubteamProgress = Database['public']['Views']['v_subteam_progress']['Row']
+// Requirement progress per Requirements Book chapter and subchapter.
+export type BookProgress = Database['public']['Views']['v_book_progress']['Row']
 // ADR-0007: attention(p_season, p_today) replaced the v_attention view, so
 // the client passes the reader's own "today" instead of the database
 // disagreeing with it via an implicit current_date (bug D2).

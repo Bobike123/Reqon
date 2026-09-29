@@ -16,6 +16,7 @@ vi.mock('../auth/context.ts', () => ({
 vi.mock('../data/useNowMetrics.ts', () => ({
   useAttention: () => ({ data: state.attention, isLoading: false, error: null }),
   useSubteamProgress: () => ({ data: [], isLoading: false, error: null }),
+  useBookProgress: () => ({ data: [], isLoading: false, error: null, refetch: () => undefined }),
 }))
 vi.mock('../data/useMembers.ts', () => ({
   useMembers: () => ({

@@ -1,13 +1,13 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import { todayIso } from '../lib/dates.ts'
 import { supabase } from '../lib/supabase.ts'
-import type { Attention, SubteamProgress } from '../metrics/types.ts'
+import type { Attention, BookProgress, SubteamProgress } from '../metrics/types.ts'
 import { useSeasonId } from '../season/context.ts'
 import { unwrap } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
 import { useSeasonScopedQuery } from './seasonQuery.ts'
 
-export type { Attention, SubteamProgress } from '../metrics/types.ts'
+export type { Attention, BookProgress, SubteamProgress } from '../metrics/types.ts'
 
 // Progress per subsystem, straight from the view. The counting rules — what
 // "resolved" means, which clauses are duties — live in SQL (see
@@ -23,6 +23,15 @@ export function useSubteamProgressForSeason(seasonId: string | undefined): UseQu
 
 export function useSubteamProgress(): UseQueryResult<SubteamProgress[], Error> {
   return useSubteamProgressForSeason(useSeasonId())
+}
+
+// Requirement progress per book chapter and subchapter. What counts and what
+// "resolved" means live in v_book_progress (20260125000500).
+export function useBookProgress(): UseQueryResult<BookProgress[], Error> {
+  const seasonId = useSeasonId()
+  return useSeasonScopedQuery<BookProgress[]>(queryKeys.bookProgress(seasonId), seasonId, async (sid) =>
+    unwrap('load requirements progress', await supabase.from('v_book_progress').select('*').eq('season_id', sid)),
+  )
 }
 
 // The attention list. `reason` (blocked / score-killer / penalty / overdue /

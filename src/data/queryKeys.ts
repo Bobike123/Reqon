@@ -46,6 +46,9 @@ export const queryKeys = {
   // Which requirements each proposal cites (proposal_requirements), by season.
   proposalRequirements: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'proposal_requirements'] as const,
   clauseStatus: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'clause_status'] as const,
+  // Under the clause_status prefix on purpose: every status change or realtime
+  // event that refreshes clause_status refreshes the chapter progress with it.
+  bookProgress: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'clause_status', 'v_book_progress'] as const,
   milestones: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'milestones'] as const,
   milestoneSections: (seasonId: string | undefined) =>
     ['season', seasonId ?? 'unknown', 'milestone_sections'] as const,

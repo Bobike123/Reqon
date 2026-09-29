@@ -1,9 +1,7 @@
 import type { Milestone } from '../../milestones/types.ts'
-import type { Attention, SubteamProgress } from '../../metrics/types.ts'
+import type { Attention } from '../../metrics/types.ts'
 import type { Proposal } from '../../proposals/types.ts'
 import { toLocalDateString } from '../../lib/dates.ts'
-import { isOverdue } from '../../tasks/overdue.ts'
-import { taskProgress, type Progress } from '../../tasks/progress.ts'
 import type { Task } from '../../tasks/types.ts'
 
 // Every instrument on the Now screen, and the SQL that reproduces it.
@@ -38,21 +36,6 @@ export function nextDeadline(milestones: Milestone[], today: Date): NextDeadline
     name: upcoming.name,
     dueOn: upcoming.due_on,
     days,
-  }
-}
-
-// SOURCE: v_subteam_progress (duties, resolved) where is_parked = false.
-// The view decides what "resolved" means; this only adds the columns up.
-// Parked = Race Operations, which only bites at the Final Event.
-// docs/now-metrics.sql §2
-export function liveObligations(rows: SubteamProgress[]): {
-  resolved: number
-  total: number
-} {
-  const live = rows.filter((r) => !r.is_parked)
-  return {
-    resolved: live.reduce((n, r) => n + (r.resolved ?? 0), 0),
-    total: live.reduce((n, r) => n + (r.duties ?? 0), 0),
   }
 }
 
@@ -91,65 +74,134 @@ export function percent(resolved: number, total: number): number {
   return Math.round((resolved / total) * 100)
 }
 
-// ------------------------------------------------------- department overview
-// One row per ACTIVE department, in its configured order, with two separate
-// measures that must never be merged:
-//   work         — the one task progress rule (tasks/progress.ts): distinct
-//                  tasks of the department, cancelled excluded, archived Done
-//                  counted, archived unfinished kept and reported.
-//   requirements — requirement compliance from v_subteam_progress: rules the
-//                  department owns that are marked compliant, verified or not
-//                  applicable, out of its team duties. A status decision, never
-//                  derived from task completion.
-// An archived department is left out even though the view still lists it
-// (finding F14-10).
-type DepartmentLike = { key: string; name: string; is_parked: boolean; archived_at: string | null; sort_order: number; lead_id: string | null }
-type ProgressTaskLike = Pick<Task, 'id' | 'state' | 'archived_at' | 'subteam_key'>
-type ActiveTaskLike = Pick<Task, 'state' | 'archived_at' | 'subteam_key' | 'due_date'>
+// ---------------------------------------------------- requirements progress
+// The Requirements Book's own chapters (SECTION A–J) and subchapters
+// (ARTICLEs, ANNEXes), in book order, from v_book_progress. The view counts
+// from the rules themselves — where the book prints them — so a rule's
+// department never moves it here, and a chapter's numbers are counted over
+// its own rules rather than added up from its articles (nothing counted
+// twice). A requirement is a rule that places a duty on the team; resolved =
+// compliant, verified or not applicable. Task completion plays no part.
+// docs/now-metrics.sql §2
 
-export type DepartmentOverview = {
-  key: string
-  name: string
-  parked: boolean
-  hasHead: boolean
-  work: Progress
-  open: { todo: number; wip: number; blocked: number }
-  overdue: number
-  requirements: { resolved: number; duties: number; blockedRules: number } | null
+export type BookCounts = {
+  requirements: number
+  resolved: number
+  notApplicable: number
+  inProgress: number
+  blocked: number
+  importedRules: number
 }
 
-export function departmentOverview(
-  departments: readonly DepartmentLike[],
-  // Active AND archived tasks: what completion is counted from.
-  progressTasks: readonly ProgressTaskLike[],
-  // The active Board list: what is open or overdue now.
-  activeTasks: readonly ActiveTaskLike[],
-  compliance: readonly SubteamProgress[],
-  today: string,
-): DepartmentOverview[] {
-  const complianceByKey = new Map(compliance.map((row) => [row.key, row]))
-  return departments
-    .filter((d) => d.archived_at === null)
-    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
-    .map((d) => {
-      const mine = progressTasks.filter((t) => t.subteam_key === d.key)
-      const active = activeTasks.filter((t) => t.subteam_key === d.key && t.archived_at === null)
-      const row = complianceByKey.get(d.key)
-      return {
-        key: d.key,
-        name: d.name,
-        parked: d.is_parked,
-        hasHead: d.lead_id !== null,
-        work: taskProgress(mine),
-        open: {
-          todo: active.filter((t) => t.state === 'todo').length,
-          wip: active.filter((t) => t.state === 'wip').length,
-          blocked: active.filter((t) => t.state === 'blocked').length,
-        },
-        overdue: active.filter((t) => isOverdue(t, today)).length,
-        requirements: row ? { resolved: row.resolved ?? 0, duties: row.duties ?? 0, blockedRules: row.blocked ?? 0 } : null,
-      }
-    })
+// What a row can honestly say:
+//   measured         — team requirements exist; show resolved/total and a bar.
+//   no-requirements  — rules are imported, but none places a duty on the team.
+//   not-imported     — the book numbers rules here, the Register has none
+//                      (missing data).
+//   out-of-scope     — the chapter is specific to another category than the
+//                      season's (Section D, Electric, in an eFuel season): left
+//                      out on purpose, so not missing data. Only its page shows.
+//   no-rules-in-book — the book itself has no numbered rules here (a
+//                      glossary, an annex): a confirmed zero.
+export type BookStatus = 'measured' | 'no-requirements' | 'not-imported' | 'out-of-scope' | 'no-rules-in-book'
+
+export type BookUnit = {
+  // 'A' for a chapter, 'A.3' for an article, 'J.annex-2' for an annex.
+  id: string
+  label: string
+  heading: string
+  page: number | null
+  status: BookStatus
+  counts: BookCounts
+  percent: number | null
+  // The Register filter that shows exactly these rules (?chapter=), or null
+  // when there are no rules to show.
+  registerFilter: string | null
+}
+
+export type BookChapter = BookUnit & { subchapters: BookUnit[] }
+
+type BookRow = {
+  level: string | null
+  chapter_code: string | null
+  kind: string | null
+  number: number | null
+  label: string | null
+  heading: string | null
+  page: number | null
+  chapter_sort: number | null
+  sort_order: number | null
+  has_numbered_rules: boolean | null
+  out_of_scope?: boolean | null
+  imported_rules: number | null
+  requirements: number | null
+  resolved: number | null
+  not_applicable: number | null
+  in_progress: number | null
+  blocked: number | null
+}
+
+function unitOf(row: BookRow): BookUnit {
+  const counts: BookCounts = {
+    requirements: row.requirements ?? 0,
+    resolved: row.resolved ?? 0,
+    notApplicable: row.not_applicable ?? 0,
+    inProgress: row.in_progress ?? 0,
+    blocked: row.blocked ?? 0,
+    importedRules: row.imported_rules ?? 0,
+  }
+  const status: BookStatus =
+    counts.importedRules > 0
+      ? counts.requirements > 0 ? 'measured' : 'no-requirements'
+      : row.out_of_scope ? 'out-of-scope'
+      : row.has_numbered_rules ? 'not-imported' : 'no-rules-in-book'
+  const chapter = row.chapter_code ?? '?'
+  const isChapter = row.level === 'chapter'
+  const id = isChapter ? chapter : row.kind === 'article' ? `${chapter}.${row.number}` : `${chapter}.${row.kind}-${row.number}`
+  return {
+    id,
+    label: row.label ?? id,
+    heading: row.heading ?? '',
+    page: row.page,
+    status,
+    counts,
+    percent: status === 'measured' ? percent(counts.resolved, counts.requirements) : null,
+    registerFilter: counts.importedRules > 0 && (isChapter || row.kind === 'article') ? id : null,
+  }
+}
+
+export function bookProgressTree(rows: readonly BookRow[]): BookChapter[] {
+  const bySort = (a: BookRow, b: BookRow) =>
+    (a.chapter_sort ?? 0) - (b.chapter_sort ?? 0) || (a.sort_order ?? 0) - (b.sort_order ?? 0)
+  const ordered = [...rows].sort(bySort)
+  const chapters = ordered
+    .filter((r) => r.level === 'chapter')
+    .map((c) => ({
+      ...unitOf(c),
+      subchapters: ordered.filter((s) => s.level === 'subchapter' && s.chapter_code === c.chapter_code).map(unitOf),
+    }))
+  // Chapters with no rules of their own (another category's section, a glossary,
+  // annexes) go last, each group keeping the book's order. Missing data stays
+  // where the book puts it, so it is not buried.
+  const last = (c: BookChapter) => c.status === 'out-of-scope' || c.status === 'no-rules-in-book'
+  return [...chapters.filter((c) => !last(c)), ...chapters.filter(last)]
+}
+
+// The whole book: chapters partition the rules, so their sum counts each
+// requirement exactly once.
+export function bookTotals(chapters: readonly BookChapter[]): BookCounts {
+  const zero: BookCounts = { requirements: 0, resolved: 0, notApplicable: 0, inProgress: 0, blocked: 0, importedRules: 0 }
+  return chapters.reduce(
+    (sum, c) => ({
+      requirements: sum.requirements + c.counts.requirements,
+      resolved: sum.resolved + c.counts.resolved,
+      notApplicable: sum.notApplicable + c.counts.notApplicable,
+      inProgress: sum.inProgress + c.counts.inProgress,
+      blocked: sum.blocked + c.counts.blocked,
+      importedRules: sum.importedRules + c.counts.importedRules,
+    }),
+    zero,
+  )
 }
 
 // Active, unfinished tasks due from today up to `days` ahead, soonest first.

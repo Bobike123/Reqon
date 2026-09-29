@@ -24,16 +24,22 @@ where m.due_on is not null and m.due_on >= current_date
 order by m.due_on
 limit 1;
 
--- ------------------------------------------------- 2. Live obligations
--- Resolved / total obligations, excluding parked subteams.
--- Source: v_subteam_progress (duties, resolved), is_parked = false.
--- "Resolved" is defined by the view as state in (compliant, verified, na).
--- Parked = Race Operations, which only bites at the Final Event: 491 team
--- duties total, 58 of them RACEOP, leaving 433 live.
-select sum(duties)   as total_live_obligations,
-       sum(resolved) as resolved
-from v_subteam_progress
-where not is_parked;
+-- ------------------------------------------ 2. Requirements progress (by book)
+-- Per Requirements Book chapter and article, from the rules themselves
+-- (clauses.section / .article), never from departments. Source:
+-- v_book_progress (20260125000500). requirements = team-duty rules;
+-- resolved = state in (compliant, verified, na); not_applicable also alone.
+-- Chapters partition the rules, so their sum is the whole book (491 for
+-- MS2627 Rev.01). imported_rules = 0 with has_numbered_rules = true means
+-- "not imported" (missing data); out_of_scope = true means the chapter is
+-- specific to another category than the season's (Section D in an eFuel
+-- season: left out on purpose); has_numbered_rules = false means the book has
+-- no numbered rules there (Sections I, J).
+select level, chapter_code, number, label, heading, page, has_numbered_rules, out_of_scope,
+       imported_rules, requirements, resolved, not_applicable
+from v_book_progress
+where season_id = (select id from seasons where is_current)
+order by chapter_sort, sort_order;
 
 -- ------------------------------------------------------------- 3. MS1 points
 -- Points at stake across the MS1 deliverables.

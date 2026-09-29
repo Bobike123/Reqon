@@ -28,6 +28,7 @@ import {
   DEFAULT_FILTERS,
   GROUPINGS,
   groupRows,
+  parseChapterParam,
   type Filters,
   type GroupingId,
   type SubteamInfo,
@@ -58,6 +59,9 @@ export default function Register() {
   // (which also switches "Team duties only" off, so the rule is found).
   const [searchParams, setSearchParams] = useUrlParams()
   const subteamParam = searchParams.get('subteam')
+  // ?chapter=A (a book section) or ?chapter=A.3 (one of its articles) — the Now
+  // screen's requirements progress links here. Book position, not department.
+  const chapterScope = parseChapterParam(searchParams.get('chapter'))
   const urlSearch = searchParams.get('search') ?? ''
   const rawGroup = searchParams.get('group')
   const grouping: GroupingId = GROUPINGS.some((g) => g.id === rawGroup) ? (rawGroup as GroupingId) : 'subsystem'
@@ -144,9 +148,16 @@ export default function Register() {
     () => buildRows(clauses.data ?? [], statuses.data ?? [], subteamMap),
     [clauses.data, statuses.data, subteamMap],
   )
+  const chapterSection = chapterScope?.section ?? null
+  const chapterArticle = chapterScope?.article ?? null
   const scoped = useMemo(
-    () => (subteamParam ? rows.filter((r) => r.clause.subteam_key === subteamParam) : rows),
-    [rows, subteamParam],
+    () =>
+      rows.filter(
+        (r) =>
+          (!subteamParam || r.clause.subteam_key === subteamParam) &&
+          (!chapterSection || (r.clause.section === chapterSection && (chapterArticle === null || r.clause.article === chapterArticle))),
+      ),
+    [rows, subteamParam, chapterSection, chapterArticle],
   )
   // Re-filtering ~500 rows (each carrying two <select>s) blocked the first
   // keystroke for 133ms, measured in Chrome. The box keeps the typed value
@@ -352,6 +363,20 @@ export default function Register() {
         </div>
       </div>
 
+      {chapterScope && (
+        <p className="mb-3 flex items-center gap-2 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+          <span data-testid="chapter-scope">
+            Showing <strong>Section {chapterScope.section}{chapterScope.article !== null ? `, Article ${chapterScope.article}` : ''}</strong> only
+          </span>
+          <button
+            type="button"
+            onClick={() => setSearchParams((current) => mergeSearchParams(current, { chapter: null }), { replace: true })}
+            className="rounded border border-slate-300 bg-white px-2 py-0.5 text-xs hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+          >
+            Clear
+          </button>
+        </p>
+      )}
       {subteamParam && (
         <p className="mb-3 flex items-center gap-2 rounded border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800">
           <span data-testid="subteam-scope">

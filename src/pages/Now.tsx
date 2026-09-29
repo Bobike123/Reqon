@@ -1,19 +1,18 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
-import { usePermissions } from '../auth/usePermissions.ts'
 import { canReviewProposal } from '../auth/permissions.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones } from '../data/useMilestones.ts'
-import { useAttention, useSubteamProgress } from '../data/useNowMetrics.ts'
+import { useAttention, useBookProgress } from '../data/useNowMetrics.ts'
 import { useProposals } from '../data/useProposals.ts'
 import { useRealtimeMilestones } from '../data/useRealtimeMilestones.ts'
 import { useRealtimeProposalRequirements } from '../data/useRealtimeProposalRequirements.ts'
 import { useRealtimeProposals } from '../data/useRealtimeProposals.ts'
 import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
 import { useSubteams } from '../data/useSubteams.ts'
+import { useRealtimeClauseStatus } from '../data/useRealtimeClauseStatus.ts'
 import { useTaskActor } from '../data/useTaskActor.ts'
-import { useTasksForProgress } from '../data/useTaskHistory.ts'
 import { useTasks } from '../data/useTasks.ts'
 import { formatDay, todayIso } from '../lib/dates.ts'
 import { isHistory } from '../proposals/filters.ts'
@@ -23,19 +22,21 @@ import { pageMain } from '../ui/layout.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import {
   attentionFor,
-  departmentOverview,
-  liveObligations,
+  bookProgressTree,
+  bookTotals,
   ms1Points,
   myOpenTasks,
   nextDeadline,
   openProposalsCount,
   percent,
   upcomingDeadlines,
-  type DepartmentOverview,
+  type BookChapter,
+  type BookUnit,
 } from './now/nowModel.ts'
 
 // The screen people keep open while working: what needs doing next, and how
-// each department stands. Every number is reproducible (docs/now-metrics.sql)
+// the requirements stand, chapter by chapter of the Requirements Book. Every
+// number is reproducible (docs/now-metrics.sql)
 // and every one is a way in — it opens the list that explains it, already
 // filtered. Loading, unavailable and genuinely empty are three different
 // states and are shown as such: a failed query never reads as "0".
@@ -159,84 +160,141 @@ function Bar({ value, tone }: { value: number | null; tone: string }) {
   )
 }
 
-function DepartmentRow({ row, canEdit }: { row: DepartmentOverview; canEdit: boolean }) {
-  const work = row.work
-  const req = row.requirements
-  const reqPct = req ? percent(req.resolved, req.duties) : null
-  const enc = encodeURIComponent(row.key)
+// What a chapter or article row says, in its four honest states.
+function bookCountsText(unit: BookUnit): string {
+  switch (unit.status) {
+    case 'measured':
+      return `${unit.counts.resolved}/${unit.counts.requirements} resolved`
+    case 'no-requirements':
+      return `no team requirements (${unit.counts.importedRules} rule${unit.counts.importedRules === 1 ? '' : 's'})`
+    case 'not-imported':
+      return 'not imported'
+    case 'out-of-scope':
+      return unit.page ? `not this category — p. ${unit.page}` : 'not this category'
+    case 'no-rules-in-book':
+      return 'no numbered rules in the book'
+  }
+}
+
+const BOOK_STATUS_NOTE: Record<Exclude<BookUnit['status'], 'measured'>, string> = {
+  'no-requirements': 'Its rules are in the Register, but none places a duty on the team.',
+  'not-imported': 'The book numbers rules here, but none is in the Register — missing data, not zero.',
+  'out-of-scope': 'Specific to another competition category than this season’s, so its rules are deliberately not imported — not missing data.',
+  'no-rules-in-book': 'The book has no numbered rules here.',
+}
+
+function BookUnitRow({
+  unit,
+  testId,
+  toggle,
+}: {
+  unit: BookUnit
+  testId: string
+  toggle?: { expanded: boolean; onToggle: () => void; controls: string }
+}) {
+  const heading = (
+    <>
+      <span className="font-medium">{unit.label}</span>
+      <span className="block break-words text-xs font-normal text-slate-600">{unit.heading}</span>
+    </>
+  )
   return (
-    <li data-testid={`department-${row.key}`}>
-      <details className="group">
-        <summary className="grid cursor-pointer list-none grid-cols-1 gap-x-4 gap-y-1 px-3 py-2 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500 sm:grid-cols-[minmax(0,14rem)_1fr_1fr] sm:items-center">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-slate-900">
-            <span aria-hidden="true" className="text-slate-500 group-open:rotate-90">
+    <div
+      className="grid grid-cols-1 gap-x-4 gap-y-1 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,14rem)] sm:items-center"
+      data-testid={testId}
+    >
+      <span className="flex min-w-0 items-start gap-1.5 text-sm text-slate-900">
+        {toggle ? (
+          <button
+            type="button"
+            onClick={toggle.onToggle}
+            aria-expanded={toggle.expanded}
+            aria-controls={toggle.controls}
+            aria-label={`${toggle.expanded ? 'Hide' : 'Show'} the parts of ${unit.label}`}
+            className="mt-0.5 shrink-0 rounded px-0.5 text-slate-500 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+          >
+            <span aria-hidden="true" className={`inline-block transition-transform ${toggle.expanded ? 'rotate-90' : ''}`}>
               ▸
             </span>
-            <span className="truncate" title={row.name}>
-              {row.name}
-            </span>
-            {row.parked && <span className="shrink-0 rounded bg-slate-100 px-1 text-[10px] font-medium uppercase text-slate-600">parked</span>}
+          </button>
+        ) : (
+          <span aria-hidden="true" className="w-3.5 shrink-0" />
+        )}
+        {unit.registerFilter ? (
+          <Link
+            to={`/register?chapter=${encodeURIComponent(unit.registerFilter)}&group=book`}
+            className="min-w-0 underline decoration-slate-300 underline-offset-2 hover:decoration-slate-900"
+            data-testid={`${testId}-link`}
+          >
+            {heading}
+          </Link>
+        ) : (
+          <span className="min-w-0">{heading}</span>
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="flex justify-between gap-2 text-[11px] text-slate-600">
+          <span className="tabular-nums" data-testid={`${testId}-counts`}>
+            {bookCountsText(unit)}
           </span>
-          <span className="min-w-0">
-            <span className="flex justify-between text-[11px] text-slate-600">
-              <span>Work</span>
-              <span className="tabular-nums" data-testid={`department-work-${row.key}`}>
-                {work.total === 0 ? 'no tasks yet' : `${work.done}/${work.total} done`}
-              </span>
-            </span>
-            <Bar value={work.percent} tone="bg-slate-800" />
+          {unit.percent !== null && <span className="tabular-nums">{unit.percent}%</span>}
+        </span>
+        {unit.status === 'measured' ? (
+          <Bar value={unit.percent} tone="bg-emerald-700" />
+        ) : (
+          <span className={`block text-[11px] ${unit.status === 'not-imported' ? 'text-amber-900' : 'text-slate-500'}`}>
+            {BOOK_STATUS_NOTE[unit.status]}
           </span>
-          <span className="min-w-0">
-            <span className="flex justify-between text-[11px] text-slate-600">
-              <span>Requirements</span>
-              <span className="tabular-nums" data-testid={`department-requirements-${row.key}`}>
-                {req === null ? 'not available' : req.duties === 0 ? 'no duties' : `${req.resolved}/${req.duties} resolved`}
-              </span>
-            </span>
-            <Bar value={reqPct} tone="bg-emerald-700" />
+        )}
+        {unit.counts.notApplicable > 0 && (
+          <span className="block text-[11px] text-slate-600" data-testid={`${testId}-na`}>
+            {unit.counts.notApplicable} not applicable (counted as resolved)
           </span>
-        </summary>
-        <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-          <p>
-            Open work: {row.open.todo} to do · {row.open.wip} in progress · {row.open.blocked} blocked
-            {row.overdue > 0 && <span className="font-semibold text-red-800"> · {row.overdue} overdue</span>}
-            {work.archivedUnfinished > 0 && ` · ${work.archivedUnfinished} archived unfinished (still counted as not done)`}
-          </p>
-          {req && req.blockedRules > 0 && <p>{req.blockedRules} of its rules are marked blocked.</p>}
-          {!row.hasHead && <p className="text-amber-900">No Head of Department appointed — only a Developer can review its proposals.</p>}
-          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-            <Link className="underline underline-offset-2" to={`/board?dept=${enc}`}>Board</Link>
-            <Link className="underline underline-offset-2" to={`/gantt?dept=${enc}`}>Gantt</Link>
-            <Link className="underline underline-offset-2" to={`/register?subteam=${enc}`}>Register</Link>
-            <Link className="underline underline-offset-2" to={`/proposals?dept=${enc}`}>Proposals</Link>
-            {canEdit && (
-              <Link className="underline underline-offset-2" to={`/settings?edit=${encodeURIComponent(`department:${row.key}`)}`} data-testid={`department-settings-${row.key}`}>
-                Edit department{row.hasHead ? '' : ' (appoint a Head)'}
-              </Link>
-            )}
-          </p>
-        </div>
-      </details>
+        )}
+      </span>
+    </div>
+  )
+}
+
+function BookChapterRow({ chapter }: { chapter: BookChapter }) {
+  const [expanded, setExpanded] = useState(false)
+  const listId = `book-chapter-${chapter.id}-parts`
+  return (
+    <li>
+      <BookUnitRow
+        unit={chapter}
+        testId={`book-chapter-${chapter.id}`}
+        toggle={chapter.subchapters.length > 0 ? { expanded, onToggle: () => setExpanded((v) => !v), controls: listId } : undefined}
+      />
+      {chapter.subchapters.length > 0 && (
+        <ul id={listId} hidden={!expanded} className="divide-y divide-slate-100 border-t border-slate-100 bg-slate-50 pl-5">
+          {chapter.subchapters.map((sub) => (
+            <li key={sub.id}>
+              <BookUnitRow unit={sub} testId={`book-sub-${sub.id}`} />
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   )
 }
 
 export default function Now() {
   const auth = useAuth()
-  const permissions = usePermissions()
   const actor = useTaskActor()
   const milestones = useMilestones()
-  const compliance = useSubteamProgress()
+  const bookProgress = useBookProgress()
   const attention = useAttention()
   const proposals = useProposals()
   const tasks = useTasks()
-  const progressTasks = useTasksForProgress()
   const departments = useSubteams()
   const members = useMembers()
   useRealtimeProposals()
   useRealtimeProposalRequirements()
   useRealtimeMilestones()
   useRealtimeTasks()
+  // A rule marked compliant elsewhere moves its chapter's bar here.
+  useRealtimeClauseStatus()
 
   const today = todayIso()
   const myId = auth.status === 'member' ? auth.member.id : null
@@ -244,17 +302,19 @@ export default function Now() {
   const deptName = useMemo(() => new Map((departments.data ?? []).map((d) => [d.key, d.name])), [departments.data])
   const taskById = useMemo(() => new Map((tasks.data ?? []).map((t) => [t.id, t])), [tasks.data])
 
-  const overview = useMemo(
-    () => departmentOverview(departments.data ?? [], progressTasks.data ?? [], tasks.data ?? [], compliance.data ?? [], today),
-    [departments.data, progressTasks.data, tasks.data, compliance.data, today],
-  )
+  const chapters = useMemo(() => bookProgressTree(bookProgress.data ?? []), [bookProgress.data])
+  const bookTotal = bookTotals(chapters)
+  // Chapters with no rules of their own are listed apart from the ones being tracked.
+  const isRuleless = (c: BookChapter) => c.status === 'out-of-scope' || c.status === 'no-rules-in-book'
+  const trackedChapters = chapters.filter((c) => !isRuleless(c))
+  const rulelessChapters = chapters.filter(isRuleless)
+  const notImported = chapters.filter((c) => c.status === 'not-imported')
   const overdue = attentionFor(attention.data ?? [], 'overdue')
   const blocked = attentionFor(attention.data ?? [], 'blocked')
   const upcoming = upcomingDeadlines(tasks.data ?? [], today, 14)
   const mine = myOpenTasks(tasks.data ?? [], myId)
   const deadline = nextDeadline(milestones.data ?? [], new Date())
   const points = ms1Points(milestones.data ?? [])
-  const obligations = liveObligations((compliance.data ?? []).filter((row) => (departments.data ?? []).some((d) => d.key === row.key && d.archived_at === null)))
   const openProposals = openProposalsCount(proposals.data ?? [])
   const reviewQueue = actor
     ? (proposals.data ?? []).filter((p) => !isHistory(p) && (p.state === 'open' || p.state === 'agenda') && canReviewProposal(actor, p))
@@ -271,15 +331,10 @@ export default function Now() {
   }
   // The tile and the list count the same tasks (attention(), SQL-owned).
   const taskSource: Source = { isLoading: attention.isLoading || tasks.isLoading, error: attention.error ?? tasks.error, refetch: () => { void attention.refetch(); void tasks.refetch() } }
-  const overviewSource: Source = {
-    isLoading: departments.isLoading || progressTasks.isLoading || compliance.isLoading,
-    error: departments.error ?? progressTasks.error ?? compliance.error,
-    refetch: () => { void departments.refetch(); void tasks.refetch(); void compliance.refetch() },
-  }
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain()}>
-      <PageHeader title="Now" description="What needs attention today — overdue and blocked work, the next deadlines, your own tasks, and how each department stands." />
+      <PageHeader title="Now" description="What needs attention today — overdue and blocked work, the next deadlines, your own tasks, and how the requirements stand, chapter by chapter." />
 
       <section aria-label="Instruments" data-tutorial="now-instruments" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
         <Tile testId="tile-overdue" to="/priorities?reason=overdue" label="Overdue" source={taskSource}
@@ -297,43 +352,62 @@ export default function Now() {
       </section>
 
       <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <section aria-labelledby="departments-heading" data-tutorial="now-departments">
-          <h2 id="departments-heading" className="text-sm font-semibold text-slate-900">
-            Departments
+        <section aria-labelledby="requirements-heading" data-tutorial="now-requirements">
+          <h2 id="requirements-heading" className="text-sm font-semibold text-slate-900">
+            Requirements progress
           </h2>
           <p className="mb-2 text-xs text-slate-600">
-            <strong className="font-medium">Work</strong> counts the department&apos;s Board tasks done (cancelled left out,
-            archived Done kept). <strong className="font-medium">Requirements</strong> counts its rules marked compliant,
-            verified or not applicable. They are separate measures: finishing tasks never marks a rule compliant.
+            The rules that place a duty on the team, in the Requirements Book&apos;s own chapters. Resolved means marked
+            compliant, verified or not applicable in the Register. Finishing tasks never marks a rule compliant, and a
+            rule&apos;s department does not change where it is counted.
           </p>
-          <p className="mb-2 text-xs text-slate-700" data-testid="now-obligations">
-            Across departments that are not parked:{' '}
+          <p className="mb-2 text-xs text-slate-700" data-testid="now-requirements-total">
+            Across the book:{' '}
             <strong className="font-semibold tabular-nums">
-              {valueOf(compliance, () => `${obligations.resolved} / ${obligations.total}`)}
+              {valueOf(bookProgress, () => `${bookTotal.resolved} / ${bookTotal.requirements}`)}
             </strong>{' '}
-            requirements resolved{compliance.data ? ` (${percent(obligations.resolved, obligations.total)}%)` : ''}.
+            requirements resolved
+            {bookProgress.data ? ` (${percent(bookTotal.resolved, bookTotal.requirements)}%)` : ''}
+            {bookProgress.data && bookTotal.notApplicable > 0 ? ` · ${bookTotal.notApplicable} not applicable` : ''}.
+            {bookProgress.data && notImported.length > 0 && (
+              <span className="block text-amber-900">
+                Not imported, so not counted: {notImported.map((c) => c.label).join(', ')}.
+              </span>
+            )}
           </p>
-          {overviewSource.error ? (
+          {bookProgress.error ? (
             <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-              Department progress could not be loaded.{' '}
-              <button type="button" className="font-medium underline underline-offset-2" onClick={() => void overviewSource.refetch()}>
+              Requirements progress could not be loaded.{' '}
+              <button type="button" className="font-medium underline underline-offset-2" onClick={() => void bookProgress.refetch()}>
                 Try again
               </button>
             </p>
-          ) : overviewSource.isLoading ? (
+          ) : bookProgress.isLoading ? (
             <p role="status" className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-              Loading department progress…
+              Loading requirements progress…
             </p>
-          ) : overview.length === 0 ? (
+          ) : chapters.length === 0 ? (
             <p className="rounded border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No departments yet. The President or Vice President sets them up in Settings.
+              This season&apos;s regulations edition has no chapter outline recorded, so progress cannot be shown by chapter.
             </p>
           ) : (
-            <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-              {overview.map((row) => (
-                <DepartmentRow key={row.key} row={row} canEdit={permissions.canManageDepartments} />
+            <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white" data-testid="now-book-chapters">
+              {trackedChapters.map((chapter) => (
+                <BookChapterRow key={chapter.id} chapter={chapter} />
               ))}
             </ul>
+          )}
+          {rulelessChapters.length > 0 && !bookProgress.isLoading && !bookProgress.error && (
+            <>
+              <h3 className="mb-1 mt-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                No requirements to track
+              </h3>
+              <ul className="divide-y divide-slate-200 rounded-lg border border-dashed border-slate-300 bg-slate-50" data-testid="now-book-chapters-untracked">
+                {rulelessChapters.map((chapter) => (
+                  <BookChapterRow key={chapter.id} chapter={chapter} />
+                ))}
+              </ul>
+            </>
           )}
         </section>
 

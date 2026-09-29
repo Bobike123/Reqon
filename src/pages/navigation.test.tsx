@@ -26,6 +26,19 @@ const PROGRESS = [
   { key: 'OLD', name: 'Retired department', duties: 9, resolved: 9, in_progress: 0, blocked: 0, total_rules: 9, is_parked: false, season_id: 's' },
 ]
 
+// v_book_progress: B has measured progress, D is out of scope for the eFuel season (page shown, no rules),
+// J has no numbered rules at all.
+const book = (over: Record<string, unknown>) => ({
+  season_id: 's', regs_ref: 'R', level: 'chapter', kind: null, number: null, page: 1, sort_order: 0,
+  has_numbered_rules: true, imported_rules: 0, requirements: 0, resolved: 0, not_applicable: 0, in_progress: 0, blocked: 0, ...over,
+})
+const BOOK = [
+  book({ chapter_code: 'B', label: 'SECTION B', heading: 'GENERAL TECHNICAL REGULATIONS', chapter_sort: 2, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2 }),
+  book({ level: 'subchapter', chapter_code: 'B', kind: 'article', number: 1, label: 'ARTICLE 1', heading: 'TECHNICAL REQUIREMENTS OF THE PROTOTYPE AND RESTRICTIONS', chapter_sort: 2, sort_order: 1, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2 }),
+  book({ chapter_code: 'D', label: 'SECTION D', heading: 'SPECIFIC TECHNICAL REGULATIONS FOR THE CATEGORY “MOTOSTUDENT ELECTRIC”', chapter_sort: 4, page: 82, out_of_scope: true }),
+  book({ chapter_code: 'J', label: 'SECTION J', heading: 'ANNEXES', chapter_sort: 10, has_numbered_rules: false }),
+]
+
 // What the dashboard's sources return, changed per test.
 const metrics: { attentionLoading: boolean; attentionError: Error | null } = { attentionLoading: false, attentionError: null }
 const TASKS = [
@@ -54,6 +67,7 @@ vi.mock('../data/useMilestones.ts', () => ({
 }))
 vi.mock('../data/useNowMetrics.ts', () => ({
   useSubteamProgress: () => ({ data: PROGRESS, isLoading: false, error: null }),
+  useBookProgress: () => ({ data: BOOK, isLoading: false, error: null, refetch: vi.fn() }),
   useAttention: () => ({
     data: metrics.attentionLoading || metrics.attentionError ? undefined : [{ kind: 'task', ref: 't-late', title: 'Late fairing drawing', owner_id: 'm1', season_id: 's', reason: 'overdue', starred: false, clause_key: null }],
     isLoading: metrics.attentionLoading,
@@ -150,19 +164,32 @@ describe('Now dashboard', () => {
     expect(within(screen.getByTestId('now-blocked')).getByRole('alert')).toHaveTextContent('Could not load this list')
   })
 
-  it('keeps work completion and requirement compliance apart for each department', () => {
+  it('shows requirements progress by book chapter, not by department, with no work bars', () => {
     renderApp()
-    // GEOM: one of its two tasks is done (work); 1 of 17 rules resolved (compliance).
-    expect(screen.getByTestId('department-work-GEOM')).toHaveTextContent('1/2 done')
-    expect(screen.getByTestId('department-requirements-GEOM')).toHaveTextContent('1/17 resolved')
-    expect(screen.getByTestId('department-work-DOCS')).toHaveTextContent('no tasks yet')
+    expect(screen.getByRole('heading', { name: 'Requirements progress' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Departments' })).not.toBeInTheDocument()
+    expect(document.querySelector('[data-testid^="department-"]')).toBeNull()
+    expect(screen.queryByText('Work')).not.toBeInTheDocument()
+    expect(screen.getByTestId('book-chapter-B-counts')).toHaveTextContent('3/17 resolved')
+    expect(screen.getByTestId('book-chapter-B-na')).toHaveTextContent('2 not applicable')
+    expect(screen.getByTestId('now-requirements-total')).toHaveTextContent('3 / 17')
   })
 
-  it('leaves an archived department out of the live overview and totals', () => {
+  it('keeps chapters without imported rules, telling another category and a confirmed zero from missing data', () => {
     renderApp()
-    expect(screen.queryByTestId('department-OLD')).not.toBeInTheDocument()
-    // DOCS 129 + GEOM 17 = 146; the parked RACEOP and the archived OLD are not counted.
-    expect(screen.getByTestId('now-obligations')).toHaveTextContent('5 / 146')
+    expect(within(screen.getByTestId('now-book-chapters')).queryByTestId('book-chapter-D-counts')).toBeNull()
+    expect(within(screen.getByTestId('now-book-chapters-untracked')).getByTestId('book-chapter-D-counts')).toBeInTheDocument()
+    expect(within(screen.getByTestId('now-book-chapters-untracked')).getByTestId('book-chapter-J-counts')).toBeInTheDocument()
+    expect(screen.getByTestId('book-chapter-D-counts')).toHaveTextContent('not this category — p. 82')
+    expect(screen.getByTestId('book-chapter-J-counts')).toHaveTextContent('no numbered rules in the book')
+    expect(screen.getByTestId('now-requirements-total')).not.toHaveTextContent('Not imported')
+  })
+
+  it('expands a chapter into its articles', async () => {
+    renderApp()
+    expect(screen.getByTestId('book-sub-B.1')).not.toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Show the parts of SECTION B' }))
+    expect(screen.getByTestId('book-sub-B.1')).toBeVisible()
   })
 
   it('has no proposal form on the dashboard, only a way to the Proposals screen', () => {
@@ -178,15 +205,27 @@ describe('Now dashboard', () => {
   })
 })
 
-describe('department -> Register navigation', () => {
-  it('lands on the Register scoped to that department only', async () => {
+describe('Register navigation', () => {
+  it('a chapter on Now lands on the Register showing only that chapter', async () => {
     renderApp()
-    const row = screen.getByTestId('department-GEOM')
-    await userEvent.click(within(row).getByText('Design Envelope'))
-    await userEvent.click(within(row).getByRole('link', { name: 'Register' }))
-    await waitFor(() => expect(screen.getByTestId('subteam-scope')).toBeInTheDocument())
-    expect(screen.getByTestId('subteam-scope')).toHaveTextContent('Design Envelope')
-    // Only the GEOM rule is listed.
+    await userEvent.click(screen.getByTestId('book-chapter-B-link'))
+    await waitFor(() => expect(screen.getByTestId('chapter-scope')).toBeInTheDocument())
+    expect(screen.getByTestId('chapter-scope')).toHaveTextContent('Section B')
+    // Only the section-B rule is listed.
+    expect(screen.getByText('Geometry rule')).toBeInTheDocument()
+    expect(screen.queryByText('Docs rule')).not.toBeInTheDocument()
+  })
+
+  it('an article narrows the Register to that article', async () => {
+    renderApp('/register?chapter=F.1')
+    await waitFor(() => expect(screen.getByTestId('chapter-scope')).toHaveTextContent('Section F, Article 1'))
+    expect(screen.getByText('Docs rule')).toBeInTheDocument()
+    expect(screen.queryByText('Geometry rule')).not.toBeInTheDocument()
+  })
+
+  it('still scopes the Register to a department when linked with ?subteam=', async () => {
+    renderApp('/register?subteam=GEOM')
+    await waitFor(() => expect(screen.getByTestId('subteam-scope')).toHaveTextContent('Design Envelope'))
     expect(screen.getByText('Geometry rule')).toBeInTheDocument()
     expect(screen.queryByText('Docs rule')).not.toBeInTheDocument()
   })
