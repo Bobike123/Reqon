@@ -96,7 +96,7 @@ export function MilestoneRow({
 
         <Track
           today={env.todayLeft}
-          label={marks.deadline === null ? (marks.opensOnly ? `Opens ${formatDay(marks.opensOnly)} · deadline TBC` : 'Deadline TBC') : undefined}
+          label={marks.deadline === null && marks.opensOnly ? `Opens ${formatDay(marks.opensOnly)} · deadline TBC` : undefined}
           summary={milestoneSummary(milestone, env.today, words)}
         >
           {marks.window && (

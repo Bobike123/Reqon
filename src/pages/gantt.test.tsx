@@ -169,7 +169,7 @@ describe('honest dates', () => {
   it('a milestone with no published date is never given an invented bar', () => {
     renderGantt()
     expect(screen.queryByTitle(/^MS1-7/)).not.toBeInTheDocument()
-    expect(within(screen.getByTestId('gantt-milestone-MS1-7')).getByText('Deadline TBC')).toBeInTheDocument()
+    expect(within(screen.getByTestId('gantt-milestone-MS1-7')).queryByText('Deadline TBC')).not.toBeInTheDocument()
   })
 
   it('a milestone with a deadline but no opening date shows only the deadline, not a window', () => {
