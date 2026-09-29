@@ -8,7 +8,7 @@ import { GanttTaskRow } from './GanttTaskRow.tsx'
 import { LinkTaskTool } from './LinkTaskTool.tsx'
 import type { GanttEnv } from './ganttEnv.ts'
 import { currentTargetKey, linkCandidates, relinkFrom } from './ganttLinking.ts'
-import { sectionSpan, type Span } from './ganttModel.ts'
+import { sectionSpan, spanCaption, type Span } from './ganttModel.ts'
 import { progressLabel, sectionProgress, tasksUnderSection, type ProgressSource } from './ganttProgress.ts'
 
 // One milestone section: its drafted tick, its bar, and — when open — its Board
@@ -40,7 +40,7 @@ export function SectionRow({
   const shown = under.filter(env.lens.matches)
   const progress = sectionProgress(section, progressTasks)
   const span = sectionSpan(tasks, section.id, fallbackSpan)
-  const words = progressLabel(progress, 'section')
+  const words = progressLabel(progress, 'section', 'done')
   const target = { seasonId: env.seasonId, milestoneKey, sectionId: section.id }
   const { direct, relink } = linkCandidates(tasks, target, (t) => env.permsFor(t).canEdit)
   const byId = new Map(tasks.map((t) => [t.id, t]))
@@ -71,18 +71,19 @@ export function SectionRow({
             </span>
             {section.name}
           </button>
-          {/* The same tick as Milestones, writing to the same row: one
-              checklist, two screens. It is the legacy drafted checklist, not
-              task completion, and says so when it is what the bar shows. */}
+          {/* The same tick as Milestones, writing to the same row (is_drafted).
+              On the Gantt a ticked section reads as done. Plain members see it
+              but cannot change it. */}
           <label className="ml-auto flex min-h-11 shrink-0 items-center gap-1 text-[11px] text-slate-600 sm:min-h-0">
             <input
               type="checkbox"
               checked={section.is_drafted}
-              aria-label={`${section.name} drafted`}
+              disabled={!env.canManage}
+              aria-label={`${section.name} done`}
               onChange={(e) => onDraftedChange(e.target.checked)}
-              className="h-4 w-4 accent-slate-900"
+              className="h-4 w-4 accent-slate-900 disabled:opacity-60"
             />
-            {progress.basis === 'tasks' ? `${progress.done}/${progress.total}` : 'drafted'}
+            {progress.basis === 'tasks' ? `${progress.done}/${progress.total}` : 'done'}
           </label>
         </div>
 
@@ -98,6 +99,7 @@ export function SectionRow({
               range={env.range}
               percent={progress.percent ?? 0}
               tone={under.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
+              caption={spanCaption(span)}
               title={`${section.name}: ${formatDay(span.from)} → ${formatDay(span.to)} · ${words}${
                 under.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''
               }`}
@@ -140,7 +142,7 @@ export function SectionRow({
 
           {under.length === 0 && (
             <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600">
-              No subtasks yet. Link an existing Board task below.
+              No subtasks yet.{env.canManage ? ' Link an existing Board task below.' : ''}
             </p>
           )}
           {under.length > 0 && shown.length === 0 && (
@@ -150,13 +152,15 @@ export function SectionRow({
             </p>
           )}
 
-          <LinkTaskTool
-            targetLabel={section.name}
-            direct={direct.map((t) => ({ id: t.id, title: t.title }))}
-            moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
-            onLink={link}
-            onMove={link}
-          />
+          {env.canManage && (
+            <LinkTaskTool
+              targetLabel={section.name}
+              direct={direct.map((t) => ({ id: t.id, title: t.title }))}
+              moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
+              onLink={link}
+              onMove={link}
+            />
+          )}
         </>
       )}
     </div>

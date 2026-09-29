@@ -8,7 +8,7 @@ import { GanttTaskRow } from './GanttTaskRow.tsx'
 import { LinkTaskTool } from './LinkTaskTool.tsx'
 import type { GanttEnv } from './ganttEnv.ts'
 import { canUnlinkMilestone, currentTargetKey, linkCandidates, relinkFrom } from './ganttLinking.ts'
-import { spanOfDates } from './ganttModel.ts'
+import { spanCaption, spanOfDates } from './ganttModel.ts'
 import { lensProgress, progressLabel, unsectionedFor, type ProgressSource } from './ganttProgress.ts'
 
 // Work linked to a submission before any section is chosen. It is a group in the
@@ -75,6 +75,7 @@ export function UnsectionedRow({
               range={env.range}
               variant="outline"
               tone="border-slate-400 text-slate-600"
+              caption={spanCaption(span)}
               title={`Unsectioned work: ${formatDay(span.from)} → ${formatDay(span.to)} · ${words}`}
             />
           )}
@@ -117,8 +118,8 @@ export function UnsectionedRow({
 
           {under.length === 0 && (
             <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600">
-              Nothing is linked to {milestone.key} without a section. Link a Board task below, or link it to a section
-              above.
+              Nothing is linked to {milestone.key} without a section.
+              {env.canManage ? ' Link a Board task below, or link it to a section above.' : ''}
             </p>
           )}
           {under.length > 0 && shown.length === 0 && (
@@ -128,13 +129,15 @@ export function UnsectionedRow({
             </p>
           )}
 
-          <LinkTaskTool
-            targetLabel={`${milestone.key} (no section yet)`}
-            direct={direct.map((t) => ({ id: t.id, title: t.title }))}
-            moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
-            onLink={link}
-            onMove={link}
-          />
+          {env.canManage && (
+            <LinkTaskTool
+              targetLabel={`${milestone.key} (no section yet)`}
+              direct={direct.map((t) => ({ id: t.id, title: t.title }))}
+              moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
+              onLink={link}
+              onMove={link}
+            />
+          )}
         </>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useId, useMemo, useState } from 'react'
 import { useAuth } from '../auth/context.ts'
+import { usePermissions } from '../auth/usePermissions.ts'
 import { canEditTask, canReassignTaskOwner } from '../auth/permissions.ts'
 import { DepartmentNav } from '../departments/DepartmentNav.tsx'
 import { ScopeDepartmentFilter } from '../departments/ScopeDepartmentFilter.tsx'
@@ -59,6 +60,7 @@ export default function Gantt() {
   const members = useMembers()
   const departments = useSubteams()
   const actor = useTaskActor()
+  const permissions = usePermissions()
   const setDrafted = useSetSectionDrafted()
   const updateTask = useUpdateTask()
   useRealtimeTasks()
@@ -168,6 +170,16 @@ export default function Gantt() {
     return out
   }, [milestoneRows, sectionRows, seasonId])
 
+  // A plain member — no privileged role, Head of no department — only views the
+  // Gantt, even for tasks they own (they still change those on the Board).
+  // Presentation only: the database keeps its own per-task rule.
+  const canManage = actor !== null && (permissions.roles.length > 0 || actor.headOf.length > 0)
+  const permsFor = (task: Task) => {
+    if (!actor || !canManage) return { canEdit: false, canReassign: false }
+    const canEdit = canEditTask(actor, task)
+    return { canEdit, canReassign: canEdit && canReassignTaskOwner(actor, task) }
+  }
+
   const env: GanttEnv = {
     today,
     range,
@@ -177,11 +189,8 @@ export default function Gantt() {
     memberNames,
     departmentNames,
     sectionNames,
-    permsFor: (task: Task) => {
-      if (!actor) return { canEdit: false, canReassign: false }
-      const canEdit = canEditTask(actor, task)
-      return { canEdit, canReassign: canEdit && canReassignTaskOwner(actor, task) }
-    },
+    canManage,
+    permsFor,
     lens: {
       active: lensActive,
       name: lensName,
@@ -190,7 +199,7 @@ export default function Gantt() {
     moveTargets,
     onMoveTo: (task, target) => {
       setMoveNotice(null)
-      if (!actor || !canEditTask(actor, task)) {
+      if (!permsFor(task).canEdit) {
         setMoveNotice(`You cannot move “${task.title}”: only its owner, its department's Head or a Developer can.`)
         return
       }
@@ -279,6 +288,11 @@ export default function Gantt() {
             {linked.length > 0 ? ` (${undated} undated, ${late} overdue)` : ''}. Progress counts archived done work, so
             archiving a finished task does not lower it.
           </p>
+          {!canManage && (
+            <p role="status" className="mb-2 text-xs text-slate-600" data-testid="gantt-view-only">
+              View only: department Heads and role holders link, assign and reschedule tasks here.
+            </p>
+          )}
 
           {/* The department lens: the same control, scope and department as the
               Board. It filters the tasks shown while the milestone → section

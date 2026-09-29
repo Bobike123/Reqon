@@ -20,7 +20,11 @@ export type GanttEnv = {
   departmentNames: ReadonlyMap<string, string>
   sectionNames: ReadonlyMap<string, string>
 
-  // Presentation-only mirrors of the database's rules (auth/permissions.ts).
+  // False for a plain member (no privileged role, heads no department): they
+  // only view the Gantt — no linking, assigning, rescheduling or ticking.
+  canManage: boolean
+  // Presentation-only mirrors of the database's rules (auth/permissions.ts),
+  // always false everywhere when canManage is false.
   permsFor: (task: Task) => GanttTaskPerms
 
   // The department lens. `matches` says whether a task passes it; `name` names it

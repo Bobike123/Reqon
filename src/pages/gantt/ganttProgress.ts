@@ -104,13 +104,19 @@ export function lensProgress(
   return counted > 0 ? { basis: 'tasks', ...rest } : NOTHING
 }
 
-// The words for a figure. Always says what it counts.
-export function progressLabel(view: ProgressView, unit: 'submission' | 'section' = 'submission'): string {
+// The words for a figure. Always says what it counts. `tick` names the section
+// tick: Milestones calls it "drafted", the Gantt calls it "done".
+export function progressLabel(
+  view: ProgressView,
+  unit: 'submission' | 'section' = 'submission',
+  tick: 'drafted' | 'done' = 'drafted',
+): string {
   if (view.basis === 'none') return 'No linked work'
   if (view.basis === 'drafted') {
+    const word = view.done === 1 ? tick : `not ${tick}`
     return unit === 'section'
-      ? `${view.done === 1 ? 'Drafted' : 'Not drafted'} (no tasks linked)`
-      : `${view.done} of ${view.total} sections drafted (no tasks linked)`
+      ? `${word[0].toUpperCase()}${word.slice(1)} (no tasks linked)`
+      : `${view.done} of ${view.total} sections ${tick} (no tasks linked)`
   }
   const archived = view.archivedDone > 0 ? `, incl. ${view.archivedDone} archived done` : ''
   const stuck = view.archivedUnfinished > 0 ? `, ${view.archivedUnfinished} archived unfinished` : ''

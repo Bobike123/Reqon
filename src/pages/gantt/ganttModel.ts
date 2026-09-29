@@ -213,3 +213,13 @@ export function spanOfDates(dates: (string | null | undefined)[]): Span | null {
 export function sectionSpan(tasks: Task[], sectionId: string, fallback: Span | null): Span | null {
   return spanOfDates(tasksInSection(tasks, sectionId).flatMap((t) => [t.starts_on, t.due_date])) ?? fallback
 }
+
+// "20 Nov": short enough to sit beside a mark. The full date (with the year) is
+// in the mark's title and the row's summary.
+export function shortDay(iso: string): string {
+  const day = new Date(`${iso.slice(0, 10)}T00:00:00`)
+  return Number.isNaN(day.getTime()) ? '' : day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+export const spanCaption = (span: Span) =>
+  span.from === span.to ? shortDay(span.from) : `${shortDay(span.from)} → ${shortDay(span.to)}`

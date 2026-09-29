@@ -58,6 +58,7 @@ describe('milestoneProgress: one rule, counted once', () => {
     const view = milestoneProgress([sec('s1', true), sec('s2')], [], 'M1')
     expect(view).toMatchObject({ basis: 'drafted', percent: 50, done: 1, total: 2 })
     expect(progressLabel(view)).toBe('1 of 2 sections drafted (no tasks linked)')
+    expect(progressLabel(view, 'submission', 'done')).toBe('1 of 2 sections done (no tasks linked)')
   })
 
   it('with nothing at all it says so, and has no percentage', () => {
@@ -80,6 +81,7 @@ describe('sectionProgress', () => {
   it('a section with no task shows its own drafted tick, labelled', () => {
     expect(progressLabel(sectionProgress(sec('s1', true), []), 'section')).toBe('Drafted (no tasks linked)')
     expect(progressLabel(sectionProgress(sec('s1', false), []), 'section')).toBe('Not drafted (no tasks linked)')
+    expect(progressLabel(sectionProgress(sec('s1', false), []), 'section', 'done')).toBe('Not done (no tasks linked)')
     expect(sectionProgress(sec('s1', true), [])).toMatchObject({ basis: 'drafted', percent: 100 })
   })
 })

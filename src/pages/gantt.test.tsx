@@ -89,7 +89,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers({ toFake: ['Date'], now: TODAY })
   who.id = 'm1'
-  who.roles = []
+  // A role holder with no task authority of their own: they edit what they own.
+  // Plain members (no role, no department) only view — see 'view only'.
+  who.roles = ['treasurer']
   state.loadError = null
   tasks = [
     task('t1', { title: 'Draft the cover', state: 'wip', section_id: 'sec1', milestone_key: 'MS1-1', starts_on: '2026-11-20', due_date: '2026-11-25' }),
@@ -234,6 +236,16 @@ describe('honest dates', () => {
     expect(months).not.toContain('Mar 25')
   })
 
+  it('writes the periods and deadlines on the chart, not only in tooltips', async () => {
+    const user = userEvent.setup()
+    renderGantt()
+    expect(screen.getByTestId('gantt-milestone-MS1-1')).toHaveTextContent('1 Nov → Due 30 Nov')
+    expect(screen.getByTestId('gantt-milestone-MS1-2')).toHaveTextContent('Due 28 Feb')
+    await open(user, /MS1-1/, /Cover sheet/)
+    expect(screen.getByTestId('gantt-task-t1')).toHaveTextContent('20 Nov → 25 Nov')
+    expect(screen.getByTestId('gantt-task-t2')).toHaveTextContent('Due 27 Nov')
+  })
+
   it('names today with a word on the ruler as well as a line', () => {
     renderGantt()
     expect(within(screen.getByTestId('gantt-today-label')).getByText('Today')).toBeInTheDocument()
@@ -252,17 +264,19 @@ describe('progress', () => {
   it('a submission with no linked task says so, instead of a percentage', () => {
     tasks = tasks.filter((t) => t.milestone_key !== 'MS1-2')
     renderGantt()
-    // MS1-2 keeps its one section (undrafted): the drafted checklist stands in, and says so.
-    expect(screen.getByTestId('gantt-overall-MS1-2')).toHaveTextContent('0/1 drafted')
+    // MS1-2 keeps its one section (unticked): the section ticks stand in, and say so.
+    expect(screen.getByTestId('gantt-overall-MS1-2')).toHaveTextContent('0/1 done')
     expect(screen.getByTestId('gantt-overall-MS1-7')).toHaveTextContent('No linked work')
   })
 
-  it('shows a section\'s drafted checklist as drafted, never as task completion', async () => {
+  it('a ticked section reads as done, not drafted', async () => {
     const user = userEvent.setup()
     renderGantt()
     await open(user, /MS1-1/)
     const empty = screen.getByTestId('gantt-section-sec2')
-    expect(empty).toHaveTextContent('Budget: Not drafted (no tasks linked)')
+    expect(empty).toHaveTextContent('Budget: Not done (no tasks linked)')
+    expect(within(empty).getByRole('checkbox', { name: 'Budget done' })).toBeEnabled()
+    expect(empty).not.toHaveTextContent(/drafted/i)
   })
 
   it('counts a task attached to a milestone once, whether or not it has a section', () => {
@@ -426,6 +440,36 @@ describe('linking an existing task (the only work-association command)', () => {
     expect(screen.getAllByTestId('link-none').length).toBeGreaterThan(0)
     // Everything is still readable.
     expect(screen.getByTestId('gantt-task-t1')).toBeInTheDocument()
+  })
+})
+
+describe('view only for plain members', () => {
+  it('a member with no role who heads nothing sees everything but changes nothing, even on their own task', async () => {
+    who.roles = []
+    const user = userEvent.setup()
+    renderGantt()
+    expect(screen.getByTestId('gantt-view-only')).toBeInTheDocument()
+    await open(user, /MS1-1/, /Cover sheet/, /Unsectioned work/)
+    // t1 is theirs: readable, not editable here.
+    expect(screen.getByTestId('gantt-task-t1')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Move .* to another lane/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Owner for/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Unlink/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Link an existing board task/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('link-none')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Cover sheet done' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Show details of Draft the cover' }))
+    expect(within(screen.getByTestId('gantt-task-more-t1')).queryByLabelText('Deadline')).not.toBeInTheDocument()
+  })
+
+  it('a Head with no role still manages their department', async () => {
+    who.id = 'm2'
+    who.roles = []
+    const user = userEvent.setup()
+    renderGantt()
+    expect(screen.queryByTestId('gantt-view-only')).not.toBeInTheDocument()
+    await open(user, /MS1-1/, /Cover sheet/)
+    expect(screen.getByLabelText('Owner for Draft the cover')).toBeInTheDocument()
   })
 })
 
