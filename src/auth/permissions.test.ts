@@ -12,6 +12,7 @@ import {
   canReviewProposal,
   canSubmitProposal,
   describeRoles,
+  describePublicAccess,
   permissionsFor,
   taskDepartmentTargets,
   type PrivilegedRole,
@@ -286,7 +287,16 @@ describe('role names shown to people', () => {
 
   it('describes any set of roles in words, including none', () => {
     expect(describeRoles([])).toBe('Member (no privileged role)')
-    expect(describeRoles(['developer', 'treasurer'])).toBe('Treasurer')
-    expect(describeRoles(['developer', 'president', 'vicepresident'])).toBe('President, Vice President')
+    // Exact: the account badge and the role editor must name every role a person holds.
+    expect(describeRoles(['developer', 'treasurer'])).toBe('Treasurer and Developer')
+    expect(describeRoles(['developer', 'president', 'vicepresident'])).toBe('President, Vice President and Developer')
+  })
+
+  // Access notices describe the club-facing roles and do not advertise the maintenance override.
+  it('describes access for notices without naming the Developer role', () => {
+    expect(describePublicAccess(['developer', 'treasurer'])).toBe('Treasurer')
+    expect(describePublicAccess(['developer', 'president', 'vicepresident'])).toBe('President and Vice President')
+    expect(describePublicAccess(['developer'])).toBe('Maintenance access')
+    expect(describePublicAccess([])).toBe('Member (no privileged role)')
   })
 })

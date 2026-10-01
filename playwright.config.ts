@@ -29,7 +29,12 @@ export default defineConfig({
     { name: 'chromium-narrow', use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 812 } } },
   ],
   webServer: {
-    command: 'npm run dev -- --port 5173 --strictPort',
+    // Bound to 127.0.0.1 explicitly: on CI runners `localhost` can resolve to ::1, so Vite would listen on IPv6
+    // only while Playwright polls 127.0.0.1 and times out (every CI run since 2026-09-29). Its output is piped
+    // so a failure to start shows the predev / Vite log instead of a bare timeout.
+    command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
+    stdout: 'pipe',
+    stderr: 'pipe',
     url: 'http://127.0.0.1:5173',
     reuseExistingServer: true,
     timeout: 60_000,
