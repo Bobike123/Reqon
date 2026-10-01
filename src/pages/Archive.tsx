@@ -266,7 +266,7 @@ function RestoreDialog({ task, pending, error, onCancel, onConfirm }: { task: Ta
             {task.state === 'done'
               ? 'This task was finished. Restoring it reopens it: it goes back to the Board in To do, and its completion time is cleared so it is not archived again straight away.'
               : 'Restoring puts it back on the Board in the lane it was in.'}{' '}
-            Its history is kept either way. Only its department Head or a Developer can restore it.
+            Its history is kept either way. Only an authorized department lead can restore it.
           </p>
           <ActionError error={error} className="mt-3" />
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">

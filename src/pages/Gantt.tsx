@@ -5,9 +5,11 @@ import { DepartmentNav } from '../departments/DepartmentNav.tsx'
 import { ScopeDepartmentFilter } from '../departments/ScopeDepartmentFilter.tsx'
 import { departmentChoices } from '../departments/filter.ts'
 import { formatDay, todayIso } from '../lib/dates.ts'
+import { milestoneLabel } from '../milestones/label.ts'
 import { useSeasonId } from '../season/context.ts'
 import { mergeSearchParams, readSetParam, writeSetParam } from '../lib/searchParams.ts'
 import { applyTaskFilter, filterTasks, isDefaultTaskFilter, taskFilterFromParams, taskScopeCounts, type TaskFilter } from '../tasks/filters.ts'
+import { prerequisitesOf, taskRefLookup } from '../tasks/dependencies.ts'
 import { isOverdue } from '../tasks/overdue.ts'
 import { pageMain } from '../ui/layout.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
@@ -16,11 +18,13 @@ import { Dialog } from '../ui/Dialog.tsx'
 import { ActionError, EmptyState, ErrorState } from '../ui/states.tsx'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones, useMilestoneSections, useSetSectionDrafted } from '../data/useMilestones.ts'
+import { useRealtimeTaskDependencies } from '../data/useRealtimeTaskDependencies.ts'
 import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
 import { useRealtimeMilestones } from '../data/useRealtimeMilestones.ts'
 import { useRealtimeMilestoneSections } from '../data/useRealtimeMilestoneSections.ts'
 import { useSubteams } from '../data/useSubteams.ts'
 import { useTaskActor } from '../data/useTaskActor.ts'
+import { useTaskDependencies } from '../data/useTaskDependencies.ts'
 import { useTasksForProgress } from '../data/useTaskHistory.ts'
 import { useTasks, useUpdateTask, type Task } from '../data/useTasks.ts'
 import { GanttLegend } from './gantt/GanttLegend.tsx'
@@ -29,6 +33,7 @@ import { MilestoneRow } from './gantt/MilestoneRow.tsx'
 import type { GanttEnv } from './gantt/ganttEnv.ts'
 import { currentTargetKey, linkEdit, targetKey, unlinkMilestoneEdit, unlinkSectionEdit, type LinkTarget } from './gantt/ganttLinking.ts'
 import { planScheduleEdit } from './board/taskEditPlan.ts'
+import { subsectionsOf, topLevelSections } from './milestones/milestoneModel.ts'
 import { planningDates, taskMark } from './gantt/ganttMarks.ts'
 import { monthTicks, placeDay, timelineRange, weekTicks } from './gantt/ganttModel.ts'
 import type { ProgressRow } from './gantt/ganttProgress.ts'
@@ -62,6 +67,8 @@ export default function Gantt() {
   const setDrafted = useSetSectionDrafted()
   const updateTask = useUpdateTask()
   useRealtimeTasks()
+  useRealtimeTaskDependencies()
+  const dependencies = useTaskDependencies()
   useRealtimeMilestones()
   useRealtimeMilestoneSections()
   const [params, setParams] = useUrlParams()
@@ -158,15 +165,30 @@ export default function Gantt() {
   const moveTargets = useMemo(() => {
     const out: { key: string; label: string; target: LinkTarget }[] = []
     for (const m of milestoneRows) {
-      for (const section of sectionRows.filter((x) => x.milestone_key === m.key).sort((a, b) => a.ordinal - b.ordinal)) {
+      for (const section of topLevelSections(sectionRows, m.key)) {
         const target = { seasonId: seasonId ?? '', milestoneKey: m.key, sectionId: section.id }
-        out.push({ key: targetKey(target), label: `${m.key} · ${section.name}`, target })
+        out.push({ key: targetKey(target), label: `${milestoneLabel(m)} · ${section.name}`, target })
+        for (const sub of subsectionsOf(sectionRows, section.id)) {
+          const subTarget = { seasonId: seasonId ?? '', milestoneKey: m.key, sectionId: sub.id }
+          out.push({ key: targetKey(subTarget), label: `${milestoneLabel(m)} · ${section.name} › ${sub.name}`, target: subTarget })
+        }
       }
       const loose = { seasonId: seasonId ?? '', milestoneKey: m.key, sectionId: null }
-      out.push({ key: targetKey(loose), label: `${m.key} · no section`, target: loose })
+      out.push({ key: targetKey(loose), label: `${milestoneLabel(m)} · no section`, target: loose })
     }
     return out
   }, [milestoneRows, sectionRows, seasonId])
+
+  const dependencyLinks = useMemo(() => dependencies.data ?? [], [dependencies.data])
+  const milestoneLabelFor = (key: string | null) => {
+    const m = (milestones.data ?? []).find((candidate) => candidate.key === key)
+    return m ? milestoneLabel(m) : (key ?? 'no submission')
+  }
+  // Prerequisites are read by name even once archived (the progress list carries the archived tasks).
+  const prerequisiteLookup = useMemo(
+    () => taskRefLookup(taskRows, (progress.data ?? []).filter((t) => t.archived_at !== null)),
+    [taskRows, progress.data],
+  )
 
   const env: GanttEnv = {
     today,
@@ -191,7 +213,7 @@ export default function Gantt() {
     onMoveTo: (task, target) => {
       setMoveNotice(null)
       if (!actor || !canEditTask(actor, task)) {
-        setMoveNotice(`You cannot move “${task.title}”: only its owner, its department's Head or a Developer can.`)
+        setMoveNotice(`You cannot move “${task.title}”: only its owner or its department's Head can.`)
         return
       }
       if (targetKey(target) === currentTargetKey(task)) return
@@ -211,7 +233,9 @@ export default function Gantt() {
     },
     expandedTask,
     onToggleTask: (taskId) => writeParams({ task: expandedTask === taskId ? null : taskId }),
-    onMove: (taskId, state) => updateTask.mutate({ id: taskId, state }),
+    prerequisitesFor: (task) => prerequisitesOf(dependencyLinks, task.id, prerequisiteLookup),
+    onMove: (taskId, state, blockedReason) =>
+      updateTask.mutate({ id: taskId, state, ...(blockedReason ? { blockedReason } : {}) }),
     onOwner: (taskId, ownerId) => updateTask.mutate({ id: taskId, ownerId }),
     onLink: (task, target) => updateTask.mutate(linkEdit(task, target)),
     onUnlinkSection: (task) => updateTask.mutate(unlinkSectionEdit(task)),
@@ -274,7 +298,7 @@ export default function Gantt() {
         <>
           <p className="mb-2 text-sm text-slate-700" data-testid="gantt-summary">
             {milestoneRows.length} submission{milestoneRows.length === 1 ? '' : 's'}.{' '}
-            {upcoming ? `Next deadline: ${upcoming.key} on ${formatDay(upcoming.due_on)}. ` : 'No upcoming deadline is published. '}
+            {upcoming ? `Next deadline: ${milestoneLabel(upcoming)} on ${formatDay(upcoming.due_on)}. ` : 'No upcoming deadline is published. '}
             {linked.length} linked task{linked.length === 1 ? '' : 's'}
             {linked.length > 0 ? ` (${undated} undated, ${late} overdue)` : ''}. Progress counts archived done work, so
             archiving a finished task does not lower it.
@@ -387,7 +411,7 @@ export default function Gantt() {
               Move to another submission?
             </h2>
             <p className="mt-2 text-sm text-slate-700">
-              “{pendingMove.task.title}” is on {pendingMove.task.milestone_key}. Moving it to {pendingMove.label} changes its
+              “{pendingMove.task.title}” is on {milestoneLabelFor(pendingMove.task.milestone_key)}. Moving it to {pendingMove.label} changes its
               milestone and section together, in one change. It stays the same Board task, with the same owner and
               department.
             </p>

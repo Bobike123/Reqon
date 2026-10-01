@@ -4,8 +4,10 @@ import { formatDay } from '../../lib/dates.ts'
 import { isUrgent, TASK_PRIORITY_BADGE_TONE, TASK_PRIORITY_LABEL } from '../../tasks/priority.ts'
 import { TASK_STATES, TASK_STATE_LABEL } from '../../tasks/taskState.ts'
 import type { Task, TaskState } from '../../tasks/types.ts'
+import { openPrerequisites } from '../../tasks/dependencies.ts'
 import { isOverdue } from './boardModel.ts'
-import { TaskDetails, type TaskPermissions } from './TaskDetails.tsx'
+import { TaskDetails, type TaskLinksView, type TaskPermissions } from './TaskDetails.tsx'
+import { BlockReasonForm } from './BlockReasonForm.tsx'
 
 type Props = {
   task: Task
@@ -19,7 +21,9 @@ type Props = {
   milestones: { value: string; label: string }[]
   moving: boolean
   today: string
-  onMove: (id: string, state: TaskState) => void
+  onMove: (id: string, state: TaskState, blockedReason?: string) => void
+  // Prerequisite links, for the blocker line and the Details section.
+  links?: TaskLinksView
   tutorial: boolean
   // Arrived by a link naming this task: open its details and bring it into view.
   focused?: boolean
@@ -45,7 +49,10 @@ export function TaskCard(props: Props) {
     cardRef.current?.scrollIntoView?.({ block: 'center' })
     cardRef.current?.focus({ preventScroll: true })
   }, [focused])
+  const [asking, setAsking] = useState(false)
   const overdue = isOverdue(task, props.today)
+  const prerequisites = props.links?.prerequisites ?? []
+  const openCount = openPrerequisites(prerequisites).length
   const reqCount = props.requirementKeys.length
 
   return (
@@ -92,12 +99,23 @@ export function TaskCard(props: Props) {
         </div>
       </dl>
 
-      {/* The blocker is its own line, apart from the description. Reqon records
-          only the Blocked state, so the summary says a reason is missing rather
-          than inventing one. */}
+      {/* The blocker is its own line, apart from the description: the written
+          reason, or the task(s) it waits for. A task blocked before reasons were
+          kept says so instead of inventing one. */}
       {task.state === 'blocked' && (
         <p className="mt-1 rounded border-l-4 border-amber-500 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-950" data-testid={`task-blocked-${task.id}`}>
-          <span className="font-semibold">Blocked</span> · no reason recorded
+          <span className="font-semibold">Blocked</span> ·{' '}
+          {task.blocked_reason
+            ? task.blocked_reason
+            : openCount > 0
+              ? `waiting for ${openCount} ${openCount === 1 ? 'task' : 'tasks'}`
+              : 'no reason recorded'}
+        </p>
+      )}
+      {task.state !== 'blocked' && prerequisites.length > 0 && (
+        <p className="mt-1 text-[11px] text-slate-600" data-testid={`task-waits-${task.id}`}>
+          Waits for {prerequisites.length} {prerequisites.length === 1 ? 'task' : 'tasks'}
+          {openCount > 0 ? ` (${openCount} not finished)` : ' (all finished)'}
         </p>
       )}
 
@@ -119,7 +137,18 @@ export function TaskCard(props: Props) {
             id={`task-state-${task.id}`}
             value={task.state}
             disabled={props.moving}
-            onChange={(e) => props.onMove(task.id, e.target.value as TaskState)}
+            onChange={(e) => {
+              const next = e.target.value as TaskState
+              // Blocking needs an explanation: a written reason, or a prerequisite
+              // task. With neither, ask for the reason here instead of sending a
+              // move the database would refuse.
+              if (next === 'blocked' && task.state !== 'blocked' && openCount === 0) {
+                setAsking(true)
+                return
+              }
+              setAsking(false)
+              props.onMove(task.id, next)
+            }}
             className="min-h-11 w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 disabled:opacity-60 sm:min-h-0"
           >
             {TASK_STATES.map((l) => (
@@ -129,6 +158,21 @@ export function TaskCard(props: Props) {
             ))}
           </select>
         </div>
+      )}
+
+      {asking && (
+        <BlockReasonForm
+          taskTitle={task.title}
+          fieldId={`task-block-reason-${task.id}`}
+          testId={`task-block-form-${task.id}`}
+          returnFocusId={`task-state-${task.id}`}
+          busy={props.moving}
+          onBlock={(reason) => {
+            props.onMove(task.id, 'blocked', reason)
+            setAsking(false)
+          }}
+          onCancel={() => setAsking(false)}
+        />
       )}
 
       <details
@@ -148,6 +192,7 @@ export function TaskCard(props: Props) {
             milestones={props.milestones}
             requirementKeys={props.requirementKeys}
             source={props.source}
+            links={props.links}
           />
         )}
       </details>

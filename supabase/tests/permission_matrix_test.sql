@@ -271,14 +271,22 @@ begin
     (select count(*)::text from activity where entity = 'task' and entity_id = t_done::text and action = 'restored'
        and actor_id = vp and detail ->> 'reason' = 'auto_done_24h'), '1');
 
-  -- archive: Head of the department yes; another Head, the President (department HAS a Head) no
+  -- archive: Head of the department yes; another Head and the Treasurer no. Role hierarchy
+  -- (20260130000000, superseding the no-Head-only fallback): the President and the Vice President
+  -- rank above the Head, so they edit and archive in a department that HAS a Head.
   insert into tasks (season_id, title, subteam_key, owner_id, state) values (season, 'P2 live', da, mem, 'wip') returning id into t_live;
   perform pg_temp.expect('Head of ANOTHER department cannot archive', pg_temp.attempt(head2, format('select archive_task(%L)', t_live)), 'DENIED');
-  perform pg_temp.expect('President cannot archive in a department that has a Head', pg_temp.attempt(pre, format('select archive_task(%L)', t_live)), 'DENIED');
-  perform pg_temp.expect('President cannot edit a task in a department that has a Head', pg_temp.attempt(pre, format('update tasks set detail = ''x'' where id = %L', t_live)), 'DENIED');
+  perform pg_temp.expect('the Treasurer cannot archive', pg_temp.attempt(tre, format('select archive_task(%L)', t_live)), 'DENIED');
+  perform pg_temp.expect('the Treasurer cannot edit a task they do not own', pg_temp.attempt(tre, format('update tasks set detail = ''x'' where id = %L', t_live)), 'DENIED');
+  perform pg_temp.expect('the President edits a task in a department that has a Head', pg_temp.attempt(pre, format('update tasks set detail = ''x'' where id = %L', t_live)), 'ALLOWED');
+  perform pg_temp.expect('the Vice President reassigns its owner there', pg_temp.attempt(vp, format('update tasks set owner_id = %L where id = %L', mem2, t_live)), 'ALLOWED');
   perform pg_temp.expect('Head archives in their department', pg_temp.attempt(head, format('select archive_task(%L)', t_live)), 'ALLOWED');
   perform pg_temp.expect('... recorded as a manual archive by the Head',
     (select (archive_reason = 'manual' and archived_by = head)::text from tasks where id = t_live), 'true');
+  insert into tasks (season_id, title, subteam_key, owner_id, state) values (season, 'P2 live 2', da, mem, 'wip') returning id into t;
+  perform pg_temp.expect('the President archives in a department that has a Head', pg_temp.attempt(pre, format('select archive_task(%L)', t)), 'ALLOWED');
+  perform pg_temp.expect('... recorded as a manual archive by the President',
+    (select (archive_reason = 'manual' and archived_by = pre)::text from tasks where id = t), 'true');
 
   -- ===================================== job titles and retired holders grant nothing
   foreach r in array array['can_manage_departments()', 'can_manage_seasons()', 'can_manage_roles()', 'is_admin()',

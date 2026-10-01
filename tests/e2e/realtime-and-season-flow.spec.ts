@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readManifest, runSql } from './setup/db.ts'
+import { deleteProposalsWhere } from './setup/cleanup.ts'
 import { chooseDepartment, openProposalForm } from './setup/departments.ts'
 import { login } from './setup/login.ts'
 
@@ -77,8 +78,7 @@ test.describe('two-session realtime propagation and season switching (R38-R39)',
       await expect(pageA.getByTestId(`task-${taskId}`)).toHaveCount(0, { timeout: 10_000 })
     } finally {
       runSql(`delete from tasks where title = '${TITLE}'`)
-      runSql(`delete from proposal_requirements where proposal_id in (select id from task_proposals where title = '${TITLE}')`)
-      runSql(`delete from task_proposals where title = '${TITLE}'`)
+      deleteProposalsWhere(`title = '${TITLE}'`)
       await ctxA.close()
       await ctxB.close()
     }

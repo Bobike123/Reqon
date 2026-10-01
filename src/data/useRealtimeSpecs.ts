@@ -5,6 +5,7 @@ import { type RealtimeState, useSeasonRealtimeChannel } from './realtime.ts'
 
 type SpecRow = Database['public']['Tables']['specs']['Row']
 type MeasurementRow = Database['public']['Tables']['spec_measurements']['Row']
+type ReadinessRow = Database['public']['Tables']['spec_readiness']['Row']
 
 // Two tables feed the Spec Sheet, and both are read through something a raw
 // payload cannot reconstruct, so both only INVALIDATE:
@@ -46,8 +47,18 @@ export function useRealtimeSpecs(): RealtimeState {
     },
   })
 
-  // "Live" only when both are; one still connecting keeps the label honest.
-  if (specs === history) return specs
-  if (specs === 'off' || history === 'off') return 'off'
+  // Readiness confirmations and their lapses arrive on their own table (a lapse writes no specs row).
+  const readiness = useSeasonRealtimeChannel<ReadinessRow>('spec_readiness', (_payload, seasonId) => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.specVerdicts(seasonId) })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.activityAll(seasonId) })
+  }, {
+    onSubscribed: (seasonId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.specVerdicts(seasonId) })
+    },
+  })
+
+  // "Live" only when all are; one still connecting keeps the label honest.
+  if (specs === history && history === readiness) return specs
+  if (specs === 'off' || history === 'off' || readiness === 'off') return 'off'
   return 'connecting'
 }

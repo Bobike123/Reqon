@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
+import { usePermissions } from '../auth/usePermissions.ts'
+import { milestoneLabel } from '../milestones/label.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { formatDay } from '../lib/dates.ts'
 import { mergeSearchParams, readSetParam, writeSetParam } from '../lib/searchParams.ts'
@@ -18,11 +20,15 @@ import { useSubteams } from '../data/useSubteams.ts'
 import { useTasksForProgress, type ProgressTask } from '../data/useTaskHistory.ts'
 import { TASK_STATE_LABEL } from '../tasks/taskState.ts'
 import { milestoneProgress, progressLabel, tasksUnderSection, unsectionedFor } from './gantt/ganttProgress.ts'
+import { ms1Points } from './now/nowModel.ts'
 import {
   draftedCount,
   sectionsFor,
+  subsectionsOf,
   submissionWindow,
+  topLevelSections,
 } from './milestones/milestoneModel.ts'
+import { SubmissionState } from './milestones/SubmissionState.tsx'
 import { useUrlParams } from '../lib/useUrlParams.ts'
 
 // The submissions, in their published order (Milestones 1–7 and Rider
@@ -31,10 +37,10 @@ import { useUrlParams } from '../lib/useUrlParams.ts'
 // window or TBC, and its status. Expanding shows its real sections and the
 // tasks under each — what is complete, blocked or outstanding.
 //
-// Three different things are kept apart on purpose: task progress (from Board
-// tasks), the drafting checklist (the sections' own ticks), and submission.
-// Reqon records neither the sending nor the organisers' acceptance of a
-// submission, so a full bar never claims either. Points are shown, small.
+// Four different things are kept apart on purpose: task progress (from Board
+// tasks), the drafting checklist (the sections' own ticks), and the two facts a
+// person records — SUBMITTED to the organisers and ACCEPTED by them. A full bar
+// never claims either. Points are shown, small.
 export default function Milestones() {
   const milestones = useMilestones()
   const sections = useMilestoneSections(milestones.data?.map((m) => m.key))
@@ -42,6 +48,7 @@ export default function Milestones() {
   useRealtimeMilestones()
   const clauses = useClauses()
   const setDrafted = useSetSectionDrafted()
+  const permissions = usePermissions()
   const members = useMembers()
   const departments = useSubteams()
   // The same linked-work figure the Gantt shows (active AND archived tasks, one
@@ -88,7 +95,7 @@ export default function Milestones() {
   }
 
   const ordered = [...(milestones.data ?? [])].sort((a, b) => a.ordinal - b.ordinal)
-  const totalPoints = ordered.filter((m) => m.key.startsWith('MS1')).reduce((n, m) => n + (m.max_points ?? 0), 0)
+  const totalPoints = ms1Points(ordered)
 
   const taskLine = (task: ProgressTask) => (
     <li key={task.id} className="flex flex-wrap items-baseline gap-x-2 py-0.5" data-task-id={task.id}>
@@ -137,7 +144,8 @@ export default function Milestones() {
 
       <p className="mb-3 text-xs text-slate-600">
         The bar counts linked Board tasks done (cancelled left out, archived Done kept). It is not the drafting checklist
-        and it does not mean a submission was sent or accepted — Reqon does not record either. Unknown dates stay TBC.{' '}
+        and it does not mean a submission was sent or accepted: those two are recorded by a person, below each
+        milestone, and read “Not recorded” until then. Unknown dates stay TBC.{' '}
         <span data-testid="ms1-total">Points: up to {totalPoints} across the MS1 deliverables, awarded by the organisers.</span>
       </p>
 
@@ -176,7 +184,7 @@ export default function Milestones() {
                   <span aria-hidden="true" className="w-3 text-slate-500">
                     {isOpen ? '▾' : '▸'}
                   </span>
-                  <span className="font-mono text-xs">{milestone.key}</span>{' '}
+                  <span className="font-mono text-xs">{milestoneLabel(milestone)}</span>{' '}
                   <span className="min-w-0">{milestone.name}</span>
                 </button>
 
@@ -229,6 +237,13 @@ export default function Milestones() {
                 </div>
               </div>
 
+              <SubmissionState
+                milestone={milestone}
+                canRecord={permissions.canManageMilestoneStructure}
+                memberNames={memberName}
+                workLabel={view ? progressLabel(view) : progress.error ? 'could not be loaded' : 'loading…'}
+              />
+
               <p className="mt-1 flex flex-wrap gap-x-3 text-xs text-slate-500">
                 {total > 0 && (
                   <span>
@@ -244,7 +259,7 @@ export default function Milestones() {
                   {milestone.aim && <p className="mb-2 text-slate-700">{milestone.aim}</p>}
                   <p className="mb-2 text-xs">
                     <Link to={`/gantt?open=${encodeURIComponent(milestone.key)}`} className="font-medium underline underline-offset-2">
-                      Open {milestone.key} on the Gantt
+                      Open {milestoneLabel(milestone)} on the Gantt
                     </Link>
                   </p>
                   {mySections.length === 0 && loose.length === 0 && (
@@ -254,32 +269,44 @@ export default function Milestones() {
                     <p className="text-xs font-medium text-slate-600">Drafting checklist — sections drafted {drafted}/{total}</p>
                   )}
                   <ul className="mt-1 space-y-2">
-                    {mySections.map((section) => {
-                      const under = progress.data ? tasksUnderSection(progress.data, section.id) : []
+                    {topLevelSections(sections.data ?? [], milestone.key).map((section) => {
+                      const subs = subsectionsOf(sections.data ?? [], section.id)
+                      const sectionRow = (sec: typeof section, nested: boolean) => {
+                        const under = progress.data ? tasksUnderSection(progress.data, sec.id) : []
+                        return (
+                          <li key={sec.id} className={`rounded border border-slate-200 bg-white p-2 ${nested ? 'ml-6' : ''}`} data-testid={`milestone-section-${sec.id}`}>
+                            <label className="flex min-h-11 items-center gap-2 font-medium text-slate-900 sm:min-h-0">
+                              <input
+                                type="checkbox"
+                                checked={sec.is_drafted}
+                                onChange={(e) => setDrafted.mutate({ id: sec.id, isDrafted: e.target.checked })}
+                                className="h-5 w-5 accent-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                              />
+                              {nested && <span aria-hidden="true" className="text-slate-400">↳</span>}
+                              {sec.name}
+                              <span className="text-xs font-normal text-slate-500">({nested ? 'subsection, ' : ''}drafted — a checklist tick, not task completion)</span>
+                            </label>
+                            {under.length === 0 ? (
+                              <p className="ml-7 text-xs text-slate-500">No tasks linked to this {nested ? 'subsection' : 'section'}.</p>
+                            ) : (
+                              <ul className="ml-7 text-sm">{under.map(taskLine)}</ul>
+                            )}
+                          </li>
+                        )
+                      }
                       return (
-                        <li key={section.id} className="rounded border border-slate-200 bg-white p-2">
-                          <label className="flex min-h-11 items-center gap-2 font-medium text-slate-900 sm:min-h-0">
-                            <input
-                              type="checkbox"
-                              checked={section.is_drafted}
-                              onChange={(e) => setDrafted.mutate({ id: section.id, isDrafted: e.target.checked })}
-                              className="h-5 w-5 accent-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
-                            />
-                            {section.name}
-                            <span className="text-xs font-normal text-slate-500">(drafted — a checklist tick, not task completion)</span>
-                          </label>
-                          {under.length === 0 ? (
-                            <p className="ml-7 text-xs text-slate-500">No tasks linked to this section.</p>
-                          ) : (
-                            <ul className="ml-7 text-sm">{under.map(taskLine)}</ul>
-                          )}
+                        <li key={section.id} className="list-none">
+                          <ul className="space-y-2">
+                            {sectionRow(section, false)}
+                            {subs.map((sub) => sectionRow(sub, true))}
+                          </ul>
                         </li>
                       )
                     })}
                   </ul>
                   {loose.length > 0 && (
                     <div className="mt-2">
-                      <p className="text-xs font-medium text-slate-600">Linked to {milestone.key} without a section</p>
+                      <p className="text-xs font-medium text-slate-600">Linked to {milestoneLabel(milestone)} without a section</p>
                       <ul className="text-sm">{loose.map(taskLine)}</ul>
                     </div>
                   )}

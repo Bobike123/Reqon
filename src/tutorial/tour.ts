@@ -1,4 +1,4 @@
-import { describeRoles } from '../auth/permissions.ts'
+import { describePublicAccess } from '../auth/permissions.ts'
 import { AUDIENCES, CHAPTERS, type ChapterId, type TourViewer, type TutorialStep } from './steps.ts'
 
 // Which tour to run: everything for this person, only the steps their role
@@ -49,9 +49,9 @@ export function buildTour(
 // department", or just "Head of a department" for someone with no privileged
 // role at all.
 function roleLabel(can: TourViewer): string {
-  if (!can.isHeadOfDepartment) return describeRoles(can.roles)
+  if (!can.isHeadOfDepartment) return describePublicAccess(can.roles)
   if (can.roles.length === 0) return 'Head of a department'
-  return `${describeRoles(can.roles)} and Head of a department`
+  return `${describePublicAccess(can.roles)} and Head of a department`
 }
 
 export function tourMenu(steps: readonly TutorialStep[], can: TourViewer): TourMenu {

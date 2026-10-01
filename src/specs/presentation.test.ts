@@ -3,6 +3,8 @@ import type { PresentableSpec } from './presentation.ts'
 import {
   acceptableLabel,
   comparisonItems,
+  competitionCell,
+  readinessPresentation,
   idealCell,
   projectGoalText,
   regulatoryLimitText,
@@ -18,6 +20,11 @@ const BASE = {
   target: null, target_max: null, target_bool: null, target_text: null, target_tolerance: null,
   target_min_inclusive: true, target_max_inclusive: true,
   verdict: 'unmeasured', goal_status: 'unmeasured', zone: 'grey',
+  direction_reviewed_at: null, direction_reviewed_by: null, direction_note: null, direction_needs_review: false,
+  readiness: 'not_confirmed', readiness_reason: null, readiness_confirmed_at: null, readiness_confirmed_by: null,
+  readiness_note: null, readiness_measurement_id: null, readiness_revoked_at: null,
+  competition_measurement_id: null, competition_value: null, competition_value_bool: null,
+  competition_measured_at: null, competition_verdict: null,
 } satisfies PresentableSpec
 
 describe('spec comparison presentation', () => {
@@ -75,8 +82,8 @@ describe('compact table helpers', () => {
     unit: 'kg', direction: 'lower_better', ideal: 138, goal: 145, goal_max: null, goal_tolerance: null, goal_bool: null,
   } as unknown as PresentableSpec
   it('names the zone in words, and never as an approval', () => {
-    expect(zoneCue('green')).toEqual({ icon: '✓', label: 'Passes the rule · goal met', tone: 'green' })
-    expect(zoneCue('amber').label).toBe('Passes the rule · goal not met')
+    expect(zoneCue('green')).toEqual({ icon: '✓', label: 'Passes the rule · confirmed ready', tone: 'green' })
+    expect(zoneCue('amber').label).toBe('Passes the rule · not confirmed ready')
     expect(zoneCue('red').label).toBe('Fails the rule')
     expect(zoneCue(null)).toMatchObject({ tone: 'grey', label: 'Not judged yet' })
     for (const zone of ['green', 'amber', 'red', null]) expect(zoneCue(zone).label).not.toMatch(/approv|accept/i)
@@ -88,5 +95,38 @@ describe('compact table helpers', () => {
     expect(idealCell({ ...base, ideal: 0 })).toEqual({ value: '0 kg', note: null })
     expect(idealCell({ ...base, direction: 'range', goal: 10, goal_max: 20 } as PresentableSpec)).toEqual({ value: '[10, 20] kg', note: 'project goal' })
     expect(idealCell({ ...base, direction: 'boolean', goal_bool: null } as PresentableSpec)).toBeNull()
+  })
+})
+
+describe('readiness and competition presentation', () => {
+  const day = (iso: string) => iso.slice(0, 10)
+
+  it('says ready with the day and the note, and never "ready" for a lapsed confirmation', () => {
+    expect(readinessPresentation({ readiness: 'ready', readiness_reason: null, readiness_confirmed_at: '2026-10-01T10:00:00Z', readiness_note: 'Weighed' }, day))
+      .toEqual({ state: 'ready', label: 'Confirmed ready on 2026-10-01', detail: 'Weighed' })
+    const lapsed = readinessPresentation({ readiness: 'lapsed', readiness_reason: 'A newer measurement became the current one.', readiness_confirmed_at: '2026-10-01T10:00:00Z', readiness_note: 'Weighed' }, day)
+    expect(lapsed.state).toBe('lapsed')
+    expect(lapsed.label).toBe('Was ready on 2026-10-01 — no longer')
+    expect(lapsed.label).not.toMatch(/^Confirmed/)
+    expect(lapsed.detail).toBe('A newer measurement became the current one.')
+  })
+
+  it('treats a missing readiness answer as unknown, not as confirmed', () => {
+    expect(readinessPresentation({ readiness: null, readiness_reason: null, readiness_confirmed_at: null, readiness_note: null }, day).state).toBe('unknown')
+    expect(readinessPresentation({ readiness: 'not_confirmed', readiness_reason: null, readiness_confirmed_at: null, readiness_note: null }, day).state).toBe('not_confirmed')
+  })
+
+  it('the row cue never calls a pass "ready" unless the zone is green', () => {
+    expect(zoneCue('amber').label).toBe('Passes the rule · not confirmed ready')
+    expect(zoneCue('green').label).toBe('Passes the rule · confirmed ready')
+    expect(zoneCue('grey').label).toBe('Not judged yet')
+  })
+
+  it('shows a competition observation apart from ours, with its own verdict, and nothing when there is none', () => {
+    expect(competitionCell(BASE)).toBeNull()
+    expect(competitionCell({ ...BASE, competition_measurement_id: 'c1', competition_value: 90, unit: 'kg', competition_verdict: 'fail' }))
+      .toEqual({ value: '90 kg', verdict: 'Fails the rule' })
+    expect(competitionCell({ ...BASE, direction: 'boolean', comparator: 'bool', competition_measurement_id: 'c2', competition_value_bool: true, competition_verdict: 'pass' }))
+      .toEqual({ value: 'Yes', verdict: 'Passes the rule' })
   })
 })

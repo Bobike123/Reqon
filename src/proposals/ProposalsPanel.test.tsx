@@ -169,32 +169,33 @@ describe('who sees review controls (resource-aware)', () => {
   it('a Head reviews only their own department; everything else stays readable with an explanation', () => {
     renderPanel()
     expect(reviewable()).toEqual(['mine-aero', 'theirs-aero'])
-    expect(screen.getByTestId('proposal-hint-mine-body')).toHaveTextContent('The Head of Bodywork, or a Developer')
+    expect(screen.getByTestId('proposal-hint-mine-body')).toHaveTextContent('The Head of Bodywork, the President or the Vice President decides')
   })
 
-  it('the President and Vice President alone get no review or promotion control', () => {
+  // Role hierarchy (20260130000000), superseding the no-Head-only fallback: the President and the Vice
+  // President rank above every Head and review every active department's proposals.
+  it('the President and the Vice President review in every department, even where a Head exists', () => {
     departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: 'other' }))
     for (const role of ['president', 'vicepresident']) {
       session.roles = [role]
       const { unmount } = renderPanel()
-      expect(reviewable()).toEqual([])
+      expect(reviewable(), role).toEqual(['mine-aero', 'mine-body', 'owned-not-mine', 'theirs-aero'])
+      expect(screen.getByTestId('proposal-review-queue'), role).toHaveTextContent('You may decide proposals in any department.')
       unmount()
     }
   })
 
-  it('the President becomes fallback when the assigned Head is no longer active', () => {
-    departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: d.archived_at ? null : 'other' }))
-    memberRows = memberRows.map((member) => member.id === 'other' ? { ...member, status: 'alumni' } : member)
+  it('the Treasurer alone gets no review or promotion control', () => {
+    departments = DEPARTMENTS.map((d) => ({ ...d, lead_id: 'other' }))
+    session.roles = ['treasurer']
+    renderPanel()
+    expect(reviewable()).toEqual([])
+  })
+
+  it('a President who is ALSO a department Head reviews every department, not only their own', () => {
     session.roles = ['president']
     renderPanel()
     expect(reviewable()).toEqual(['mine-aero', 'mine-body', 'owned-not-mine', 'theirs-aero'])
-    expect(screen.getByTestId('proposal-review-queue')).toHaveTextContent('governance fallback where no active Head exists')
-  })
-
-  it('a President who is ALSO the department Head gets the control for that department only', () => {
-    session.roles = ['president']
-    renderPanel()
-    expect(reviewable()).toEqual(['mine-aero', 'theirs-aero'])
   })
 
   it('a Developer may review everything, including an older proposal with no department', () => {
@@ -212,11 +213,11 @@ describe('who sees review controls (resource-aware)', () => {
     expect(reviewable()).toEqual([])
   })
 
-  it('an older proposal without a department is a Developer matter for everyone else', () => {
+  it('an older proposal without a department explains that its details must be completed', () => {
     rows = [p('no-dept', { subteam_key: null, legacy_incomplete: true, due_date: null, milestone_key: null })]
     renderPanel()
     expect(screen.getByTestId('review-open-no-dept')).toHaveTextContent('Discussion')
-    expect(screen.getByTestId('proposal-hint-no-dept')).toHaveTextContent('A Developer completes the details')
+    expect(screen.getByTestId('proposal-hint-no-dept')).toHaveTextContent('The missing details must be completed')
     expect(screen.getByTestId('proposal-legacy-no-dept')).toHaveTextContent(/needs a department, a deadline, a milestone and at least one requirement/)
   })
 

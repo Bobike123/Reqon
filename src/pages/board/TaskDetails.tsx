@@ -1,8 +1,11 @@
 import { useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useClauses } from '../../data/useClauses.ts'
+import { useAddTaskDependency, useRemoveTaskDependency } from '../../data/useTaskDependencies.ts'
 import { useArchiveTask, useLinkTaskRequirement, useUnlinkTaskRequirement, useUpdateTask, type Task, type TaskEdit } from '../../data/useTasks.ts'
-import { formatDay } from '../../lib/dates.ts'
+import { formatDay, formatInstantDay } from '../../lib/dates.ts'
+import { isSatisfied, openPrerequisites, scheduleConflict, type TaskRef } from '../../tasks/dependencies.ts'
+import { TASK_STATE_LABEL } from '../../tasks/taskState.ts'
 import { buildRequirementOptions } from '../../proposals/requirementOptions.ts'
 import { RequirementPicker } from '../../proposals/RequirementPicker.tsx'
 import { completionLabel } from '../../tasks/lifecycle.ts'
@@ -10,9 +13,16 @@ import { TASK_PRIORITIES, TASK_PRIORITY_LABEL } from '../../tasks/priority.ts'
 import type { TaskPriority } from '../../tasks/types.ts'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../../ui/buttons.ts'
 import { ActionError } from '../../ui/states.tsx'
-import { planTaskEdit, type EditPlan } from './taskEditPlan.ts'
+import { DepartmentMove } from './DepartmentMove.tsx'
+import { MAX_BLOCKER_REASON, planTaskEdit, type EditPlan } from './taskEditPlan.ts'
 
-export type TaskPermissions = { canEdit: boolean; canReassign: boolean; canArchive: boolean }
+export type TaskPermissions = {
+  canEdit: boolean
+  canReassign: boolean
+  canArchive: boolean
+  // Departments this person may move the task to (set_task_department); absent or empty = no control.
+  moveTo?: { key: string; name: string }[]
+}
 
 const FIELD =
   'mt-1 min-h-11 w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0'
@@ -26,7 +36,21 @@ type Props = {
   milestones: { value: string; label: string }[]
   requirementKeys: string[]
   source: { id: string; title: string } | null
+  // What this task waits for and what waits for it, and the tasks that could be
+  // added as a prerequisite (already filtered for the season, archived and
+  // circles). Optional so a view without the links still renders.
+  links?: TaskLinksView
 }
+
+export type TaskLinksView = {
+  prerequisites: TaskRef[]
+  dependents: TaskRef[]
+  // A function, so the list is built only for the card whose details are open.
+  candidates: () => TaskRef[]
+  departmentName: (key: string | null) => string
+}
+
+const NO_LINKS: TaskLinksView = { prerequisites: [], dependents: [], candidates: () => [], departmentName: () => 'No department' }
 
 type Result = { kind: 'saved'; what: string } | { kind: 'nothing' } | null
 
@@ -55,6 +79,17 @@ export function TaskDetails(props: Props) {
   const [priority, setPriority] = useState<TaskPriority>(task.priority)
   const [milestone, setMilestone] = useState(task.milestone_key ?? '')
   const [owner, setOwner] = useState(task.owner_id ?? '')
+  // What this editor started from. A save sends only the fields the person
+  // changed RELATIVE TO THIS, never relative to the live row: if someone else
+  // changed a field the person did not touch, that change stays.
+  const [origin, setOrigin] = useState(task)
+  // The blocker reason as typed; null = untouched, so the field always shows the
+  // live reason until the person edits it.
+  const [blockedDraft, setBlockedDraft] = useState<string | null>(null)
+  const [pick, setPick] = useState('')
+  const links = props.links ?? NO_LINKS
+  const addDependency = useAddTaskDependency()
+  const removeDependency = useRemoveTaskDependency()
   const [keys, setKeys] = useState<string[]>(props.requirementKeys)
   const [error, setError] = useState<Error | null>(null)
   const [busy, setBusy] = useState(false)
@@ -68,9 +103,29 @@ export function TaskDetails(props: Props) {
   // and our OWN save advances it when its result arrives.
   const [baseline, setBaseline] = useState(task.updated_at)
   const [selfSave, setSelfSave] = useState(false)
+  const syncFrom = (t: Task) => {
+    setTitle(t.title)
+    setDetail(t.detail ?? '')
+    setStart(t.starts_on ?? '')
+    setDue(t.due_date ?? '')
+    setPriority(t.priority)
+    setMilestone(t.milestone_key ?? '')
+    setOwner(t.owner_id ?? '')
+    setBlockedDraft(null)
+    setOrigin(t)
+    setBaseline(t.updated_at)
+  }
   if (task.updated_at !== baseline && selfSave) {
-    setBaseline(task.updated_at)
+    // Our own save arrived: the form now shows what the server holds (including
+    // anything someone else changed in fields we did not touch).
+    syncFrom(task)
     setSelfSave(false)
+  }
+  // Leaving or entering Blocked elsewhere ends an old, half-typed reason.
+  const [seenState, setSeenState] = useState(task.state)
+  if (seenState !== task.state) {
+    setSeenState(task.state)
+    setBlockedDraft(null)
   }
   const changedElsewhere = task.updated_at !== baseline && !selfSave
 
@@ -85,14 +140,7 @@ export function TaskDetails(props: Props) {
   const dirtyKeys = keys.length !== props.requirementKeys.length || keys.some((k) => !props.requirementKeys.includes(k))
 
   const takeServerValues = () => {
-    setTitle(task.title)
-    setDetail(task.detail ?? '')
-    setStart(task.starts_on ?? '')
-    setDue(task.due_date ?? '')
-    setPriority(task.priority)
-    setMilestone(task.milestone_key ?? '')
-    setOwner(task.owner_id ?? '')
-    setBaseline(task.updated_at)
+    syncFrom(task)
     setResult(null)
     setError(null)
   }
@@ -115,7 +163,14 @@ export function TaskDetails(props: Props) {
 
   const save = () =>
     run(async () => {
-      const plan: EditPlan = planTaskEdit(task, { title, detail, start, due, priority, milestone, owner }, perms.canReassign)
+      const plan: EditPlan = planTaskEdit(
+        // The reason is judged against the LIVE state and reason, everything else
+        // against what the editor started from.
+        { ...origin, state: task.state, blocked_reason: task.blocked_reason },
+        { title, detail, start, due, priority, milestone, owner, blockedReason: blockedDraft ?? task.blocked_reason ?? '' },
+        perms.canReassign,
+        { hasPrerequisites: openPrerequisites(links.prerequisites).length > 0 },
+      )
       if (plan.kind === 'invalid') throw new Error(plan.reason)
       const toAdd = keys.filter((k) => !props.requirementKeys.includes(k))
       const toRemove = props.requirementKeys.filter((k) => !keys.includes(k))
@@ -123,10 +178,16 @@ export function TaskDetails(props: Props) {
         setResult({ kind: 'nothing' })
         return
       }
-      if (plan.kind === 'edit') await update.mutateAsync(plan.edit satisfies TaskEdit)
+      // Only a task write moves the row's version; a requirement link does not. So our own save is marked
+      // only after a task write succeeded (never for a links-only save, where the flag would stay set and
+      // swallow someone else's later edit), and before the link calls, so their wait never shows our own
+      // change as "changed elsewhere".
+      if (plan.kind === 'edit') {
+        await update.mutateAsync(plan.edit satisfies TaskEdit)
+        setSelfSave(true)
+      }
       for (const clauseKey of toAdd) await link.mutateAsync({ taskId: task.id, clauseKey })
       for (const clauseKey of toRemove) await unlink.mutateAsync({ taskId: task.id, clauseKey })
-      setSelfSave(true)
       const what = [...(plan.kind === 'edit' ? plan.changed : []), ...(toAdd.length + toRemove.length > 0 ? ['requirements'] : [])]
       setResult({ kind: 'saved', what: what.join(', ') })
     })
@@ -136,6 +197,9 @@ export function TaskDetails(props: Props) {
       await archive.mutateAsync({ id: task.id })
     })
 
+  // A choice that has since stopped being a candidate (linked by someone else, archived) is dropped.
+  const candidates = perms.canEdit ? links.candidates() : []
+  const chosen = candidates.some((c) => c.id === pick) ? pick : ''
   const completed = completionLabel(task)
   const refs = props.requirementKeys.map((k) => ({ key: k, ref: printedRef.get(k) ?? k }))
 
@@ -157,12 +221,112 @@ export function TaskDetails(props: Props) {
           <h4 id={fid('h-block')} className="text-[11px] font-semibold tracking-wide text-amber-900 uppercase">
             Blocker
           </h4>
-          <p className="mt-0.5 text-sm text-amber-950">
-            No blocker reason is recorded. Reqon keeps only the Blocked state, not a separate reason or a link to the
-            work it waits on — ask the owner, or write the reason in the description.
-          </p>
+          {task.blocked_reason ? (
+            <p className="mt-0.5 text-sm whitespace-pre-line text-amber-950">{task.blocked_reason}</p>
+          ) : openPrerequisites(links.prerequisites).length > 0 ? (
+            <p className="mt-0.5 text-sm text-amber-950">Waiting for the task(s) listed under “Waits for”.</p>
+          ) : (
+            <p className="mt-0.5 text-sm text-amber-950">
+              No reason is recorded — this task was blocked before reasons were kept. Add the reason below.
+            </p>
+          )}
+          {task.blocked_since && (
+            <p className="mt-0.5 text-xs text-amber-900">Blocked since {formatInstantDay(task.blocked_since)}.</p>
+          )}
         </section>
       )}
+
+      <section data-testid={`task-deps-${task.id}`} aria-labelledby={fid('h-deps')}>
+        <h4 id={fid('h-deps')} className={SECTION_HEADING}>
+          Waits for
+        </h4>
+        {links.prerequisites.length === 0 ? (
+          <p className="mt-0.5 text-sm text-slate-500 italic">No prerequisite tasks.</p>
+        ) : (
+          <ul className="mt-0.5 space-y-1 text-sm text-slate-700">
+            {links.prerequisites.map((p) => {
+              const conflict = scheduleConflict(task, p)
+              return (
+                <li key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid={`task-prereq-${task.id}-${p.id}`}>
+                  {p.archived_at ? (
+                    <span>{p.title}</span>
+                  ) : (
+                    <Link className="underline underline-offset-2" to={`/board?task=${encodeURIComponent(p.id)}`}>
+                      {p.title}
+                    </Link>
+                  )}
+                  <span className="text-xs text-slate-600">
+                    {links.departmentName(p.subteam_key)} · {p.archived_at ? 'archived' : TASK_STATE_LABEL[p.state]}
+                    {p.due_date ? ` · due ${formatDay(p.due_date)}` : ''}
+                  </span>
+                  {isSatisfied(p) && <span className="rounded bg-green-50 px-1 text-[11px] text-green-800">finished</span>}
+                  {conflict && (
+                    <span className="rounded bg-amber-100 px-1 text-[11px] text-amber-900" data-testid={`task-prereq-conflict-${p.id}`}>
+                      schedule conflict: starts before this is due
+                    </span>
+                  )}
+                  {perms.canEdit && (
+                    <button
+                      type="button"
+                      className="min-h-11 rounded px-1 text-xs text-slate-700 underline underline-offset-2 sm:min-h-0"
+                      disabled={removeDependency.isPending}
+                      onClick={() => {
+                        addDependency.reset()
+                        removeDependency.mutate({ taskId: task.id, dependsOnTaskId: p.id })
+                      }}
+                      aria-label={`Remove prerequisite ${p.title}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {perms.canEdit && (
+          <div className="mt-1 flex flex-wrap items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <label htmlFor={fid('prereq')} className={LABEL}>
+                Add a prerequisite (any department)
+              </label>
+              <select id={fid('prereq')} value={chosen} onChange={(e) => setPick(e.target.value)} className={FIELD}>
+                <option value="">Choose a task…</option>
+                {candidates.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title} — {links.departmentName(c.subteam_key)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className={buttonSecondary}
+              disabled={chosen === '' || addDependency.isPending}
+              onClick={() => {
+                removeDependency.reset()
+                addDependency.mutate({ taskId: task.id, dependsOnTaskId: chosen }, { onSuccess: () => setPick('') })
+              }}
+            >
+              {addDependency.isPending ? 'Adding…' : 'Add prerequisite'}
+            </button>
+          </div>
+        )}
+        <ActionError error={addDependency.error ?? removeDependency.error} className="mt-1" />
+        {links.dependents.length > 0 && (
+          <p className="mt-1 text-xs text-slate-600" data-testid={`task-dependents-${task.id}`}>
+            Waiting for this task:{' '}
+            {links.dependents.map((d, i) => (
+              <span key={d.id}>
+                {i > 0 && ', '}
+                <Link className="underline underline-offset-2" to={`/board?task=${encodeURIComponent(d.id)}`}>
+                  {d.title}
+                </Link>
+              </span>
+            ))}
+          </p>
+        )}
+      </section>
 
       <section data-testid={`task-links-${task.id}`}>
         <h4 id={fid('h-links')} className={SECTION_HEADING}>
@@ -272,6 +436,24 @@ export function TaskDetails(props: Props) {
                 <p className="mt-1 text-xs text-slate-500">Created from a proposal: the deadline can change but not be removed.</p>
               )}
             </div>
+            {task.state === 'blocked' && (
+              <div className="sm:col-span-2">
+                <label htmlFor={fid('blocker')} className={LABEL}>
+                  Why is it blocked?
+                </label>
+                <textarea
+                  id={fid('blocker')}
+                  rows={2}
+                  value={blockedDraft ?? task.blocked_reason ?? ''}
+                  maxLength={MAX_BLOCKER_REASON}
+                  onChange={(e) => setBlockedDraft(e.target.value)}
+                  className={FIELD}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Name the outside thing being waited for (a supplier, a decision, an event) or link the task under “Waits for”.
+                </p>
+              </div>
+            )}
             <div>
               <label htmlFor={fid('priority')} className={LABEL}>
                 Priority
@@ -313,7 +495,7 @@ export function TaskDetails(props: Props) {
               ) : (
                 <p id={fid('owner')} className="mt-1 min-h-11 py-2 text-sm text-slate-800 sm:min-h-0 sm:py-1.5">
                   {props.owners.find((o) => o.id === task.owner_id)?.name ?? 'Unassigned'}{' '}
-                  <span className="text-xs text-slate-500">(only the department Head or a Developer can reassign)</span>
+                  <span className="text-xs text-slate-500">(only the department Head can reassign)</span>
                 </p>
               )}
             </div>
@@ -348,9 +530,17 @@ export function TaskDetails(props: Props) {
             <span className="font-medium">Priority:</span> {TASK_PRIORITY_LABEL[task.priority]}
           </p>
           <p className="text-xs text-slate-500">
-            Read-only for you. Its owner, its department&apos;s Head or a Developer can change it.
+            Read-only for you. Its owner, its department&apos;s Head, the President or the Vice President can change it.
           </p>
         </div>
+      )}
+
+      {perms.moveTo && perms.moveTo.length > 0 && (
+        <DepartmentMove
+          taskId={task.id}
+          currentName={task.subteam_key ? links.departmentName(task.subteam_key) : null}
+          targets={perms.moveTo}
+        />
       )}
 
       {perms.canArchive && (
@@ -359,7 +549,7 @@ export function TaskDetails(props: Props) {
             <div role="alertdialog" aria-label="Archive this task" className="rounded border border-slate-300 bg-slate-50 p-2">
               <p className="text-sm text-slate-800">
                 Archive this task? It leaves the Board and moves to the Archive, where it and its history stay. Its
-                department Head or a Developer can restore it.
+                department Head, the President or the Vice President can restore it.
                 {task.state !== 'done' &&
                   ' It is not finished, so it is archived as unfinished: it still counts in its milestone and requirement progress as not done.'}
               </p>

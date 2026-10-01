@@ -23,7 +23,7 @@ export default function Proposals() {
     <main id="main-content" tabIndex={-1} className={pageMain()}>
       <PageHeader
         title="Task proposals"
-        description="Work anyone can suggest and discuss. The responsible Head reviews a department's proposal; where no Head exists, the President or Vice President acts. Approval is required before a Board task is created."
+        description="Work anyone can suggest and discuss. The department's Head, the President or the Vice President reviews it. Approval is required before a Board task is created."
       />
 
       <ProposalsPanel

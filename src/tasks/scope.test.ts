@@ -9,7 +9,7 @@ function task(id: string, ownerId: string | null): Task {
     source_proposal: null, created_by: null, created_at: '', updated_at: '',
     section_id: null, completed_at: null, completion_source: null,
     archived_at: null, archived_by: null, archive_reason: null,
-    milestone_key: null, links_required: false,
+    milestone_key: null, links_required: false, blocked_reason: null, blocked_since: null,
   }
 }
 

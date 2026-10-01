@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import type { Member } from '../../data/useMembers.ts'
 import type { Task, TaskState } from '../../data/useTasks.ts'
 import { formatDay } from '../../lib/dates.ts'
+import { isSatisfied, openPrerequisites, scheduleConflict, type TaskRef } from '../../tasks/dependencies.ts'
 import { TASK_STATES, TASK_STATE_LABEL } from '../../tasks/taskState.ts'
 import { isUrgent, TASK_PRIORITY_BADGE_TONE, TASK_PRIORITY_LABEL } from '../../tasks/priority.ts'
 import { buttonSecondary } from '../../ui/buttons.ts'
+import { BlockReasonForm } from '../board/BlockReasonForm.tsx'
 import { Bar, Marker, ROW, STICKY_LABEL, selectSmall, Track } from './GanttChart.tsx'
 import type { LinkTarget } from './ganttLinking.ts'
 import { taskMark, taskSummary } from './ganttMarks.ts'
@@ -62,6 +64,7 @@ export function GanttTaskRow({
   onSchedule,
   onMove,
   onOwner,
+  prerequisites = [],
 }: {
   task: Task
   today: string
@@ -79,8 +82,10 @@ export function GanttTaskRow({
   currentTargetKey: string
   onMoveTo: (target: LinkTarget) => void
   onSchedule: (start: string | null, due: string | null) => Promise<string>
-  onMove: (state: TaskState) => void
+  onMove: (state: TaskState, blockedReason?: string) => void
   onOwner: (ownerId: string | null) => void
+  // Tasks this one waits for (any department). Read-only here.
+  prerequisites?: TaskRef[]
 }) {
   const uid = useId()
   const [preview, setPreview] = useState<ScheduleDates | null>(null)
@@ -89,6 +94,9 @@ export function GanttTaskRow({
   const [seen, setSeen] = useState({ s: task.starts_on, d: task.due_date })
   const [dateResult, setDateResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  // Blocking a task with no prerequisite needs a written reason first.
+  const [asking, setAsking] = useState(false)
+  const waiting = openPrerequisites(prerequisites).length
   // Someone (or a drag) changed the dates: the fields follow the saved values.
   if (seen.s !== task.starts_on || seen.d !== task.due_date) {
     setSeen({ s: task.starts_on, d: task.due_date })
@@ -154,6 +162,12 @@ export function GanttTaskRow({
               </span>
             )}
             <StatusCue task={task} overdue={overdue} />
+            {prerequisites.length > 0 && (
+              <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-700" data-testid={`gantt-waits-${task.id}`}>
+                Waits for {prerequisites.length}
+                {waiting < prerequisites.length ? ` (${waiting} open)` : ''}
+              </span>
+            )}
             <span className="text-[11px] text-slate-500">{departmentName ?? 'No department'}</span>
           </span>
 
@@ -165,7 +179,16 @@ export function GanttTaskRow({
               <select
                 id={`gantt-state-${task.id}`}
                 value={task.state}
-                onChange={(e) => onMove(e.target.value as TaskState)}
+                onChange={(e) => {
+                  const next = e.target.value as TaskState
+                  if (next === 'blocked' && task.state !== 'blocked' && waiting === 0) {
+                    setAsking(true)
+                    if (!expanded) onToggle()
+                    return
+                  }
+                  setAsking(false)
+                  onMove(next)
+                }}
                 className={selectSmall}
               >
                 {TASK_STATES.map((s) => (
@@ -289,9 +312,55 @@ export function GanttTaskRow({
             date, and nothing is estimated.
           </p>
           {task.state === 'blocked' && (
-            <p className="mt-1 rounded border-l-4 border-amber-500 bg-amber-50 px-1.5 py-0.5 text-amber-950">
-              Blocked — no reason or prerequisite is recorded (Reqon has no dependency links yet).
+            <p className="mt-1 rounded border-l-4 border-amber-500 bg-amber-50 px-1.5 py-0.5 text-amber-950" data-testid={`gantt-blocker-${task.id}`}>
+              <span className="font-semibold">Blocked</span> ·{' '}
+              {task.blocked_reason
+                ? task.blocked_reason
+                : waiting > 0
+                  ? 'waiting for the task(s) below'
+                  : 'no reason recorded (blocked before reasons were kept). Add one from the Board card.'}
             </p>
+          )}
+          {prerequisites.length > 0 && (
+            <div className="mt-1" data-testid={`gantt-prereqs-${task.id}`}>
+              <p className="font-medium">Waits for</p>
+              <ul className="ml-4 list-disc">
+                {prerequisites.map((p) => (
+                  <li key={p.id}>
+                    {p.archived_at === null ? (
+                      <Link to={`/board?task=${encodeURIComponent(p.id)}`} className="underline underline-offset-2">
+                        {p.title}
+                      </Link>
+                    ) : (
+                      p.title
+                    )}{' '}
+                    <span className="text-slate-600">
+                      · {p.archived_at === null ? TASK_STATE_LABEL[p.state] : 'archived'}
+                      {p.due_date ? ` · due ${formatDay(p.due_date)}` : ''}
+                    </span>
+                    {isSatisfied(p) && <span className="ml-1 text-green-800">finished</span>}
+                    {scheduleConflict(task, p) && (
+                      <span className="ml-1 rounded bg-amber-100 px-1 text-[11px] text-amber-900" data-testid={`gantt-conflict-${task.id}-${p.id}`}>
+                        schedule conflict: starts before this is due
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {asking && (
+            <BlockReasonForm
+              taskTitle={task.title}
+              fieldId={`${uid}-reason`}
+              testId={`gantt-block-form-${task.id}`}
+              returnFocusId={`gantt-state-${task.id}`}
+              onBlock={(reason) => {
+                onMove('blocked', reason)
+                setAsking(false)
+              }}
+              onCancel={() => setAsking(false)}
+            />
           )}
 
           {perms.canEdit ? (
@@ -354,7 +423,7 @@ export function GanttTaskRow({
               </div>
             </>
           ) : (
-            <p className="mt-1 text-[11px] text-slate-500">Read-only for you: its owner, its department&apos;s Head or a Developer can change it.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Read-only for you: its owner or its department&apos;s Head can change it.</p>
           )}
         </div>
       )}

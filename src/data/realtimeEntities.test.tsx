@@ -34,6 +34,7 @@ const { QueryClientProvider } = await import('@tanstack/react-query')
 const { useRealtimeTasks } = await import('./useRealtimeTasks.ts')
 const { useRealtimeProposals } = await import('./useRealtimeProposals.ts')
 const { useRealtimeProposalComments } = await import('./useRealtimeProposalComments.ts')
+const { useRealtimeTaskDependencies } = await import('./useRealtimeTaskDependencies.ts')
 const { useRealtimeSpecs } = await import('./useRealtimeSpecs.ts')
 const { useRealtimeTaskRequirements } = await import('./useRealtimeTaskRequirements.ts')
 const { useRealtimeMilestoneSections } = await import('./useRealtimeMilestoneSections.ts')
@@ -151,9 +152,9 @@ describe('useRealtimeSpecs', () => {
     return { view, on }
   }
 
-  it('listens to the specs table AND the measurement history', () => {
+  it('listens to the specs table, the measurement history AND readiness confirmations', () => {
     open(new QueryClient())
-    expect(channels.map((c) => c.table).sort()).toEqual(['spec_measurements', 'specs'])
+    expect(channels.map((c) => c.table).sort()).toEqual(['spec_measurements', 'spec_readiness', 'specs'])
   })
 
   it('a specs change invalidates spec_verdicts rather than patching (the view derives verdict, goal status and zone)', () => {
@@ -234,5 +235,22 @@ describe('useRealtimeTaskRequirements', () => {
     expect(invalidate).toHaveBeenCalledTimes(4)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.taskRequirements('season-a') })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.activityAll('season-a') })
+  })
+})
+
+describe('useRealtimeTaskDependencies', () => {
+  it('listens unfiltered (a filtered subscription can miss a DELETE) and refreshes the link list and the activity trail', () => {
+    const qc = new QueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    mount(() => useRealtimeTaskDependencies(), qc)
+
+    expect(capturedTable).toBe('task_dependencies')
+    expect(capturedOptions?.filterBySeasonId).toBe(false)
+    expect(typeof capturedOptions?.onSubscribed).toBe('function')
+
+    capturedOnChange?.({ eventType: 'DELETE', new: null, old: { task_id: 'a', depends_on_task_id: 'b' } }, 'season-a')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.taskDependencies('season-a') })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.activityAll('season-a') })
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.taskDependencies('season-b') })
   })
 })

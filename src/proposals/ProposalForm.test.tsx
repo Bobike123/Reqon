@@ -148,7 +148,7 @@ describe('honest empty states', () => {
     renderForm({ requirements: [], canConfigure: false })
     expect(screen.getByTestId('proposal-empty')).toHaveTextContent('requirements book')
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.getByTestId('proposal-empty')).toHaveTextContent('President, Vice President or a Developer')
+    expect(screen.getByTestId('proposal-empty')).toHaveTextContent('President or Vice President')
   })
 
   it('does not call a still-loading list empty, and reports a load failure', () => {

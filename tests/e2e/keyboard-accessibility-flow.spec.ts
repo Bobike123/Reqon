@@ -1,12 +1,27 @@
 import { test, expect } from '@playwright/test'
-import { readManifest } from './setup/db.ts'
+import { readManifest, runSql } from './setup/db.ts'
 import { login } from './setup/login.ts'
 
 // Phase 13: prove keyboard-only operation of a filter, a dialog and the
 // tutorial offer in a REAL browser — Vitest/jsdom cannot model native
 // keyboard activation of <summary>/<dialog> the way a real browser does
 // (see board.test.tsx's own comment on this). Nothing here relies on a mouse.
+const PREFIX = '[E2E keyboard]'
 test.describe('keyboard-only interaction (R8.2, R24.1, R34.1, tutorial)', () => {
+  // The scenario picks a department from the navigation and opens the first card
+  // it shows, so every active department needs at least one task or the result
+  // would depend on which departments happen to hold work in this database.
+  test.beforeAll(() => {
+    const m = readManifest()
+    runSql(
+      `insert into tasks (season_id, title, state, subteam_key) select '${m.season.id}', '${PREFIX} ' || key, 'todo', key from subteams where archived_at is null`,
+    )
+  })
+  test.afterAll(() => {
+    runSql(`delete from activity where entity = 'task' and entity_id in (select id::text from tasks where title like '${PREFIX}%')`)
+    runSql(`delete from tasks where title like '${PREFIX}%'`)
+  })
+
   test('the tutorial offer, the Board scope/department filter, and a proposal review dialog are all keyboard-operable', async ({ page }) => {
     const m = readManifest()
     await login(page, m.users.member.email, m.password)

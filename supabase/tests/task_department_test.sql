@@ -153,9 +153,11 @@ begin
   perform pg_temp.expect('the author cannot move it once under review', pg_temp.attempt(mem, format('select set_proposal_department(%L, %L, ''x'', 1)', p_review, pb)), 'DENIED');
   perform pg_temp.expect('the Head of the source alone cannot move it out', pg_temp.attempt(ha, format('select set_proposal_department(%L, %L, ''x'', 1)', p_review, pb)), 'DENIED');
   perform pg_temp.expect('a Head moves it within their own departments', pg_temp.attempt(ha, format('select set_proposal_department(%L, ''TD_SUB'', ''sub work'', 1)', p_review)), 'ALLOWED');
-  -- Phase 2 security review fix (20260126000700): the President/VP move a
-  -- proposal only as the no-Head fallback, never out of a department with a Head.
-  perform pg_temp.expect('the President cannot move it out of a department that has a Head', pg_temp.attempt(pre, format('select set_proposal_department(%L, %L, ''reorganised'', 2)', p_review, pb)), 'DENIED');
+  -- Role hierarchy (20260130000000) supersedes the Phase 2 fix (20260126000700, fallback only): the
+  -- President may move a proposal out of a department that has a Head. Shown with a same-department
+  -- "move", which the command answers only for someone who could make the move and which changes nothing.
+  perform pg_temp.expect('the President has the authority to move it although a Head exists', pg_temp.attempt(pre, format('select set_proposal_department(%L, %L, ''reorganised'', 2)', p_review, 'TD_SUB')), 'ALLOWED');
+  perform pg_temp.expect('... and that changed nothing', (select subteam_key || '/' || revision from task_proposals where id = p_review), 'TD_SUB/2');
   insert into task_proposals (season_id, title, raised_by, due_date, milestone_key, state)
     values (season, 'TD no department', null, '2026-12-01', ms, 'agenda') returning id into p_nodept;
   perform pg_temp.expect('the President classifies a proposal that has no department', pg_temp.attempt(pre, format('select set_proposal_department(%L, %L, ''classified'', 1)', p_nodept, pb)), 'ALLOWED');

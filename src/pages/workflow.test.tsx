@@ -582,12 +582,14 @@ describe('a proposal is never a dead end', () => {
     expect(db.proposal_requirements).toEqual([{ proposal_id: 'l', clause_key: 'B.1.1.1' }])
   })
 
-  it('offers discussion but no review authority for a department the viewer does not head, and says who decides', async () => {
+  // Role hierarchy (20260130000000): this viewer is the President, who ranks above every Head and so reviews
+  // a department they do not head. (Who decides, for someone without that authority, is ProposalsPanel.test.)
+  it('the President reviews a proposal in a department they do not head', async () => {
     db.task_proposals = [proposalRow({ id: 'o', title: 'Bodywork idea', subteam_key: 'BODY' })]
     renderApp('/proposals')
     await screen.findByTestId('proposal-o')
-    expect(screen.getByTestId('review-open-o')).toHaveTextContent('Discuss or revise')
-    expect(screen.getByTestId('proposal-hint-o')).toHaveTextContent('The Head of Bodywork, or a Developer')
+    expect(screen.getByTestId('review-open-o')).toHaveTextContent('Review')
+    expect(screen.queryByTestId('proposal-hint-o')).not.toBeInTheDocument()
   })
 
   it('shows a promotion refusal from the database and preserves the approved proposal', async () => {

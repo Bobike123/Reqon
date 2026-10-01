@@ -25,3 +25,24 @@ describe('activity presentation', () => {
     expect(actorLabel(row('state_changed', {}, 'former'), names)).toBe('Former team member')
   })
 })
+
+describe('Phase 3 activity actions', () => {
+  it('shows a blocker reason on the state change through the shared reason line', () => {
+    expect(presentActivity(row('state_changed', { from: 'todo', to: 'blocked', reason: 'Waiting for the quote' }), names)).toMatchObject({
+      summary: 'State: todo → blocked', reason: 'Waiting for the quote',
+    })
+  })
+  it('names a rewritten blocker reason', () => {
+    expect(presentActivity(row('blocker_changed', { from: 'a', to: 'b' }), names).summary).toBe('Blocker reason: a → b')
+  })
+  it('names the prerequisite added or removed', () => {
+    expect(presentActivity(row('dependency_added', { depends_on_title: 'Order carbon' }), names).summary).toBe('Now waits for “Order carbon”')
+    expect(presentActivity(row('dependency_removed', { depends_on_title: 'Order carbon' }), names).summary).toBe('No longer waits for “Order carbon”')
+  })
+  it('describes discussion, revision and approval events instead of echoing the action code', () => {
+    expect(presentActivity(row('commented', { kind: 'changes_requested' }), names).summary).toBe('Discussion: changes requested added')
+    expect(presentActivity(row('revised', { fields: ['title', 'due_date'] }), names).summary).toBe('Proposal revised: title, due_date')
+    expect(presentActivity(row('approved', {}), names).summary).toBe('Proposal approved')
+    expect(presentActivity(row('approval_invalidated', {}), names).summary).toMatch(/changed after it was approved/)
+  })
+})

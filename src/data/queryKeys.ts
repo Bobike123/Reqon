@@ -87,5 +87,6 @@ export const queryKeys = {
   tasksBySource: (seasonId: string | undefined, ids: readonly string[]) =>
     ['season', seasonId ?? 'unknown', 'archive', 'tasks_by_source', ids] as const,
   taskRequirements: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'task_requirements'] as const,
+  taskDependencies: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'task_dependencies'] as const,
   progressTasks: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'progress_tasks'] as const,
 } as const

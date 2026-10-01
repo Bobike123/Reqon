@@ -200,9 +200,12 @@ begin
   update subteams set lead_id = pre where key = dept;
   perform pg_temp.chk('F5a a President who is also the department Head may review as Head', pg_temp.val(pre, format('select can_review_proposal(%L)::text', p1)) = 'true');
   update subteams set lead_id = hd where key = dept;
-  perform pg_temp.chk('F5b once no longer Head the same person has no proposal power', pg_temp.val(pre, format('select can_review_proposal(%L)::text', p1)) = 'false');
+  -- Role hierarchy (20260130000000) supersedes the old reading here: the President and the Vice President
+  -- rank above every Head, so losing the headship leaves the President's own authority in place.
+  perform pg_temp.chk('F5b once no longer Head the same person still reviews, as President', pg_temp.val(pre, format('select department_authority(%L)', dept)) = 'president');
   perform pg_temp.chk('F5c a Developer is not restricted to one department', pg_temp.val(dev, format('select can_review_proposal(%L)::text', p1)) = 'true');
-  perform pg_temp.chk('F5d a Vice President has no power over a department they do not head', pg_temp.val(vp, format('select can_review_proposal(%L)::text', p1)) = 'false');
+  perform pg_temp.chk('F5d a Vice President reviews in a department they do not head (role hierarchy)', pg_temp.val(vp, format('select can_review_proposal(%L)::text', p1)) = 'true');
+  perform pg_temp.chk('F5e an ordinary member does not', pg_temp.val(mem, format('select can_review_proposal(%L)::text', p1)) = 'false');
 
   -- ====================== F6: NOTHING FORGEABLE THROUGH A GENERIC EDIT ======================
   perform pg_temp.chk('F6a the Head cannot forge who created a task', pg_temp.act(hd, format('update tasks set created_by = %L where id = %L', mem, t1)) = '42501');

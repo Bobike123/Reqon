@@ -99,7 +99,17 @@ beforeEach(() => {
 
 describe('useSeason() states', () => {
   it('throws outside a SeasonProvider — there is no silent default', () => {
-    expect(() => renderHook(() => useSeason())).toThrow(/SeasonProvider/)
+    // The throw is the point: keep React's error log and jsdom's uncaught-error
+    // report out of the run output.
+    const swallow = (event: ErrorEvent) => event.preventDefault()
+    window.addEventListener('error', swallow)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect(() => renderHook(() => useSeason())).toThrow(/SeasonProvider/)
+    } finally {
+      log.mockRestore()
+      window.removeEventListener('error', swallow)
+    }
   })
 
   it('is loading, then ready, with season and seasonId set', async () => {

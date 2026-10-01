@@ -254,6 +254,14 @@ const supabase = {
     // today, kept as its own RPC per ADR-0001 so department authority does not
     // silently follow future, unrelated changes to is_admin().
     if (fn === 'can_manage_departments') return { data: isAdmin(caller), error: null }
+    if (fn === 'start_season') {
+      // The real command is President/Developer only (can_manage_seasons) and creates the season NOT current.
+      if (!canManageSeasons(caller)) return { data: null, error: { message: 'Only the President or a Developer can start a season.', code: '42501' } }
+      const row = { id: `s${db.seasons.length + 1}`, label: args.p_label, edition: args.p_edition ?? 'MotoStudent IX', is_current: false }
+      db.seasons.push(row)
+      rpcCalls.push({ fn, args })
+      return { data: row, error: null }
+    }
     rpcCalls.push({ fn, args })
     // Everything else here is set_current_season, which the real function
     // refuses to anyone but the President or a Developer (can_manage_seasons()).
@@ -329,7 +337,7 @@ describe('who sees what', () => {
     // The roster rows arrive with the members query, after the forms.
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including roles \(only a Developer changes the Developer role\)/)).toBeInTheDocument()
+    expect(screen.getByText(/including the roles available to you/)).toBeInTheDocument()
   })
 
   // Backend completion Phase 2: the Vice President now manages the Treasurer and
@@ -345,7 +353,7 @@ describe('who sees what', () => {
     expect(changeRolesButtons().length).toBeGreaterThan(0)
     expect(await within(screen.getByTestId('member-m1')).findByText('President')).toBeInTheDocument()
     expect(
-      screen.getByText(/except seasons and the President, Vice President and Developer roles/),
+      screen.getByText(/except seasons and the President and Vice President roles/),
     ).toBeInTheDocument()
     expect(screen.getByText(/You can give or take away the Treasurer and Documentation roles/)).toBeInTheDocument()
   })
@@ -370,7 +378,7 @@ describe('who sees what', () => {
       caller = who
       renderSettings()
       expect(
-        await screen.findByText(/reserved for the President, Vice President and Developer/),
+        await screen.findByText(/reserved for the President and Vice President/),
       ).toBeInTheDocument()
       expect(screen.getByText(shown, { selector: 'strong' })).toBeInTheDocument()
       await screen.findByTestId('member-m2')
@@ -394,7 +402,7 @@ describe('who sees what', () => {
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including roles \(only a Developer changes the Developer role\)/)).toBeInTheDocument()
+    expect(screen.getByText(/including the roles available to you/)).toBeInTheDocument()
   })
 
   it('a job title of "President" grants nothing', async () => {
@@ -1013,6 +1021,18 @@ describe('seasons', () => {
     await waitFor(() => expect(db.seasons).toHaveLength(3))
     expect(db.seasons[2]).toMatchObject({ label: '2028/29', is_current: false })
     expect(db.seasons.filter((s) => s.is_current)).toHaveLength(1)
+    // Through the command, never a direct INSERT; the structure is copied from the current season by default.
+    expect(rpcCalls[0]).toMatchObject({ fn: 'start_season', args: { p_label: '2028/29', p_copy_from: 'sa' } })
+  })
+
+  it('can start a season without copying the structure', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await user.type(await screen.findByLabelText('Label'), '2029/30')
+    await user.click(screen.getByTestId('copy-structure'))
+    await user.click(screen.getByRole('button', { name: 'Create season' }))
+    await waitFor(() => expect(rpcCalls.some((c) => c.fn === 'start_season')).toBe(true))
+    expect(rpcCalls.find((c) => c.fn === 'start_season')?.args).not.toHaveProperty('p_copy_from')
   })
 
   it('switches through the atomic database function, not two client writes', async () => {
@@ -1041,7 +1061,7 @@ describe('export', () => {
 
   it('is scoped to one season and carries identifying metadata', async () => {
     const out = await buildSeasonExport('sa')
-    expect(out.exportVersion).toBe(5) // 5: + department memberships (backend completion Phase 2)
+    expect(out.exportVersion).toBe(7) // 7: + readiness confirmations and the shared progress block (Phase 4); 6: + prerequisite links (Phase 3); 5: + department memberships (Phase 2)
     expect(typeof out.exportedAt).toBe('string')
     expect(typeof out.consistency).toBe('string')
     expect(out.season).toMatchObject({ id: 'sa', label: '2026/27' })

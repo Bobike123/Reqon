@@ -24,6 +24,11 @@ export function SectionRow({
   open,
   onToggle,
   onDraftedChange,
+  subsections = [],
+  openSections,
+  onToggleSection,
+  onDraftedChangeById,
+  depth = 0,
   env,
 }: {
   section: MilestoneSection
@@ -34,12 +39,22 @@ export function SectionRow({
   open: boolean
   onToggle: () => void
   onDraftedChange: (isDrafted: boolean) => void
+  // Subsections are drawn under their parent, one level deep (a subsection has none).
+  subsections?: MilestoneSection[]
+  openSections?: ReadonlySet<string>
+  onToggleSection?: (key: string) => void
+  onDraftedChangeById?: (sectionId: string, isDrafted: boolean) => void
+  depth?: number
   env: GanttEnv
 }) {
+  const subsectionIds = subsections.map((s) => s.id)
+  // The section's own subtasks are listed here; a section that has subsections
+  // also counts theirs in its progress and bar.
   const under = tasksUnderSection(tasks, section.id)
+  const underAll = tasks.filter((t) => t.section_id === section.id || (t.section_id !== null && subsectionIds.includes(t.section_id)))
   const shown = under.filter(env.lens.matches)
-  const progress = sectionProgress(section, progressTasks)
-  const span = sectionSpan(tasks, section.id, fallbackSpan)
+  const progress = sectionProgress(section, progressTasks, subsectionIds)
+  const span = sectionSpan(tasks, section.id, fallbackSpan, subsectionIds)
   const words = progressLabel(progress, 'section')
   const target = { seasonId: env.seasonId, milestoneKey, sectionId: section.id }
   const { direct, relink } = linkCandidates(tasks, target, (t) => env.permsFor(t).canEdit)
@@ -50,7 +65,7 @@ export function SectionRow({
     const task = byId.get(taskId)
     if (task) env.onMoveTo(task, target)
   }, setDropOver)
-  const dimmed = env.lens.active && shown.length === 0
+  const dimmed = env.lens.active && !underAll.some(env.lens.matches)
   const link = (taskId: string) => {
     const task = byId.get(taskId)
     if (task) env.onLink(task, target)
@@ -59,7 +74,7 @@ export function SectionRow({
   return (
     <div data-testid={`gantt-section-${section.id}`} className={dimmed ? 'opacity-70' : undefined}>
       <div className={`${ROW} group py-1 ${dropOver ? "rounded ring-2 ring-slate-900" : ""}`} {...drop} data-drop-target="true">
-        <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-white pl-6 pr-2 group-hover:bg-slate-100`}>
+        <div className={`${STICKY_LABEL} flex items-center gap-1.5 bg-white ${depth > 0 ? 'pl-10' : 'pl-6'} pr-2 group-hover:bg-slate-100`}>
           <button
             type="button"
             aria-expanded={open}
@@ -97,9 +112,9 @@ export function SectionRow({
               span={span}
               range={env.range}
               percent={progress.percent ?? 0}
-              tone={under.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
+              tone={underAll.length > 0 ? 'bg-slate-500' : 'bg-slate-300'}
               title={`${section.name}: ${formatDay(span.from)} → ${formatDay(span.to)} · ${words}${
-                under.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''
+                underAll.length === 0 ? ' (no dated subtasks — shows the submission window)' : ''
               }`}
             />
           )}
@@ -132,13 +147,30 @@ export function SectionRow({
                 currentTargetKey={currentTargetKey(task)}
                 onMoveTo={(to) => env.onMoveTo(task, to)}
                 onSchedule={(start, due) => env.onSchedule(task, start, due)}
-                onMove={(state) => env.onMove(task.id, state)}
+                prerequisites={env.prerequisitesFor(task)}
+                onMove={(state, reason) => env.onMove(task.id, state, reason)}
                 onOwner={(ownerId) => env.onOwner(task.id, ownerId)}
               />
             )
           })}
 
-          {under.length === 0 && (
+          {subsections.map((sub) => (
+            <SectionRow
+              key={sub.id}
+              section={sub}
+              milestoneKey={milestoneKey}
+              tasks={tasks}
+              progressTasks={progressTasks}
+              fallbackSpan={fallbackSpan}
+              open={openSections?.has(sub.id) ?? false}
+              onToggle={() => onToggleSection?.(sub.id)}
+              onDraftedChange={(isDrafted) => onDraftedChangeById?.(sub.id, isDrafted)}
+              depth={depth + 1}
+              env={env}
+            />
+          ))}
+
+          {underAll.length === 0 && (
             <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600">
               No subtasks yet. Link an existing Board task below.
             </p>

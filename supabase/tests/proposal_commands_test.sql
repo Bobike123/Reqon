@@ -67,7 +67,7 @@ end $fn$;
 do $test$
 declare
   dev uuid := gen_random_uuid();   -- Developer
-  pre uuid := gen_random_uuid();   -- President (no proposal power)
+  pre uuid := gen_random_uuid();   -- President (proposal power in every department since 20260130000000)
   hd  uuid := gen_random_uuid();   -- Head of department A
   hd2 uuid := gen_random_uuid();   -- Head of department B
   mem uuid := gen_random_uuid();   -- ordinary member
@@ -185,16 +185,16 @@ begin
   q1 := pg_temp.act(hd2, format('select revise_proposal(%L, 2, ''{"title":"hijack"}''::jsonb)', p));
   perform pg_temp.chk('the Head of another department cannot edit it',
     q1 = '42501' and (select title from task_proposals where id = p) = 'Head edit');
-  q1 := pg_temp.act(pre, format('select revise_proposal(%L, 2, ''{"title":"pres"}''::jsonb)', p));
-  perform pg_temp.chk('the President cannot edit it',
-    q1 = '42501' and (select title from task_proposals where id = p) = 'Head edit');
+  -- Role hierarchy (20260130000000): the President ranks above the Head and may edit and review here too.
+  -- Asked without changing anything, so the revision numbers below stay as they are.
+  perform pg_temp.chk('the President may edit it too (role hierarchy)', pg_temp.val(pre, format('select can_review_proposal(%L)::text', p)) = 'true');
   q1 := pg_temp.act(dev, format('select revise_proposal(%L, 2, ''{"title":"Dev edit"}''::jsonb)', p));
   perform pg_temp.chk('the Developer can edit it',
     q1 = 'ok' and (select title || revision::text from task_proposals where id = p) = 'Dev edit3', q1);
 
   -- ======================================================== REVIEW COMMANDS
   perform pg_temp.chk('a member cannot review', pg_temp.val(mem, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
-  perform pg_temp.chk('the President cannot review', pg_temp.val(pre, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
+  perform pg_temp.chk('an alumnus cannot review', pg_temp.val(alum, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
   perform pg_temp.chk('the Head of another department cannot review', pg_temp.val(hd2, format('select review_proposal(%L, ''review'', 3)::text', p)) = 'E:42501');
   q1 := pg_temp.act(hd, format('select review_proposal(%L, ''review'', 3)', p));
   perform pg_temp.chk('the Head takes a proposal under review', q1 = 'ok' and (select state::text from task_proposals where id = p) = 'agenda', q1);
@@ -243,7 +243,7 @@ begin
     q1 = 'true'
     and (select count(*) from task_requirements where clause_key = c1 and task_id in (t_leg, t2)) = 2);
   perform pg_temp.chk('a stranger cannot link', pg_temp.val(mem, format('select link_task_requirement(%L, %L)::text', t_leg, c3)) = 'E:42501');
-  perform pg_temp.chk('the President alone cannot link', pg_temp.val(pre, format('select link_task_requirement(%L, %L)::text', t_leg, c3)) = 'E:42501');
+  perform pg_temp.chk('the President may link it (role hierarchy; asked without linking)', pg_temp.val(pre, format('select can_edit_task(%L)::text', t_leg)) = 'true');
   perform pg_temp.chk('an unknown requirement cannot be linked', pg_temp.val(own, format('select link_task_requirement(%L, ''NOPE'')::text', t_leg)) = 'E:23503');
   begin
     insert into task_requirements (task_id, clause_key) values (t_leg, c1);
@@ -362,9 +362,9 @@ begin
     and (select count(*) from activity where entity = 'proposal' and entity_id = p_leg2::text and action = 'legacy_repaired') = 1);
   perform pg_temp.chk('the repaired proposal can now be approved', pg_temp.val(hd, format('select (approve_proposal(%L, 3, ''Legacy details reviewed'')).state::text', p_leg2)) = 'approved');
   perform pg_temp.chk('the repaired proposal can now be promoted', pg_temp.val(hd, format('select (promote_proposal(%L, %L)).created::text', p_leg2, sA)) = 'true');
-  perform pg_temp.chk('the President and a member cannot change requirements',
-    pg_temp.act(pre, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg, c1)) = '42501'
-    and pg_temp.act(mem, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg, c1)) = '42501');
+  perform pg_temp.chk('a member cannot change requirements, the President may (role hierarchy; asked without changing them)',
+    pg_temp.act(mem, format('select set_proposal_requirements(%L, array[%L], 2)', p_leg, c1)) = '42501'
+    and pg_temp.val(pre, format('select can_review_proposal(%L)::text', p_leg)) = 'true');
 
   -- ========================================= ROLLBACK AFTER A FORCED FAILURE
   r := pg_temp.val(mem, format('select (submit_proposal(%L, %L, %L, %L::date, %L, %L::text[])).id::text', sA, 'Will fail to promote', dA, '2026-12-01', 'PC-A1', array[c3]));

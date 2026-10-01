@@ -109,6 +109,11 @@ export type RecordMeasurement = {
   measuredAt?: string
   note?: string
   source?: string
+  // 'team' (default) is OUR observation and becomes the current value; 'competition' is a result read at
+  // the event: separate, never the current value, recorded only by evidence authority (the server decides).
+  context?: 'team' | 'competition'
+  // The unit shown beside the input; the server refuses a value entered for another unit.
+  unit?: string | null
 }
 
 export type CorrectMeasurement = {
@@ -126,10 +131,14 @@ function valueArgs(value: number | boolean) {
 function useRefreshSpecs() {
   const queryClient = useQueryClient()
   const seasonId = useSeasonId()
-  return () => {
-    if (!seasonId) return
-    void queryClient.invalidateQueries({ queryKey: queryKeys.specVerdicts(seasonId) })
-    void queryClient.invalidateQueries({ queryKey: queryKeys.specMeasurementsAll(seasonId) })
+  // `forSeason` is the season the command was issued under: a switch while the request is in flight must
+  // still refresh the season that changed, not the one that is now current.
+  return (forSeason: string | undefined = seasonId) => {
+    if (!forSeason) return
+    void queryClient.invalidateQueries({ queryKey: queryKeys.specVerdicts(forSeason) })
+    void queryClient.invalidateQueries({ queryKey: queryKeys.specMeasurementsAll(forSeason) })
+    // The audit trail gained an entry (readiness, direction, observation); do not depend on realtime for it.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.activityAll(forSeason) })
   }
 }
 
@@ -137,7 +146,8 @@ export function useRecordMeasurement() {
   const seasonId = useSeasonId()
   const refresh = useRefreshSpecs()
 
-  return useMutation<SpecMeasurement, Error, RecordMeasurement>({
+  return useMutation<SpecMeasurement, Error, RecordMeasurement, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
     mutationFn: async (input) => {
       if (!seasonId) throw new DataError('record a measurement: no season is selected', null)
       const { data, error } = await supabase.rpc('record_spec_measurement', {
@@ -148,12 +158,14 @@ export function useRecordMeasurement() {
         ...(input.measuredAt ? { p_measured_at: input.measuredAt } : {}),
         ...(input.note ? { p_note: input.note } : {}),
         ...(input.source ? { p_source: input.source } : {}),
+        ...(input.context ? { p_context: input.context } : {}),
+        ...(input.unit ? { p_unit: input.unit } : {}),
       })
       if (error) throw new DataError('record a measurement', error)
       if (!data) throw new DataError('record a measurement: nothing was returned', null)
       return data
     },
-    onSettled: refresh,
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
   })
 }
 
@@ -161,8 +173,10 @@ export function useRecordMeasurement() {
 // history, marked invalidated with the reason; the corrected one is appended.
 export function useCorrectMeasurement() {
   const refresh = useRefreshSpecs()
+  const seasonId = useSeasonId()
 
-  return useMutation<SpecMeasurement, Error, CorrectMeasurement>({
+  return useMutation<SpecMeasurement, Error, CorrectMeasurement, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
     mutationFn: async (input) => {
       const { data, error } = await supabase.rpc('correct_spec_measurement', {
         p_measurement_id: input.measurementId,
@@ -175,7 +189,7 @@ export function useCorrectMeasurement() {
       if (!data) throw new DataError('correct a measurement: nothing was returned', null)
       return data
     },
-    onSettled: refresh,
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
   })
 }
 
@@ -183,8 +197,10 @@ export function useCorrectMeasurement() {
 // to the next accepted observation, or to "not measured" — never to zero.
 export function useInvalidateMeasurement() {
   const refresh = useRefreshSpecs()
+  const seasonId = useSeasonId()
 
-  return useMutation<SpecMeasurement, Error, { measurementId: string; reason: string }>({
+  return useMutation<SpecMeasurement, Error, { measurementId: string; reason: string }, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
     mutationFn: async ({ measurementId, reason }) => {
       const { data, error } = await supabase.rpc('invalidate_spec_measurement', {
         p_measurement_id: measurementId,
@@ -194,6 +210,55 @@ export function useInvalidateMeasurement() {
       if (!data) throw new DataError('withdraw a measurement: nothing was returned', null)
       return data
     },
-    onSettled: refresh,
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
+  })
+}
+
+// ------------------------------------------------------------- readiness
+// "Checked and ready" is a person's confirmation of ONE exact current team measurement, with a note. It
+// lapses on the server when that measurement is replaced, corrected or withdrawn, or the rule/targets
+// change; the client never derives readiness itself, it reads spec_verdicts.readiness.
+export function useConfirmReadiness() {
+  const refresh = useRefreshSpecs()
+  const seasonId = useSeasonId()
+  return useMutation<unknown, Error, { specId: string; measurementId: string; note: string }, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
+    mutationFn: async ({ specId, measurementId, note }) => {
+      const { data, error } = await supabase.rpc('confirm_spec_readiness', {
+        p_spec_id: specId,
+        p_measurement_id: measurementId,
+        p_note: note,
+      })
+      if (error) throw new DataError('confirm readiness', error)
+      return data
+    },
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
+  })
+}
+
+export function useRevokeReadiness() {
+  const refresh = useRefreshSpecs()
+  const seasonId = useSeasonId()
+  return useMutation<boolean, Error, { specId: string; reason: string }, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
+    mutationFn: async ({ specId, reason }) =>
+      unwrap('withdraw the readiness confirmation', await supabase.rpc('revoke_spec_readiness', { p_spec_id: specId, p_reason: reason })),
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
+  })
+}
+
+// Which way is better for the project (higher or lower) for a specification whose direction was only
+// derived from the regulatory minimum/maximum. President, Vice President or a Developer.
+export function useReviewDirection() {
+  const refresh = useRefreshSpecs()
+  const seasonId = useSeasonId()
+  return useMutation<unknown, Error, { specId: string; direction: 'higher_better' | 'lower_better'; note: string }, { seasonId: string | undefined }>({
+    onMutate: () => ({ seasonId }),
+    mutationFn: async ({ specId, direction, note }) => {
+      const { data, error } = await supabase.rpc('review_spec_direction', { p_spec_id: specId, p_direction: direction, p_note: note })
+      if (error) throw new DataError('review the direction', error)
+      return data
+    },
+    onSettled: (_data, _error, _vars, context) => refresh(context?.seasonId),
   })
 }

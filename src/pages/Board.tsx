@@ -1,19 +1,23 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { canArchiveTask, canEditTask, canReassignTaskOwner } from '../auth/permissions.ts'
+import { canArchiveTask, canEditTask, canReassignTaskOwner, taskDepartmentTargets } from '../auth/permissions.ts'
 import { useAuth } from '../auth/context.ts'
 import { departmentChoices } from '../departments/filter.ts'
 import { DepartmentNav } from '../departments/DepartmentNav.tsx'
 import { ScopeDepartmentFilter } from '../departments/ScopeDepartmentFilter.tsx'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones } from '../data/useMilestones.ts'
+import { useRealtimeTaskDependencies } from '../data/useRealtimeTaskDependencies.ts'
 import { useRealtimeTaskRequirements } from '../data/useRealtimeTaskRequirements.ts'
 import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
 import { useSubteams } from '../data/useSubteams.ts'
 import { useTaskActor } from '../data/useTaskActor.ts'
-import { useSourceProposals, useTaskRequirements } from '../data/useTaskHistory.ts'
+import { useTaskDependencies } from '../data/useTaskDependencies.ts'
+import { useSourceProposals, useTaskRequirements, useTasksForProgress } from '../data/useTaskHistory.ts'
 import { useTasks, useUpdateTask } from '../data/useTasks.ts'
 import { todayIso } from '../lib/dates.ts'
+import { milestoneLabel } from '../milestones/label.ts'
+import { dependentsOf, prerequisiteCandidates, prerequisitesOf, taskRefLookup } from '../tasks/dependencies.ts'
 import { applyTaskFilter, DEFAULT_TASK_FILTER, filterTasks, isDefaultTaskFilter, taskFilterFromParams, taskScopeCounts, type TaskFilter } from '../tasks/filters.ts'
 import type { TaskScope } from '../tasks/scope.ts'
 import { TASK_STATES } from '../tasks/taskState.ts'
@@ -21,7 +25,7 @@ import { pageMain } from '../ui/layout.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import { ErrorState } from '../ui/states.tsx'
 import { TaskCard } from './board/TaskCard.tsx'
-import type { TaskPermissions } from './board/TaskDetails.tsx'
+import type { TaskLinksView, TaskPermissions } from './board/TaskDetails.tsx'
 import { useUrlParams } from '../lib/useUrlParams.ts'
 
 // The five lanes, exactly the task_state values in the schema, from the one
@@ -48,6 +52,8 @@ export default function Board() {
   const realtime = useRealtimeTasks()
   // Someone else linking a task to a requirement must update the counts here.
   useRealtimeTaskRequirements()
+  useRealtimeTaskDependencies()
+  const dependencies = useTaskDependencies()
   const [params, setParams] = useUrlParams()
   const today = todayIso()
 
@@ -106,18 +112,41 @@ export default function Board() {
     [members.data],
   )
   const deptName = useMemo(() => new Map((departmentList ?? []).map((d) => [d.key, d.name])), [departmentList])
-  const milestoneName = useMemo(() => new Map((milestones.data ?? []).map((m) => [m.key, `${m.key} — ${m.name}`])), [milestones.data])
-  const milestoneOptions = useMemo(() => (milestones.data ?? []).map((m) => ({ value: m.key, label: `${m.key} — ${m.name}` })), [milestones.data])
+  const activeDepartments = useMemo(
+    () => (departmentList ?? []).filter((d) => d.archived_at === null).map((d) => ({ key: d.key, name: d.name })),
+    [departmentList],
+  )
+  const milestoneName = useMemo(() => new Map((milestones.data ?? []).map((m) => [m.key, `${milestoneLabel(m)} — ${m.name}`])), [milestones.data])
+  const milestoneOptions = useMemo(() => (milestones.data ?? []).map((m) => ({ value: m.key, label: `${milestoneLabel(m)} — ${m.name}` })), [milestones.data])
   const keysByTask = useMemo(() => {
     const map = new Map<string, string[]>()
     for (const link of links.data ?? []) map.set(link.task_id, [...(map.get(link.task_id) ?? []), link.clause_key])
     return map
   }, [links.data])
 
+  // A prerequisite that finished and was archived still reads by name (the progress list carries archived tasks).
+  const progressTasks = useTasksForProgress()
+  const taskRefs = useMemo(
+    () => taskRefLookup(allTasks, (progressTasks.data ?? []).filter((t) => t.archived_at !== null)),
+    [allTasks, progressTasks.data],
+  )
+  const dependencyLinks = useMemo(() => dependencies.data ?? [], [dependencies.data])
+  const linksFor = (task: (typeof allTasks)[number]): TaskLinksView => ({
+    prerequisites: prerequisitesOf(dependencyLinks, task.id, taskRefs),
+    dependents: dependentsOf(dependencyLinks, task.id, taskRefs),
+    candidates: () => prerequisiteCandidates(task, allTasks, dependencyLinks),
+    departmentName: (key) => (key ? (deptName.get(key) ?? key) : 'No department'),
+  })
+
   const permsFor = (task: (typeof allTasks)[number]): TaskPermissions => {
     if (!actor) return NO_PERMISSIONS
     const edit = canEditTask(actor, task)
-    return { canEdit: edit, canReassign: edit && canReassignTaskOwner(actor, task), canArchive: canArchiveTask(actor, task) && task.archived_at === null }
+    return {
+      canEdit: edit,
+      canReassign: edit && canReassignTaskOwner(actor, task),
+      canArchive: canArchiveTask(actor, task) && task.archived_at === null,
+      moveTo: taskDepartmentTargets(actor, task, activeDepartments),
+    }
   }
   const ownersFor = (task: (typeof allTasks)[number]) =>
     task.owner_id && !activeOwners.some((o) => o.id === task.owner_id)
@@ -294,7 +323,8 @@ export default function Board() {
                         owners={ownersFor(task)}
                         milestones={milestoneOptions}
                         moving={updateTask.isPending}
-                        onMove={(id, state) => updateTask.mutate({ id, state })}
+                        links={linksFor(task)}
+                        onMove={(id, state, blockedReason) => updateTask.mutate({ id, state, ...(blockedReason ? { blockedReason } : {}) })}
                       />
                     )
                   })}

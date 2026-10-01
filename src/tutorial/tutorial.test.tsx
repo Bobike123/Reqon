@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { permissionsFor, type PrivilegedRole } from '../auth/permissions.ts'
 import { NAV_ITEMS } from '../ui/navItems.ts'
 import { useTutorial } from './context.ts'
-import { CHAPTERS, TUTORIAL_STEPS, type TourViewer, type TutorialStep } from './steps.ts'
+import { AUDIENCES, CHAPTERS, TUTORIAL_STEPS, type TourViewer, type TutorialStep } from './steps.ts'
 import { readTutorialRecord } from './storage.ts'
 import { buildTour, tourMenu } from './tour.ts'
 import { TutorialProvider } from './TutorialProvider.tsx'
@@ -273,7 +273,7 @@ describe('the tour chooser', () => {
     expect(within(chooser).getByRole('button', { name: /^Full tour.*4 steps$/ })).toBeInTheDocument()
     await user.click(within(chooser).getByRole('button', { name: /^Only the Treasurer parts.*2 steps$/ }))
     expect(await screen.findByRole('dialog', { name: 'Treasurer step' })).toBeInTheDocument()
-    expect(screen.getByText('Only for: Treasurer and Developer')).toBeInTheDocument()
+    expect(screen.getByText('Only for: Treasurer')).toBeInTheDocument()
   })
 
   it('Close leaves without starting anything', async () => {
@@ -339,7 +339,6 @@ describe('what each role is taught', () => {
   })
 
   it('a Head with no privileged role is taught how to review and promote — resource-aware authority, not a role check', () => {
-    expect(ids(['president']).filter((id) => id.startsWith('proposal-'))).not.toContain('proposal-decision')
     expect(ids([], 'full', true)).toEqual(
       expect.arrayContaining(['proposal-decision', 'proposal-promote']),
     )
@@ -347,6 +346,15 @@ describe('what each role is taught', () => {
     // two Head-only steps plus "finish" is 3, not 2.
     const menu = tourMenu(TUTORIAL_STEPS, viewerFor([], true))
     expect(menu.role).toEqual({ label: 'Head of a department', count: 3 })
+  })
+
+  // F6-03 / C20 (supersedes R5.3 where no Head exists): the President and Vice President review the proposals
+  // of a department with no Head, and unassigned ones, so they are taught how; the Treasurer is not.
+  it('the President and Vice President are taught to review and promote, as the reviewers where no Head exists', () => {
+    for (const role of ['president', 'vicepresident'] as const) {
+      expect(ids([role]), role).toEqual(expect.arrayContaining(['proposal-decision', 'proposal-promote']))
+    }
+    expect(ids(['treasurer'])).not.toContain('proposal-decision')
   })
 
   it('a plain member who heads no department never sees Head-only instruction', () => {
@@ -372,7 +380,7 @@ describe('what each role is taught', () => {
       'finish',
     ])
     const all = ids(['treasurer'])
-    for (const id of ['finance-read-only', 'change-roles', 'add-member', 'developer-scope']) {
+    for (const id of ['finance-read-only', 'change-roles', 'add-member']) {
       expect(all, id).not.toContain(id)
     }
   })
@@ -392,7 +400,7 @@ describe('what each role is taught', () => {
         'finance-read-only',
       ]),
     )
-    for (const id of ['vp-roles', 'finance-add', 'developer-scope']) expect(all, id).not.toContain(id)
+    for (const id of ['vp-roles', 'finance-add']) expect(all, id).not.toContain(id)
   })
 
   it('the Vice President learns Settings, and that roles are the President’s', () => {
@@ -403,11 +411,10 @@ describe('what each role is taught', () => {
     }
   })
 
-  it('the Developer is taught everything, because they can do everything', () => {
+  it('the Developer keeps the complete permission-based tour without a role-specific explanation', () => {
     const all = ids(['developer'])
     expect(all).toEqual(
       expect.arrayContaining([
-        'developer-scope',
         'change-roles',
         'role-rules',
         'roster-controls',
@@ -420,12 +427,13 @@ describe('what each role is taught', () => {
     // Nothing that tells them they cannot change something.
     expect(all).not.toContain('finance-read-only')
     expect(all).not.toContain('vp-roles')
+    expect(all).not.toContain('developer-scope')
   })
 
   it('never tells someone with two roles two contradicting things', () => {
     const all = ids(['treasurer', 'developer'])
     expect(all).toContain('finance-add')
-    // Says "only the Treasurer may write", which is untrue for a Developer.
+    // The maintenance override still selects the write-capable tour steps.
     expect(all).not.toContain('finance-read-only')
   })
 
@@ -458,9 +466,9 @@ describe('the real tour', () => {
     }
   })
 
-  it('gates reviewing and promoting a proposal to a department Head or a Developer, never Developer alone', () => {
-    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-decision')?.audience).toBe('headOrDeveloper')
-    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-promote')?.audience).toBe('headOrDeveloper')
+  it('gates reviewing and promoting a proposal to whoever may review proposals, never Developer alone', () => {
+    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-decision')?.audience).toBe('proposalReviewer')
+    expect(TUTORIAL_STEPS.find((s) => s.id === 'proposal-promote')?.audience).toBe('proposalReviewer')
   })
 
   it('visits every screen in the menu', () => {
@@ -481,6 +489,15 @@ describe('the real tour', () => {
     for (const chapter of CHAPTERS) {
       expect(TUTORIAL_STEPS.filter((s) => s.chapter === chapter.id).length, chapter.id).toBeLessThanOrEqual(16)
     }
+  })
+
+  it('does not advertise the Developer exception in tour copy', () => {
+    const copy = [
+      ...Object.values(AUDIENCES).map((audience) => audience.label),
+      ...TUTORIAL_STEPS.flatMap((step) => [step.title, step.body]),
+    ].join('\n')
+    expect(copy).not.toMatch(/developer/i)
+    expect(tourMenu(TUTORIAL_STEPS, viewerFor(['developer'])).role?.label).toBe('Maintenance access')
   })
 
   it('explains that the team-duty filter hides rules that ask nothing of the team', () => {

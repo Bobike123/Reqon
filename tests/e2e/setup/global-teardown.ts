@@ -23,10 +23,12 @@ export default async function globalTeardown() {
   // records real rows here, so removing them needs the same superuser
   // trigger-pause pattern task-proposal-flow.spec.ts already uses for tasks.
   const specIds = [manifest.spec.id, ...Object.values(manifest.extraSpecs).map((s) => s.id)]
+  runSql(`alter table spec_readiness disable trigger trg_guard_spec_readiness_rows`)
   runSql(`alter table spec_measurements disable trigger trg_guard_spec_measurement_rows`)
   runSql(`alter table specs disable trigger trg_guard_spec_current_cache`)
   try {
     for (const id of specIds) {
+      runSql(`delete from spec_readiness where spec_id = '${id}'`)
       // specs.current_measurement_id (FK restrict) must be cleared before its
       // row can be deleted.
       runSql(`update specs set current_measurement_id = null where id = '${id}'`)
@@ -36,6 +38,7 @@ export default async function globalTeardown() {
   } finally {
     runSql(`alter table specs enable trigger trg_guard_spec_current_cache`)
     runSql(`alter table spec_measurements enable trigger trg_guard_spec_measurement_rows`)
+    runSql(`alter table spec_readiness enable trigger trg_guard_spec_readiness_rows`)
   }
 
   // Restore each department's original Head (NULL if it had none).

@@ -165,11 +165,12 @@ begin
     ('headx CAN edit a task he owns in dept Z',   headx,  format('update tasks set detail = ''own in other dept'' where id = %L', t_head_owns), 'write', 'ALLOWED'),
     ('heady heads Z, edits owner2''s task there', heady,  format('update tasks set detail = ''heady edit'' where id = %L', t_other_dep), 'write', 'ALLOWED'),
     ('treasurer alone cannot edit any task',      tre,    format('update tasks set detail = ''nope'' where id = %L', t_own), 'write', 'DENIED'),
-    ('president (not a Head) cannot edit',        pre,    format('update tasks set detail = ''nope'' where id = %L', t_own), 'write', 'DENIED'),
+    -- Role hierarchy (20260130000000): the President ranks above the Head and edits any department's task.
+    ('president (not a Head) edits it too',       pre,    format('update tasks set detail = ''president'' where id = %L', t_own), 'write', 'ALLOWED'),
     -- Backend completion Phase 2 (PERMISSIONS §1): a task with NO department is
     -- unassigned work, which the President/VP may act on as the governance
-    -- fallback (to classify it). This row used to expect DENIED; the row above
-    -- (a department that has a Head) still refuses the President.
+    -- fallback (to classify it). This row used to expect DENIED; since the role
+    -- hierarchy (20260130000000) the President acts in every department.
     ('president acts on an unassigned task (governance fallback)', pre, format('update tasks set detail = ''pres tries'' where id = %L', t_no_dept), 'write', 'ALLOWED'),
     ('developer edits any task',                  dev,    format('update tasks set detail = ''dev edit'' where id = %L', t_other_dep), 'write', 'ALLOWED'),
     ('nobody may INSERT a task directly (owner1)',owner1, format('insert into tasks (season_id, title) values (%L, ''sneaky'')', season), 'write', 'DENIED'),
@@ -369,7 +370,8 @@ begin
   perform set_config('request.jwt.claim.sub', '', true);
 
   -- ========================================== attention(p_season, p_today)
-  update tasks set state = 'blocked' where id = t_other_dep;
+  -- Phase 3: entering Blocked now needs a reason or a prerequisite (20260128000100).
+  update tasks set state = 'blocked', blocked_reason = 'Waiting for a decision' where id = t_other_dep;
   update tasks set priority = 'urgent', starred = false where id = t_head_owns;
   update tasks set due_date = '2026-09-01', starred = false, state = 'todo' where id = t_plain_due;
 

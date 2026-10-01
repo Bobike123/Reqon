@@ -116,7 +116,9 @@ describe('useRecordMeasurement', () => {
     invalidate.mockClear()
     rpcResult = { data: null, error: { message: 'boom', code: '22003' } }
     await act(async () => { await result.current.mutateAsync({ specId: 's', value: 1, requestId: REQ }).catch(() => {}) })
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    // verdicts, every open history, and the audit trail (an observation is an audited event)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.activityAll('season-a') })
+    expect(invalidate).toHaveBeenCalledTimes(3)
   })
 
   it('reports the database\'s own explanation of a refused value', async () => {

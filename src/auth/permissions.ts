@@ -24,7 +24,7 @@ export const ROLE_LABELS: Record<PrivilegedRole, string> = {
 
 // What each role may do, in one line — shown where roles are handed out.
 export const ROLE_SUMMARIES: Record<PrivilegedRole, string> = {
-  president: 'Runs Settings and seasons, and gives or takes away every role except Developer.',
+  president: 'Runs Settings and seasons, and manages the roles available to the President.',
   vicepresident: 'Runs Settings and the Treasurer and Documentation roles; cannot switch seasons.',
   treasurer: 'Adds, edits and deletes financial entries.',
   documentation: 'Edits meetings, the default agenda and milestone sections. No access to finances.',
@@ -53,6 +53,15 @@ export function describeRoles(roles: readonly PrivilegedRole[]): string {
   if (labels.length === 0) return `${NO_ROLE_LABEL} (no privileged role)`
   if (labels.length === 1) return labels[0]
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`
+}
+
+// Explanatory access notices should describe the club-facing roles without
+// advertising the maintenance override. The real role still appears in the
+// account badge and role editor, where an exact identity is required.
+export function describePublicAccess(roles: readonly PrivilegedRole[]): string {
+  const publicRoles = roles.filter((role) => role !== 'developer')
+  if (publicRoles.length > 0) return describeRoles(publicRoles)
+  return roles.includes('developer') ? 'Maintenance access' : describeRoles([])
 }
 
 // What the signed-in person may do — the ONE place the app decides it.
@@ -156,17 +165,18 @@ export type TaskActor = {
   // built by the caller from useSubteams() data, since this module owns no
   // data fetching of its own.
   headOf: readonly string[]
-  // Active President or Vice President: restores any archived task, and acts
-  // for unassigned work and for departments without a Head (below).
+  // Active President or Vice President. They rank above every Head (role
+  // hierarchy, 20260130000000): Head authority over every active department
+  // and over unassigned work, and they restore any archived task.
   isGovernance?: boolean
-  // Departments where that no-Head fallback applies: neither the department
-  // nor its parent has a Head ('governance_fallback').
+  // The active departments where they act ('president' / 'vicepresident' in
+  // department_authority()): for an active President or VP, all of them.
   governs?: readonly string[]
 }
 
-// department_authority(key) is not null (20260126000200): the Head (directly
-// or through the parent), a Developer, or — only where no Head exists, or for
-// unassigned work (key null) — the President / Vice President.
+// department_authority(key) is not null (20260130000000): the Head (directly
+// or through the parent), a Developer, or the President / Vice President for
+// every active department and for unassigned work (key null).
 export function hasDepartmentAuthority(actor: TaskActor, subteamKey: string | null): boolean {
   if (actor.status !== 'active') return false
   if (actor.isDeveloper) return true
@@ -214,10 +224,27 @@ export function canRestoreTask(
   return actor.isGovernance === true || hasDepartmentAuthority(actor, task.subteam_key)
 }
 
+// set_task_department() (20260126000400): an active President, Vice President or
+// Developer may give any non-archived task any active department; a Head may move
+// a task only between departments they head (directly or as the parent's Head),
+// and never classifies unassigned work. Returns the departments this actor may
+// move THIS task to (never its current one); empty = no control to show.
+export function taskDepartmentTargets<D extends { key: string }>(
+  actor: TaskActor,
+  task: Pick<Task, 'subteam_key' | 'archived_at'>,
+  activeDepartments: readonly D[],
+): D[] {
+  if (actor.status !== 'active' || task.archived_at !== null) return []
+  const others = activeDepartments.filter((d) => d.key !== task.subteam_key)
+  if (actor.isDeveloper || actor.isGovernance === true) return others
+  if (task.subteam_key === null || !actor.headOf.includes(task.subteam_key)) return []
+  return others.filter((d) => actor.headOf.includes(d.key))
+}
+
 // can_review_proposal(id): department authority over the proposal's
 // department. Covers reviewing, parking, rejecting, reopening, editing and
-// promoting. President/VP act only where the department has no Head, or for
-// a proposal with no department yet.
+// promoting. The President and VP act in every active department and for a
+// proposal with no department yet (role hierarchy, 20260130000000).
 export function canReviewProposal(actor: TaskActor, proposal: Pick<Proposal, 'subteam_key'>): boolean {
   return hasDepartmentAuthority(actor, proposal.subteam_key)
 }

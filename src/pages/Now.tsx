@@ -4,6 +4,8 @@ import { useAuth } from '../auth/context.ts'
 import { canReviewProposal, reviewsAnyProposal } from '../auth/permissions.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { useMilestones } from '../data/useMilestones.ts'
+import { useTaskDependencies } from '../data/useTaskDependencies.ts'
+import { useRealtimeTaskDependencies } from '../data/useRealtimeTaskDependencies.ts'
 import { useAttention, useBookProgress } from '../data/useNowMetrics.ts'
 import { useProposals } from '../data/useProposals.ts'
 import { useRealtimeMilestones } from '../data/useRealtimeMilestones.ts'
@@ -19,6 +21,7 @@ import { formatDay, todayIso } from '../lib/dates.ts'
 import { isHistory } from '../proposals/filters.ts'
 import { proposalStatusLabel } from '../proposals/proposalStates.ts'
 import { TASK_STATE_LABEL } from '../tasks/taskState.ts'
+import { isSatisfied } from '../tasks/dependencies.ts'
 import { pageMain } from '../ui/layout.ts'
 import { PageHeader } from '../ui/PageHeader.tsx'
 import {
@@ -33,6 +36,7 @@ import {
   upcomingDeadlines,
   type BookChapter,
   type BookUnit,
+  REVIEWER_QUEUE_STATES,
 } from './now/nowModel.ts'
 
 // The screen people keep open while working: what needs doing next, and how
@@ -165,7 +169,9 @@ function Bar({ value, tone }: { value: number | null; tone: string }) {
 function bookCountsText(unit: BookUnit): string {
   switch (unit.status) {
     case 'measured':
-      return `${unit.counts.resolved}/${unit.counts.requirements} resolved`
+      return unit.counts.applicable > 0
+        ? `${unit.counts.complied}/${unit.counts.applicable} complied`
+        : 'all not applicable'
     case 'no-requirements':
       return `no team requirements (${unit.counts.importedRules} rule${unit.counts.importedRules === 1 ? '' : 's'})`
     case 'not-imported':
@@ -249,7 +255,7 @@ function BookUnitRow({
         )}
         {unit.counts.notApplicable > 0 && (
           <span className="block text-[11px] text-slate-600" data-testid={`${testId}-na`}>
-            {unit.counts.notApplicable} not applicable (counted as resolved)
+            {unit.counts.notApplicable} not applicable (left out of the count)
           </span>
         )}
       </span>
@@ -284,6 +290,7 @@ export default function Now() {
   const auth = useAuth()
   const actor = useTaskActor()
   const milestones = useMilestones()
+  const dependencyLinks = useTaskDependencies()
   const bookProgress = useBookProgress()
   const attention = useAttention()
   const proposals = useProposals()
@@ -295,6 +302,8 @@ export default function Now() {
   useRealtimeProposalComments()
   useRealtimeMilestones()
   useRealtimeTasks()
+  // The blocked list names what each task waits for; keep those links live too.
+  useRealtimeTaskDependencies()
   // A rule marked compliant elsewhere moves its chapter's bar here.
   useRealtimeClauseStatus()
 
@@ -319,7 +328,7 @@ export default function Now() {
   const points = ms1Points(milestones.data ?? [])
   const openProposals = openProposalsCount(proposals.data ?? [])
   const reviewQueue = actor
-    ? (proposals.data ?? []).filter((p) => !isHistory(p) && (p.state === 'open' || p.state === 'agenda') && canReviewProposal(actor, p))
+    ? (proposals.data ?? []).filter((p) => !isHistory(p) && REVIEWER_QUEUE_STATES.includes(p.state) && canReviewProposal(actor, p))
     : []
   const myProposals = myId ? (proposals.data ?? []).filter((p) => p.raised_by === myId && !isHistory(p)) : []
   const isReviewer = actor !== null && reviewsAnyProposal(actor)
@@ -330,6 +339,17 @@ export default function Now() {
     const t = id ? taskById.get(id) : undefined
     if (!t) return ''
     return `${who(t.owner_id)} · ${dept(t.subteam_key)}${t.due_date ? ` · due ${formatDay(t.due_date)}` : ''}`
+  }
+  // Why a task is blocked: the written reason, else the unfinished tasks it waits for, else an honest "none kept".
+  const blockerText = (id: string | null) => {
+    const t = id ? taskById.get(id) : undefined
+    if (t?.blocked_reason) return t.blocked_reason
+    // The Board's rule (tasks/dependencies.ts): a done, cancelled or archived prerequisite no longer holds anything up.
+    const open = (dependencyLinks.data ?? []).filter((l) => {
+      const p = l.task_id === id ? taskById.get(l.depends_on_task_id) : undefined
+      return p !== undefined && !isSatisfied(p)
+    }).length
+    return open > 0 ? `waiting for ${open} ${open === 1 ? 'task' : 'tasks'}` : 'no reason recorded'
   }
   // The tile and the list count the same tasks (attention(), SQL-owned).
   const taskSource: Source = { isLoading: attention.isLoading || tasks.isLoading, error: attention.error ?? tasks.error, refetch: () => { void attention.refetch(); void tasks.refetch() } }
@@ -346,10 +366,10 @@ export default function Now() {
         <Tile testId="tile-mine" to="/board?scope=mine" label="My open tasks" source={tasks}
           value={valueOf(tasks, () => String(mine.length))} sub={myId ? 'Assigned to you, not done' : 'Not on the roster'} />
         <Tile testId="tile-proposals" to="/proposals" label="Open proposals" source={proposals}
-          value={valueOf(proposals, () => String(openProposals))} sub={isReviewer ? `${reviewQueue.length} wait for your review` : 'Suggested or under review'} />
+          value={valueOf(proposals, () => String(openProposals))} sub={isReviewer ? `${reviewQueue.length} wait for your review` : 'Not yet decided or made into a task'} />
         <Tile testId="tile-deadline" to="/milestones" label="Next submission" source={milestones}
           value={valueOf(milestones, () => (deadline.kind === 'tbc' ? 'TBC' : `${deadline.days} days`))}
-          sub={deadline.kind === 'tbc' ? 'No published deadline' : `${deadline.milestoneKey} · ${deadline.name} · ${formatDay(deadline.dueOn)}`}
+          sub={deadline.kind === 'tbc' ? 'No published deadline' : `${deadline.label} · ${deadline.name} · ${formatDay(deadline.dueOn)}`}
           tone={deadline.kind === 'due' && deadline.days <= 14 ? 'warn' : 'plain'} />
       </section>
 
@@ -359,17 +379,18 @@ export default function Now() {
             Requirements progress
           </h2>
           <p className="mb-2 text-xs text-slate-600">
-            The rules that place a duty on the team, in the Requirements Book&apos;s own chapters. Resolved means marked
-            compliant, verified or not applicable in the Register. Finishing tasks never marks a rule compliant, and a
+            The rules that place a duty on the team, in the Requirements Book&apos;s own chapters. Complied means marked
+            compliant or verified in the Register, out of the rules that apply: not applicable ones are left out and counted apart. Finishing tasks never marks a rule compliant, and a
             rule&apos;s department does not change where it is counted.
           </p>
           <p className="mb-2 text-xs text-slate-700" data-testid="now-requirements-total">
             Across the book:{' '}
             <strong className="font-semibold tabular-nums">
-              {valueOf(bookProgress, () => `${bookTotal.resolved} / ${bookTotal.requirements}`)}
+              {valueOf(bookProgress, () => `${bookTotal.complied} / ${bookTotal.applicable}`)}
             </strong>{' '}
-            requirements resolved
-            {bookProgress.data ? ` (${percent(bookTotal.resolved, bookTotal.requirements)}%)` : ''}
+            requirements complied
+            {bookProgress.data && bookTotal.applicable > 0 ? ` (${percent(bookTotal.complied, bookTotal.applicable)}%)` : ''}
+            {bookProgress.data && bookTotal.verified > 0 ? ` · ${bookTotal.verified} verified` : ''}
             {bookProgress.data && bookTotal.notApplicable > 0 ? ` · ${bookTotal.notApplicable} not applicable` : ''}.
             {bookProgress.data && notImported.length > 0 && (
               <span className="block text-amber-900">
@@ -427,7 +448,7 @@ export default function Now() {
               a.kind === 'clause' ? (
                 <Row key={`c-${a.clause_key}`} to={`/register?search=${encodeURIComponent(a.clause_key ?? a.ref ?? '')}`} title={`Rule ${a.ref}`} meta={`${who(a.owner_id)} · requirement`} tone="warn" />
               ) : (
-                <Row key={`t-${a.ref}`} to={`/board?task=${encodeURIComponent(a.ref ?? '')}`} title={a.title ?? 'Untitled task'} meta={`${taskMeta(a.ref)} · no reason recorded`} tone="warn" />
+                <Row key={`t-${a.ref}`} to={`/board?task=${encodeURIComponent(a.ref ?? '')}`} title={a.title ?? 'Untitled task'} meta={`${taskMeta(a.ref)} · ${blockerText(a.ref)}`} tone="warn" />
               ),
             )}
           </ActionList>

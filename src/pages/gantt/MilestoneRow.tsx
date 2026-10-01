@@ -1,7 +1,8 @@
+import { milestoneLabel } from '../../milestones/label.ts'
 import type { Milestone, MilestoneSection } from '../../data/useMilestones.ts'
 import type { Task } from '../../data/useTasks.ts'
 import { formatDay } from '../../lib/dates.ts'
-import { sectionsFor } from '../milestones/milestoneModel.ts'
+import { sectionsFor, subsectionsOf, topLevelSections } from '../milestones/milestoneModel.ts'
 import { Bar, Marker, ROW, STICKY_LABEL, Track } from './GanttChart.tsx'
 import { SectionRow } from './SectionRow.tsx'
 import { UnsectionedRow } from './UnsectionedRow.tsx'
@@ -38,7 +39,10 @@ export function MilestoneRow({
   onDraftedChange: (sectionId: string, isDrafted: boolean) => void
   env: GanttEnv
 }) {
+  // Every section and subsection of the milestone count toward progress; only the
+  // top-level ones are rows here — a subsection is drawn under its parent.
   const mySections = sectionsFor(sections, milestone.key)
+  const topSections = topLevelSections(sections, milestone.key)
   const marks = milestoneMarks(milestone, env.today)
   const progress = milestoneProgress(mySections, progressTasks, milestone.key)
   const words = progressLabel(progress)
@@ -68,7 +72,7 @@ export function MilestoneRow({
             <span aria-hidden="true" className="w-3 text-slate-500">
               {open ? '▾' : '▸'}
             </span>
-            <span className="font-mono text-xs">{milestone.key}</span>
+            <span className="font-mono text-xs">{milestoneLabel(milestone)}</span>
             <span className="font-normal">{milestone.name}</span>
           </button>
           <span className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1">
@@ -104,7 +108,7 @@ export function MilestoneRow({
               range={env.range}
               percent={progress.percent ?? 0}
               tone={late ? 'bg-red-600' : 'bg-slate-700'}
-              title={`${milestone.key}: ${
+              title={`${milestoneLabel(milestone)}: ${
                 marks.window.from === marks.window.to ? '' : `${formatDay(marks.window.from)} → `
               }${formatDay(marks.window.to)} · ${words}`}
             />
@@ -115,7 +119,7 @@ export function MilestoneRow({
               range={env.range}
               kind="milestone-deadline"
               overdue={late}
-              title={`${milestone.key} deadline: ${formatDay(marks.deadline)}${marks.passed ? ' (passed)' : ''}${
+              title={`${milestoneLabel(milestone)} deadline: ${formatDay(marks.deadline)}${marks.passed ? ' (passed)' : ''}${
                 marks.window ? '' : ' — no opening date published'
               }`}
             />
@@ -130,7 +134,7 @@ export function MilestoneRow({
       )}
 
       {open &&
-        mySections.map((section) => (
+        topSections.map((section) => (
           <SectionRow
             key={section.id}
             section={section}
@@ -141,6 +145,10 @@ export function MilestoneRow({
             open={openSections.has(section.id)}
             onToggle={() => onToggleSection(section.id)}
             onDraftedChange={(isDrafted) => onDraftedChange(section.id, isDrafted)}
+            subsections={subsectionsOf(sections, section.id)}
+            openSections={openSections}
+            onToggleSection={onToggleSection}
+            onDraftedChangeById={onDraftedChange}
             env={env}
           />
         ))}

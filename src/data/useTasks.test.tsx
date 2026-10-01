@@ -13,17 +13,27 @@ let updateResult: { data: unknown; error: { message: string; code?: string } | n
 let rpcResults: Record<string, { data: unknown; error: { message: string; code?: string } | null }>
 let lastRpc: { fn: string; args: unknown } | null
 let lastUpdatePayload: Record<string, unknown> | undefined
+let lastUpdateFilters: [string, string][]
+let currentRow: { data: { id: string; updated_at: string; archived_at: string | null } | null; error: { message: string } | null }
 
 const supabase = {
   from: (_table: string) => ({
     update: (payload: Record<string, unknown>) => {
       lastUpdatePayload = payload
-      return {
-        eq: (_col: string, _val: string) => ({
-          select: (_cols: string) => Promise.resolve(updateResult),
-        }),
+      lastUpdateFilters = []
+      const chain = {
+        eq: (col: string, val: string) => {
+          lastUpdateFilters.push([col, val])
+          return chain
+        },
+        select: (_cols: string) => Promise.resolve(updateResult),
       }
+      return chain
     },
+    // The follow-up read after a zero-row write: what is the row now?
+    select: (_cols: string) => ({
+      eq: (_col: string, _val: string) => ({ maybeSingle: () => Promise.resolve(currentRow) }),
+    }),
   }),
   rpc: (fn: string, args: unknown) => {
     lastRpc = { fn, args }
@@ -36,6 +46,15 @@ vi.mock('../season/context.ts', () => ({ useSeasonId: () => 'season-a' }))
 const { useUpdateTask, useArchiveTask, useRestoreTask, useLinkTaskRequirement, useUnlinkTaskRequirement } =
   await import('./useTasks.ts')
 
+function hookWithClient<T>(useHook: () => T, seed?: unknown[]) {
+  const queryClient = new QueryClient()
+  if (seed) queryClient.setQueryData(['season', 'season-a', 'tasks'], seed)
+  const result = renderHook(useHook, {
+    wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+  }).result
+  return { result, queryClient }
+}
+
 function hook<T>(useHook: () => T) {
   const queryClient = new QueryClient()
   return renderHook(useHook, {
@@ -47,6 +66,8 @@ beforeEach(() => {
   updateResult = { data: [{ id: 't1' }], error: null }
   rpcResults = {}
   lastRpc = null
+  lastUpdateFilters = []
+  currentRow = { data: { id: 't1', updated_at: '2026-09-01T00:00:00+00:00', archived_at: null }, error: null }
 })
 
 describe('useUpdateTask', () => {
@@ -56,8 +77,9 @@ describe('useUpdateTask', () => {
     await waitFor(() => expect(update.current.isSuccess).toBe(true))
   })
 
-  it('reports "no longer exists" when zero rows match but the caller could edit it', async () => {
+  it('reports "no longer exists" when zero rows match because the row is gone', async () => {
     updateResult = { data: [], error: null }
+    currentRow = { data: null, error: null }
     rpcResults.can_edit_task = { data: true, error: null }
     const update = hook(() => useUpdateTask())
     await expect(update.current.mutateAsync({ id: 'ghost', title: 'x' })).rejects.toThrow(/no longer exists/)
@@ -153,5 +175,93 @@ describe('requirement links', () => {
     const update = hook(() => useUpdateTask())
     await update.current.mutateAsync({ id: 't1', milestoneKey: 'MS1-2', sectionId: null })
     expect(lastUpdatePayload).toEqual({ milestone_key: 'MS1-2', section_id: null })
+  })
+})
+
+// Versioned writes (F-12): an edit carries the updated_at the person saw, and a
+// mismatch is "changed elsewhere", never a permission error and never a silent
+// overwrite.
+describe('useUpdateTask is a versioned write', () => {
+  const CACHED = [{ id: 't1', title: 'Old', updated_at: '2026-09-01T00:00:00+00:00', state: 'todo', blocked_reason: null, blocked_since: null }]
+
+  it('sends the version of the row it holds as an extra filter', async () => {
+    const { result } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00', title: 'New' }], error: null }
+    await result.current.mutateAsync({ id: 't1', title: 'New' })
+    expect(lastUpdateFilters).toEqual([['id', 't1'], ['updated_at', '2026-09-01T00:00:00+00:00']])
+  })
+
+  it('merges the row the server returns, so a second edit carries the new version', async () => {
+    const { result, queryClient } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00', title: 'New' }], error: null }
+    await result.current.mutateAsync({ id: 't1', title: 'New' })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-03T00:00:00+00:00', title: 'Newer' }], error: null }
+    await result.current.mutateAsync({ id: 't1', title: 'Newer' })
+    expect(lastUpdateFilters[1]).toEqual(['updated_at', '2026-09-02T00:00:00+00:00'])
+    expect(queryClient.getQueryData<{ updated_at: string }[]>(['season', 'season-a', 'tasks'])?.[0]?.updated_at).toBe('2026-09-03T00:00:00+00:00')
+  })
+
+  it('reports "changed by someone else" — not a permission error — when the version no longer matches', async () => {
+    const { result } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [], error: null }
+    currentRow = { data: { id: 't1', updated_at: '2026-09-05T00:00:00+00:00', archived_at: null }, error: null }
+    const error = await result.current.mutateAsync({ id: 't1', title: 'Mine' }).catch((e: unknown) => e)
+    expect(error).toMatchObject({ conflict: true, permission: false })
+    expect((error as Error).message).toMatch(/changed by someone else/)
+    expect(lastRpc).toBeNull() // no permission lookup was needed to explain it
+  })
+
+  it('restores the optimistic value when the write is refused, and exposes the real error', async () => {
+    const { result, queryClient } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: null, error: { message: 'Say why this task is blocked: write the reason, or link the task it is waiting for.', code: '23514' } }
+    await expect(result.current.mutateAsync({ id: 't1', state: 'blocked' })).rejects.toThrow(/Say why this task is blocked/)
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(queryClient.getQueryData<{ state: string }[]>(['season', 'season-a', 'tasks'])?.[0]?.state).toBe('todo')
+  })
+
+  it('says an archived row was archived, not that it was changed', async () => {
+    const { result } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [], error: null }
+    currentRow = { data: { id: 't1', updated_at: '2026-09-01T00:00:00+00:00', archived_at: '2026-09-04T00:00:00+00:00' }, error: null }
+    await expect(result.current.mutateAsync({ id: 't1', title: 'x' })).rejects.toThrow(/has been archived/)
+  })
+
+  it('sends a blocker reason with the state, and only that state', async () => {
+    const { result } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00', state: 'blocked', blocked_reason: 'Sponsor quote' }], error: null }
+    await result.current.mutateAsync({ id: 't1', state: 'blocked', blockedReason: 'Sponsor quote' })
+    expect(lastUpdatePayload).toEqual({ state: 'blocked', blocked_reason: 'Sponsor quote' })
+  })
+
+  it('queues two edits of one task so the second carries the version the first produced', async () => {
+    const { result } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00' }], error: null }
+    const first = result.current.mutateAsync({ id: 't1', title: 'A' })
+    const second = result.current.mutateAsync({ id: 't1', priority: 'urgent' })
+    await Promise.all([first, second])
+    // Both writes ran and the second did not carry the (now stale) original version.
+    expect(lastUpdateFilters[1]).toEqual(['updated_at', '2026-09-02T00:00:00+00:00'])
+  })
+
+  it('does not carry an older version back after a stale refetch put one in the cache', async () => {
+    const { result, queryClient } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00' }], error: null }
+    await result.current.mutateAsync({ id: 't1', title: 'First' })
+    // A refetch that began before that write lands afterwards with the OLD row.
+    queryClient.setQueryData(['season', 'season-a', 'tasks'], CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-03T00:00:00+00:00' }], error: null }
+    await result.current.mutateAsync({ id: 't1', title: 'Second' })
+    expect(lastUpdateFilters[1]).toEqual(['updated_at', '2026-09-02T00:00:00+00:00'])
+  })
+
+  it('keeps a later edit\'s optimistic value when an earlier edit\'s answer arrives', async () => {
+    const { result, queryClient } = hookWithClient(() => useUpdateTask(), CACHED)
+    updateResult = { data: [{ id: 't1', updated_at: '2026-09-02T00:00:00+00:00', title: 'Server title', completed_at: null, completion_source: null, blocked_since: null }], error: null }
+    queryClient.setQueryData(['season', 'season-a', 'tasks'], [{ ...CACHED[0], title: 'Pending optimistic title' }])
+    await result.current.mutateAsync({ id: 't1', priority: 'urgent' })
+    const row = queryClient.getQueryData<{ title: string; updated_at: string }[]>(['season', 'season-a', 'tasks'])?.[0]
+    expect(row?.updated_at).toBe('2026-09-02T00:00:00+00:00')
+    expect(row?.title).toBe('Pending optimistic title')
   })
 })

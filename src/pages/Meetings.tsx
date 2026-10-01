@@ -69,7 +69,7 @@ export default function Meetings() {
         <p className="mt-2 text-sm text-slate-700" data-testid="meeting-access">
           {can.canCreateMeeting
             ? 'You can call a meeting and write its agenda and minutes.'
-            : 'Everyone can read these. The President, Vice President or a Developer calls a meeting.'}
+            : 'Everyone can read these. The President or Vice President calls a meeting.'}
         </p>
       </PageHeader>
 
@@ -291,7 +291,7 @@ function DefaultAgenda({ canEdit, onSaved }: { canEdit: boolean; onSaved: (messa
           </h2>
           <p className="mt-0.5 text-xs text-slate-600">
             Every new meeting starts from this. Changing it changes nothing about meetings that already exist.
-            {canEdit ? '' : ' The President or a Developer edits it.'}
+            {canEdit ? '' : ' The President edits it.'}
           </p>
         </div>
         {canEdit && (

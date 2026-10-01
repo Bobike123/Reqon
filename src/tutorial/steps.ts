@@ -39,33 +39,32 @@ export type ChapterId = (typeof CHAPTERS)[number]['id']
 // watching it does not have. `label` is shown on the step ("Only for: …").
 export const AUDIENCES = {
   finance: {
-    label: 'President, Vice President, Treasurer and Developer',
+    label: 'President, Vice President and Treasurer',
     includes: (can) => can.canViewFinances,
   },
   financeReadOnly: {
     label: 'President and Vice President',
     includes: (can) => can.canViewFinances && !can.canManageFinances,
   },
-  treasurer: { label: 'Treasurer and Developer', includes: (can) => can.canManageFinances },
-  admins: { label: 'President, Vice President and Developer', includes: (can) => can.canAdminister },
+  treasurer: { label: 'Treasurer', includes: (can) => can.canManageFinances },
+  admins: { label: 'President and Vice President', includes: (can) => can.canAdminister },
   // Seasons and the President / Vice President / Developer roles stay with the
   // President and a Developer (can_manage_seasons, can_grant_role).
-  president: { label: 'President and Developer', includes: (can) => can.canManageSeasons },
+  president: { label: 'President', includes: (can) => can.canManageSeasons },
   vicePresident: { label: 'Vice President', includes: (can) => can.canAdminister && !can.canManageSeasons },
   meetingEditors: {
-    label: 'President, Vice President, Documentation and Developer',
+    label: 'President, Vice President and Documentation',
     includes: (can) => can.canEditMeetingTemplate,
   },
-  // The Developer holds every power in the club, so this is the one audience
-  // that asks which role someone holds rather than what they may do.
-  developer: { label: 'Developer', includes: (can) => can.hasRole('developer') },
   // Resource-aware, not role-aware (ADR-0003): true for anyone who heads at
   // least one active department, whether or not they also hold a privileged
   // role. A Head with no privileged role must still see these.
   head: { label: 'Head of a department', includes: (can) => can.isHeadOfDepartment },
-  headOrDeveloper: {
-    label: 'A department Head, or Developer',
-    includes: (can) => can.isHeadOfDepartment || can.hasRole('developer'),
+  // Whoever may review proposals (can_review_proposal): the Head of the proposal's department, the
+  // President or Vice President (every department since the role hierarchy, 20260130000000), or a Developer.
+  proposalReviewer: {
+    label: 'A department Head, the President or Vice President',
+    includes: (can) => can.isHeadOfDepartment || can.hasRole('president') || can.hasRole('vicepresident') || can.hasRole('developer'),
   },
 } satisfies Record<string, { label: string; includes: (can: TourViewer) => boolean }>
 
@@ -123,7 +122,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'account-roles',
     title: 'You, and your role',
-    body: 'Your name and, if you hold one, your role: President, Vice President, Treasurer or Developer. Everyone else is a member. The tour adds the parts your role uses.',
+    body: 'Your name and, if you hold one, your role: President, Vice President, Treasurer or Documentation. Everyone else is a member. The tour adds the parts your role uses.',
   },
 
   // ----------------------------------------------------------------------- Now
@@ -141,7 +140,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/',
     target: 'now-requirements',
     title: 'Requirements progress',
-    body: 'Team rules resolved per chapter of the Requirements Book (compliant, verified or not applicable). Open a chapter for its articles; click one to see its rules in the Register. Tasks never mark rules compliant.',
+    body: 'Each Requirements Book chapter and subchapter: its team rules and how many that apply are compliant or verified. Not applicable is counted apart; “not imported” is never 0 %. Tasks never mark rules compliant.',
   },
   {
     id: 'now-actions',
@@ -238,7 +237,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/milestones',
     target: 'milestone-card',
     title: 'Milestones — the deliverables',
-    body: 'Each submission with its window, days left and points. BLOCKING means missing it keeps the bike off the track. “TBC” means no date has been published — never a guess.',
+    body: 'Each submission with its window, points, work done, and the dates it was submitted and accepted — three separate facts. BLOCKING keeps the bike off the track. “TBC” means no published date.',
   },
   {
     id: 'milestone-sections',
@@ -306,7 +305,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/board',
     target: 'board-card',
     title: 'A task',
-    body: 'The card shows department, owner, deadline, milestone and requirement count. Move it with the dropdown (if you may); open Details for the description, links and editor. “From proposal” links to where it came from.',
+    body: 'Department, owner, deadline, milestone, requirements. Move it with the dropdown (if you may); Blocked asks why. Details hold the description, blocker, tasks it waits for, links and the editor.',
   },
 
   // ------------------------------------------------------------------ Meetings
@@ -324,7 +323,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/proposals',
     target: 'proposal-flow',
     title: 'How a proposal moves',
-    body: 'Suggested, then Under review, then Decided (approved or rejected), with how many proposals sit at each stage. Parked sets one aside without deleting it.',
+    body: 'Suggested, Under review (the Head may ask for changes), Approved, then Decided once it becomes a task or is rejected. Parked sets one aside without deleting it.',
   },
   {
     id: 'proposal-card',
@@ -332,23 +331,23 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/proposals',
     target: 'proposal-card',
     title: 'A proposal',
-    body: 'Who suggested it, its department, deadline and milestone, and where it stands. You read it here and watch the stage change; the Head of its department does the deciding.',
+    body: 'Who suggested it, its department, deadline and milestone, and where it stands. Its department’s Head decides; the President and the Vice President can decide for any department.',
   },
   {
     id: 'proposal-decision',
     chapter: 'proposals',
     route: '/proposals',
     target: 'proposal-decision',
-    audience: 'headOrDeveloper',
+    audience: 'proposalReviewer',
     title: 'Reviewing a proposal',
-    body: 'Review opens a dialog: fix the details, then Approve, Park or Reject. Rejected work moves to History and can be reopened; parked work stays in the queue, marked. Only the Head of its department, or a Developer, can do this.',
+    body: 'Review opens the discussion with the author. Ask for changes or Approve with a note, then make the task. Editing an approved proposal withdraws the approval. Its Head decides, and so can the President or Vice President.',
   },
   {
     id: 'proposal-promote',
     chapter: 'proposals',
     route: '/proposals',
     target: 'proposal-promote',
-    audience: 'headOrDeveloper',
+    audience: 'proposalReviewer',
     title: 'Promoting a proposal',
     body: 'Approve and create task puts it on the Board with the proposal\'s department, deadline, priority, milestone and requirements. A proposal is approved once, and the task remembers where it came from.',
   },
@@ -359,7 +358,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/board',
     target: 'board-card',
     title: 'Who can edit a task',
-    body: 'Its owner, its department’s Head, or a Developer; only the Head or a Developer can reassign it. If a change doesn’t save, that’s why. Nothing is deleted: work is archived, and a Done task left alone archives itself after 24 hours.',
+    body: 'Its owner, its department’s Head, the President or the Vice President. Only they reassign it; moving it to another department needs a reason. Nothing is deleted: a Done task archives itself after 24 hours.',
   },
 
   // ------------------------------------------------------------------- Archive
@@ -377,7 +376,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/archive',
     target: 'archive-list',
     title: 'Where it came from',
-    body: 'Each task links to the proposal it came from, and each approved proposal to its task. The department Head or a Developer can restore an archived task; restoring a finished one reopens it.',
+    body: 'Each task links to the proposal it came from, and each approved proposal to its task. Its department Head, the President or the Vice President can restore a task; a finished one reopens.',
   },
 
   // ------------------------------------------------------------------ Meetings
@@ -405,7 +404,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'meeting-template',
     audience: 'meetingEditors',
     title: 'The default agenda',
-    body: 'Every new meeting starts from this. “Edit default agenda” opens it in a dialog; unsaved text is kept if you close it. Existing meetings never change. The President, Vice President, Documentation and Developers edit it.',
+    body: 'Every new meeting starts from this. “Edit default agenda” opens it in a dialog; unsaved text is kept if you close it. Existing meetings never change. The President, Vice President and Documentation edit it.',
   },
 
   // ---------------------------------------------------------------- Spec sheet
@@ -423,7 +422,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     route: '/specs',
     target: 'spec-row',
     title: 'Entering a measurement',
-    body: 'Each row sets our value against the ideal and the rule’s limit; the outline and its words give the verdict. Open a row to measure: Review, then Save measurement. Nobody types pass or fail by hand.',
+    body: 'Our value against the goal and the rule’s limit: Review, then Save measurement. Nobody types pass or fail by hand. Green needs someone to confirm the current value ready; competition results have their own column.',
   },
 
   // ------------------------------------------------------------------ Finances
@@ -452,7 +451,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'finance-entries',
     audience: 'financeReadOnly',
     title: 'Read-only for you',
-    body: 'You can see every entry, but only the Treasurer and the Developer can add, edit or delete one — the database refuses changes from anyone else. If something looks wrong, tell the Treasurer.',
+    body: 'You can see every entry, but only the Treasurer can add, edit or delete one. If something looks wrong, tell the Treasurer.',
   },
   {
     id: 'finance-add',
@@ -492,15 +491,6 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     body: 'This line says what your role allows on this page. Everyone can change their password, write handover notes and download the season; the rest is for the President and Vice President.',
   },
   {
-    id: 'developer-scope',
-    chapter: 'settings',
-    route: '/settings',
-    target: 'settings-access',
-    audience: 'developer',
-    title: 'What a Developer can do',
-    body: 'Everything: roles, the roster, the rulebook, seasons and the money. The role exists so the app can be maintained and repaired, so nothing on screen will stop you — be careful, and hand it back when you are done.',
-  },
-  {
     id: 'settings-account',
     chapter: 'settings',
     route: '/settings',
@@ -523,7 +513,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'settings-roster',
     audience: 'vicePresident',
     title: 'Which roles you manage',
-    body: 'As Vice President you give or take away the Treasurer and Documentation roles. President, Vice President and Developer roles, and switching seasons, belong to the President or a Developer.',
+    body: 'As Vice President you give or take away the Treasurer and Documentation roles. President and Vice President roles, and switching seasons, belong to the President.',
   },
   {
     id: 'change-roles',
@@ -532,7 +522,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'change-roles',
     audience: 'president',
     title: 'Giving and taking away roles',
-    body: 'The President changes every role but Developer, the Vice President only Treasurer and Documentation, a Developer all. “Change roles” opens a checklist; big changes ask you to confirm first.',
+    body: 'The President manages the President and Vice President roles; the Vice President manages Treasurer and Documentation. “Change roles” opens a checklist; big changes ask you to confirm first.',
   },
   {
     id: 'role-rules',
@@ -611,7 +601,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'new-season',
     audience: 'admins',
     title: 'Starting a new season',
-    body: 'Create it here, then press “Make current” when the team is ready. The rulebook carries over; progress, tasks and finances start empty, and nothing switches until you say so.',
+    body: 'Create it here (it can copy this season’s milestones and sections, without dates), then press “Make current” when ready. Tasks, progress and finances start empty; nothing switches until you say so.',
   },
   {
     id: 'settings-export',

@@ -18,18 +18,21 @@ export function useSeasons(): UseQueryResult<Season[], Error> {
 
 export function useCreateSeason() {
   const queryClient = useQueryClient()
-  return useMutation<Season, Error, { label: string; edition: string | null }>({
-    mutationFn: async ({ label, edition }) =>
+  return useMutation<Season, Error, { label: string; edition: string | null; copyFrom?: string | null }>({
+    mutationFn: async ({ label, edition, copyFrom }) =>
       unwrap<Season>(
         'create a season',
-        // Deliberately NOT current. Creating and switching are two separate,
-        // reversible steps: a new season appearing does not silently move the
-        // whole club onto it.
-        await supabase
-          .from('seasons')
-          .insert({ label, edition: edition ?? undefined, is_current: false })
-          .select()
-          .single(),
+        // start_season(): the President or a Developer only (checked by the database on this
+        // path as on every other). The season is NOT current — creating and switching are two
+        // separate, reversible steps — and, when copyFrom names a season, it gets that season's
+        // milestone and section DEFINITIONS (no dates, tasks, statuses or measurements).
+        await supabase.rpc('start_season', {
+          p_label: label,
+          p_edition: edition as string,
+          p_regs_ref: null as unknown as string,
+          p_category: null as unknown as string,
+          ...(copyFrom ? { p_copy_from: copyFrom } : {}),
+        }),
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.seasons })

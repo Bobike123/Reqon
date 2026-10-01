@@ -2,6 +2,8 @@ import type { PostgrestError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase.ts'
 import { DataError } from '../core/errors.ts'
 import { fetchAllRows, unwrap } from './errors.ts'
+import { departmentRollup, taskProgress, tasksInMilestone, type Progress } from '../tasks/progress.ts'
+import type { Task } from '../tasks/types.ts'
 
 // One JSON file containing everything the team recorded this season.
 //
@@ -24,7 +26,22 @@ import { fetchAllRows, unwrap } from './errors.ts'
 // metadata, and clearly separated relevant global department history.
 // 5: adds the season's department memberships (department_members, backend
 // completion Phase 2).
-export const EXPORT_VERSION = 5
+// 6: adds the season's prerequisite links between tasks (task_dependencies,
+// backend completion Phase 3). Blocker reasons and subsection parents are new
+// columns on tasks / milestone_sections, so they arrive with those rows.
+// 7: adds the readiness confirmations (spec_readiness) and a `progress` block
+// computed with the one shared progress definition (tasks/progress.ts, the
+// mirror of v_task_progress). Competition observations, milestone
+// submission/acceptance dates, milestone display codes and direction reviews
+// arrive as new columns on spec_measurements / milestones / specs.
+export const EXPORT_VERSION = 7
+
+export type SeasonProgress = {
+  definition: string
+  tasks: Progress
+  byDepartment: Record<string, Progress>
+  byMilestone: Record<string, Progress>
+}
 
 export type SeasonExport = {
   exportVersion: number
@@ -40,6 +57,8 @@ export type SeasonExport = {
   taskRequirements: unknown[]
   proposalRequirements: unknown[]
   proposalComments: unknown[]
+  // "Task A waits for task B" links, any departments, this season.
+  taskDependencies: unknown[]
   // Who worked in which department this season (organisational, grants nothing).
   departmentMembers: unknown[]
   meetings: unknown[]
@@ -49,6 +68,13 @@ export type SeasonExport = {
   // Every accepted and superseded observation, so a correction's old value and
   // its reason survive in the handover file.
   specMeasurements: unknown[]
+  // Every confirmation that a current team measurement was checked and ready,
+  // including the ones that lapsed or were withdrawn (append-only).
+  specReadiness: unknown[]
+  // Task progress under the shared definition, so the file agrees with the Board,
+  // Gantt, Register and milestone screens. Requirement compliance is NOT in here:
+  // it is `clauseStatus`, a different fact.
+  progress: SeasonProgress
   handoverNotes: unknown[]
   activity: unknown[]
   globalDepartmentActivity: unknown[]
@@ -65,8 +91,8 @@ const CONSISTENCY_NOTE =
 // Only tables that actually carry a season_id. Typed as a union rather than
 // `string` so a typo cannot compile.
 type ScopedTable =
-  | 'clause_status' | 'tasks' | 'task_proposals' | 'task_requirements' | 'proposal_requirements' | 'proposal_comments' | 'meetings'
-  | 'milestones' | 'specs' | 'spec_measurements' | 'handover_notes' | 'activity' | 'department_members'
+  | 'clause_status' | 'tasks' | 'task_proposals' | 'task_requirements' | 'proposal_requirements' | 'proposal_comments' | 'task_dependencies' | 'meetings'
+  | 'milestones' | 'specs' | 'spec_measurements' | 'spec_readiness' | 'handover_notes' | 'activity' | 'department_members'
 
 // Retention (Phase 5 §5.6): `activity` rows are kept indefinitely — there is
 // no scheduled deletion or archival job. The only thing that removes them is
@@ -84,10 +110,11 @@ type ScopedTable =
 // `id` — every other scoped table has a real `id` column.
 const KEY_COLUMNS: Record<ScopedTable, readonly string[]> = {
   clause_status: ['id'], tasks: ['id'], task_proposals: ['id'], meetings: ['id'],
-  milestones: ['key'], specs: ['id'], spec_measurements: ['id'], handover_notes: ['id'], activity: ['id'],
+  milestones: ['key'], specs: ['id'], spec_measurements: ['id'], spec_readiness: ['id'], handover_notes: ['id'], activity: ['id'],
   task_requirements: ['task_id', 'clause_key'],
   proposal_requirements: ['proposal_id', 'clause_key'],
   proposal_comments: ['id'],
+  task_dependencies: ['task_id', 'depends_on_task_id'],
   department_members: ['subteam_key', 'member_id'],
 }
 
@@ -126,6 +153,27 @@ async function pagedAndVerified(
     )
   }
   return rows
+}
+
+const PROGRESS_DEFINITION =
+  'Distinct tasks; cancelled tasks are left out; archived done tasks keep their contribution; an archived ' +
+  'unfinished task stays in the total and is never counted done; percent is null when there is no linked work; ' +
+  'a department or milestone is computed from its unique tasks, never by averaging children.'
+
+function seasonProgress(
+  tasks: readonly Task[],
+  subteams: readonly { key: string; parent_key: string | null }[],
+  milestones: readonly { key: string }[],
+  sections: readonly { id: string; milestone_key: string }[],
+): SeasonProgress {
+  const byDepartment: Record<string, Progress> = {}
+  for (const d of subteams) byDepartment[d.key] = departmentRollup(tasks, subteams, d.key)
+  const byMilestone: Record<string, Progress> = {}
+  for (const m of milestones) {
+    const sectionIds = new Set(sections.filter((s) => s.milestone_key === m.key).map((s) => s.id))
+    byMilestone[m.key] = taskProgress(tasksInMilestone(tasks, m.key, sectionIds))
+  }
+  return { definition: PROGRESS_DEFINITION, tasks: taskProgress(tasks), byDepartment, byMilestone }
 }
 
 export async function buildSeasonExport(seasonId: string): Promise<SeasonExport> {
@@ -169,13 +217,13 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
 
   const [
     clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, proposalComments,
-    meetings, milestones, specs, specMeasurements, handoverNotes, activity, departmentMembers,
+    meetings, milestones, specs, specMeasurements, handoverNotes, activity, departmentMembers, taskDependencies, specReadiness,
   ] =
     await Promise.all([
       scoped('clause_status'), scoped('tasks'), scoped('task_proposals'),
       scoped('task_requirements'), scoped('proposal_requirements'), scoped('proposal_comments'), scoped('meetings'),
       scoped('milestones'), scoped('specs'), scoped('spec_measurements'), scoped('handover_notes'), scoped('activity'),
-      scoped('department_members'),
+      scoped('department_members'), scoped('task_dependencies'), scoped('spec_readiness'),
     ])
 
   // milestone_sections has no season_id — it hangs off its milestone.
@@ -188,6 +236,8 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
         supabase.from('milestone_sections').select('*', { count: 'exact', head: true }).in('milestone_key', keys),
       )
     : []
+
+  const progress = seasonProgress(tasks as Task[], subteams as { key: string; parent_key: string | null }[], milestones as { key: string }[], milestoneSections as { id: string; milestone_key: string }[])
 
   // Book provenance, not the PDF bytes: enough source metadata to resolve a
   // link and its printed/PDF page after handover. Clause body text and the
@@ -263,20 +313,22 @@ export async function buildSeasonExport(seasonId: string): Promise<SeasonExport>
       taskRequirements: taskRequirements.length,
       proposalRequirements: proposalRequirements.length,
       proposalComments: proposalComments.length,
+      taskDependencies: taskDependencies.length,
       departmentMembers: departmentMembers.length,
       meetings: meetings.length,
       milestones: milestones.length,
       milestoneSections: milestoneSections.length,
       specs: specs.length,
       specMeasurements: specMeasurements.length,
+      specReadiness: specReadiness.length,
       handoverNotes: handoverNotes.length,
       activity: activity.length,
       globalDepartmentActivity: globalDepartmentActivity.length,
       regulationDocument: regulationDocuments.length,
       bookClauses: bookClauses.length,
     },
-    members, subteams, clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, proposalComments, departmentMembers, meetings,
-    milestones, milestoneSections, specs, specMeasurements, handoverNotes, activity,
+    members, subteams, clauseStatus, tasks, proposals, taskRequirements, proposalRequirements, proposalComments, taskDependencies, departmentMembers, meetings,
+    milestones, milestoneSections, specs, specMeasurements, specReadiness, progress, handoverNotes, activity,
     globalDepartmentActivity, regulationDocument: regulationDocuments[0] ?? null, bookClauses,
   }
 }

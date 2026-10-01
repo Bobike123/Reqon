@@ -148,19 +148,61 @@ export function projectStatus(status: string | null): StatusPresentation {
 
 export function zoneStatus(zone: string | null): StatusPresentation {
   if (zone === 'red') return { icon: '✕', label: 'Red zone — regulatory failure', tone: 'red' }
-  if (zone === 'amber') return { icon: '▲', label: 'Amber zone — regulatory pass; project goal unmet', tone: 'amber' }
-  if (zone === 'green') return { icon: '✓', label: 'Green zone — regulatory pass; project goal met', tone: 'green' }
+  if (zone === 'amber') return { icon: '▲', label: 'Amber zone — regulatory pass; not confirmed ready', tone: 'amber' }
+  if (zone === 'green') return { icon: '✓', label: 'Green zone — regulatory pass; confirmed ready by a person', tone: 'green' }
   return { icon: '○', label: 'Grey zone — status unknown', tone: 'grey' }
 }
 
 // The row cue beside a parameter in the compact table: an icon and a few words,
-// so the colour is never the only signal. It says what OUR measurement does
-// against the rule and our goal — never that anyone has approved anything.
+// so the colour is never the only signal. Green means a PERSON confirmed the current
+// measurement ready (Phase 4); passing the rule or meeting the goal alone is amber.
 export function zoneCue(zone: string | null): StatusPresentation {
   if (zone === 'red') return { icon: '✕', label: 'Fails the rule', tone: 'red' }
-  if (zone === 'amber') return { icon: '▲', label: 'Passes the rule · goal not met', tone: 'amber' }
-  if (zone === 'green') return { icon: '✓', label: 'Passes the rule · goal met', tone: 'green' }
+  if (zone === 'amber') return { icon: '▲', label: 'Passes the rule · not confirmed ready', tone: 'amber' }
+  if (zone === 'green') return { icon: '✓', label: 'Passes the rule · confirmed ready', tone: 'green' }
   return { icon: '○', label: 'Not judged yet', tone: 'grey' }
+}
+
+export type ReadinessPresentation = {
+  state: 'ready' | 'lapsed' | 'not_confirmed' | 'unknown'
+  label: string
+  // Why it lapsed / what the confirmation said, when there is something to say.
+  detail: string | null
+}
+
+// What the readiness columns of the verdict view say, in words. "was ready on <day>" for a lapsed one,
+// never "ready" — and nothing at all is inferred when the view predates readiness.
+export function readinessPresentation(
+  spec: Pick<PresentableSpec, 'readiness' | 'readiness_reason' | 'readiness_confirmed_at' | 'readiness_note'>,
+  formatDay: (iso: string) => string,
+): ReadinessPresentation {
+  if (spec.readiness === 'ready') {
+    return {
+      state: 'ready',
+      label: spec.readiness_confirmed_at ? `Confirmed ready on ${formatDay(spec.readiness_confirmed_at)}` : 'Confirmed ready',
+      detail: spec.readiness_note,
+    }
+  }
+  if (spec.readiness === 'lapsed') {
+    return {
+      state: 'lapsed',
+      label: spec.readiness_confirmed_at ? `Was ready on ${formatDay(spec.readiness_confirmed_at)} — no longer` : 'Was ready — no longer',
+      detail: spec.readiness_reason,
+    }
+  }
+  if (spec.readiness === 'not_confirmed') return { state: 'not_confirmed', label: 'Not confirmed ready', detail: null }
+  return { state: 'unknown', label: 'Readiness unknown', detail: null }
+}
+
+// The Competition column: the latest accepted competition observation and what the rule says about it,
+// or nothing (never zero, never our own value).
+export function competitionCell(spec: PresentableSpec): { value: string; verdict: string | null } | null {
+  if (spec.competition_measurement_id === null || spec.competition_measurement_id === undefined) return null
+  const verdict =
+    spec.competition_verdict === 'pass' ? 'Passes the rule'
+    : spec.competition_verdict === 'fail' ? 'Fails the rule'
+    : null
+  return { value: measurementValue(spec.competition_value ?? null, spec.competition_value_bool ?? null, spec.unit), verdict }
 }
 
 // The "Ideal" column. Higher/lower-is-better specs carry their own ideal; for a

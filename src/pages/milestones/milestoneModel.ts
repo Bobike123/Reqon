@@ -32,6 +32,16 @@ export function sectionsFor(
     .sort((a, b) => a.ordinal - b.ordinal)
 }
 
+// Top-level sections of a milestone, in order (subsections are nested under them).
+export function topLevelSections(sections: MilestoneSection[], milestoneKey: string): MilestoneSection[] {
+  return sectionsFor(sections, milestoneKey).filter((s) => !s.parent_section_id)
+}
+
+// The subsections of one section, in order.
+export function subsectionsOf(sections: MilestoneSection[], parentId: string): MilestoneSection[] {
+  return sections.filter((s) => s.parent_section_id === parentId).sort((a, b) => a.ordinal - b.ordinal)
+}
+
 export function draftedCount(sections: MilestoneSection[]): { drafted: number; total: number } {
   return {
     drafted: sections.filter((s) => s.is_drafted).length,

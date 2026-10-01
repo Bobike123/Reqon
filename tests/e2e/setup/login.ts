@@ -11,6 +11,12 @@ export async function login(page: Page, email: string, password: string) {
   // button being present-but-hidden doesn't make `.first()` silently match
   // an invisible element and skip sign-out entirely.
   const menuButton = page.getByRole('button', { name: 'Menu' })
+  // isVisible() does not wait: right after goto('/') the app may still be restoring the session, so
+  // neither the Login form nor the header exists yet and the sign-out below would be skipped while a
+  // previous user is still signed in (seen once at 375 px in Phase 6). Wait until one of them shows.
+  await expect(
+    page.getByLabel('Email').or(menuButton).or(page.getByRole('button', { name: 'Sign out' })).filter({ visible: true }).first(),
+  ).toBeVisible({ timeout: 15_000 })
   if (await menuButton.isVisible().catch(() => false)) {
     await menuButton.click()
   }

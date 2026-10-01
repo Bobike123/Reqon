@@ -70,8 +70,9 @@ begin
   perform set_config('request.jwt.claim.sub', dev::text, true);
 
   -- Task fields and transitions: one row per changed dimension.
+     -- Phase 3: entering Blocked now needs a reason or a prerequisite (20260128000100).
   update tasks
-     set state = 'blocked', priority = 'urgent', starts_on = '2026-10-01', due_date = '2026-10-10',
+     set state = 'blocked', blocked_reason = 'Waiting for the supplier', priority = 'urgent', starts_on = '2026-10-01', due_date = '2026-10-10',
          milestone_key = ms_a
    where id = v_task_id;
   update tasks set state = 'done' where id = v_task_id;

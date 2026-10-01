@@ -210,6 +210,7 @@ export function spanOfDates(dates: (string | null | undefined)[]): Span | null {
 // "somewhere inside this submission".
 // Starts count as well as deadlines, so a section whose subtasks begin early is
 // drawn from that start, not from the first deadline.
-export function sectionSpan(tasks: Task[], sectionId: string, fallback: Span | null): Span | null {
-  return spanOfDates(tasksInSection(tasks, sectionId).flatMap((t) => [t.starts_on, t.due_date])) ?? fallback
+export function sectionSpan(tasks: Task[], sectionId: string, fallback: Span | null, subsectionIds: readonly string[] = []): Span | null {
+  const ids = new Set([sectionId, ...subsectionIds])
+  return spanOfDates(tasks.filter((t) => t.section_id !== null && ids.has(t.section_id)).flatMap((t) => [t.starts_on, t.due_date])) ?? fallback
 }

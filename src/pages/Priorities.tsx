@@ -10,6 +10,7 @@ import { canEditTask, canReassignTaskOwner } from '../auth/permissions.ts'
 import { useTaskActor } from '../data/useTaskActor.ts'
 import { useTasks, useUpdateTask } from '../data/useTasks.ts'
 import { useRealtimeTasks } from '../data/useRealtimeTasks.ts'
+import { attentionFor } from './now/nowModel.ts'
 import { useRealtimeClauseStatus } from '../data/useRealtimeClauseStatus.ts'
 import { useUrlParams } from '../lib/useUrlParams.ts'
 
@@ -113,7 +114,7 @@ export default function Priorities() {
   const rawReason = params.get('reason')
   const reason = rawReason && REASONS.includes(rawReason) ? rawReason : null
   const allRows = attention.data ?? []
-  const rows = [...allRows.filter((row) => reason === null || row.reason === reason)].sort(
+  const rows = [...(reason === null ? allRows : attentionFor(allRows, reason))].sort(
     (a, b) =>
       (REASON_ORDER[a.reason ?? ''] ?? 99) - (REASON_ORDER[b.reason ?? ''] ?? 99),
   )
@@ -127,7 +128,7 @@ export default function Priorities() {
 
       <div role="group" aria-label="Show only one reason" className="mb-3 flex flex-wrap gap-1 rounded-md bg-slate-50 p-1" data-testid="priority-reasons">
         {[null, ...REASONS].map((r) => {
-          const n = r === null ? allRows.length : allRows.filter((row) => row.reason === r).length
+          const n = r === null ? allRows.length : attentionFor(allRows, r).length
           return (
             <button
               key={r ?? 'all'}

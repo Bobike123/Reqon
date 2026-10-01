@@ -8,11 +8,20 @@ function Boom({ fail }: { fail: boolean }): React.ReactElement {
   return <p>screen content</p>
 }
 
+// React re-throws a render error through a window "error" event in development;
+// jsdom prints every uncancelled one as an uncaught stack trace. These throws are
+// the point of the test, so the event is cancelled here (and only here).
+const swallowRenderError = (event: ErrorEvent) => event.preventDefault()
+
 beforeEach(() => {
   // React logs the caught error itself; silence it so the run stays readable.
   vi.spyOn(console, 'error').mockImplementation(() => {})
+  window.addEventListener('error', swallowRenderError)
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  window.removeEventListener('error', swallowRenderError)
+  vi.restoreAllMocks()
+})
 
 describe('a render crash', () => {
   it('shows a real message instead of a blank page', () => {

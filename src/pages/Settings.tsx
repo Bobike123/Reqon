@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { PageHeader } from '../ui/PageHeader.tsx'
-import { describeRoles } from '../auth/permissions.ts'
+import { describePublicAccess } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
 import { pageMain } from '../ui/layout.ts'
 import { AccountSettings } from './settings/AccountSettings.tsx'
@@ -84,14 +84,14 @@ export default function Settings() {
       {/* What this person can do here, in words — never left to be inferred
           from which buttons happen to be missing. */}
       <Notice>
-        Signed in as <strong className="font-medium text-slate-900">{describeRoles(myRoles)}</strong>.{' '}
+        Your access: <strong className="font-medium text-slate-900">{describePublicAccess(myRoles)}</strong>.{' '}
         {canManageRoles && canManageSeasons
-          ? 'You can change everything on this page, including roles (only a Developer changes the Developer role).'
+          ? 'You can change everything on this page, including the roles available to you.'
           : canManageRoles
-            ? 'You can change everything on this page except seasons and the President, Vice President and Developer roles, which belong to the President or a Developer.'
+            ? 'You can change everything on this page except seasons and the President and Vice President roles, which belong to the President.'
           : canAdminister
-            ? 'You can change everything on this page except roles, which only the President or a Developer can give or take away.'
-            : 'Roster, department, milestone and season changes are reserved for the President, Vice President and Developer — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
+            ? 'You can change everything on this page except roles, which only the President can give or take away.'
+            : 'Roster, department, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
       </Notice>
 
       <Section title="Your account" tutorialId="settings-account">

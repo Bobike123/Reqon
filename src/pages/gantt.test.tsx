@@ -10,11 +10,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const TODAY = new Date(2026, 10, 15, 12, 0, 0) // 15 Nov 2026, local noon
 
-const { updateTask, updateTaskAsync, who, state } = vi.hoisted(() => ({
+const { updateTask, updateTaskAsync, who, state, deps } = vi.hoisted(() => ({
   updateTask: vi.fn(),
   updateTaskAsync: vi.fn(async () => {}),
   who: { id: 'm1', roles: [] as string[] },
   state: { loadError: null as Error | null },
+  deps: { links: [] as { task_id: string; depends_on_task_id: string }[], extraSections: [] as Record<string, unknown>[] },
 }))
 
 const M = (over: Record<string, unknown>) => ({
@@ -26,9 +27,9 @@ const MILESTONES = [
   M({ key: 'MS1-7', name: 'Final Event', ordinal: 7, opens_on: null, due_on: null }),
 ]
 const SECTIONS = [
-  { id: 'sec1', milestone_key: 'MS1-1', ordinal: 1, name: 'Cover sheet', is_drafted: false, owner_id: null, updated_at: '' },
-  { id: 'sec2', milestone_key: 'MS1-1', ordinal: 2, name: 'Budget', is_drafted: false, owner_id: null, updated_at: '' },
-  { id: 'secB', milestone_key: 'MS1-2', ordinal: 1, name: 'Loads', is_drafted: false, owner_id: null, updated_at: '' },
+  { id: 'sec1', milestone_key: 'MS1-1', ordinal: 1, name: 'Cover sheet', is_drafted: false, owner_id: null, updated_at: '', parent_section_id: null },
+  { id: 'sec2', milestone_key: 'MS1-1', ordinal: 2, name: 'Budget', is_drafted: false, owner_id: null, updated_at: '', parent_section_id: null },
+  { id: 'secB', milestone_key: 'MS1-2', ordinal: 1, name: 'Loads', is_drafted: false, owner_id: null, updated_at: '', parent_section_id: null },
 ]
 const DEPARTMENTS = [
   { key: 'AERO', name: 'Aerodynamics', lead_id: 'm2', archived_at: null, is_parked: false, sort_order: 0 },
@@ -45,7 +46,8 @@ function task(id: string, over: Record<string, unknown> = {}) {
     id, season_id: 's', title: id, state: 'todo', priority: 'normal', section_id: null, milestone_key: null,
     starts_on: null, due_date: null, owner_id: 'm1', subteam_key: 'AERO', detail: null, starred: false,
     source_proposal: null, created_at: '', created_by: null, updated_at: '', links_required: false,
-    completed_at: null, completion_source: null, archived_at: null, archived_by: null, archive_reason: null, ...over,
+    completed_at: null, completion_source: null, archived_at: null, archived_by: null, archive_reason: null,
+    blocked_reason: null, blocked_since: null, ...over,
   }
 }
 
@@ -59,11 +61,13 @@ vi.mock('../season/context.ts', () => ({ useSeasonId: () => 's', useSeason: () =
 vi.mock('../data/useMembers.ts', () => ({ useMembers: () => ({ data: MEMBERS, isLoading: false, error: null }) }))
 vi.mock('../data/useSubteams.ts', () => ({ useSubteams: () => ({ data: DEPARTMENTS, isLoading: false, error: null }) }))
 vi.mock('../data/useRealtimeTasks.ts', () => ({ useRealtimeTasks: () => 'live' }))
+vi.mock('../data/useRealtimeTaskDependencies.ts', () => ({ useRealtimeTaskDependencies: () => 'live' }))
+vi.mock('../data/useTaskDependencies.ts', () => ({ useTaskDependencies: () => ({ data: deps.links }) }))
 vi.mock('../data/useRealtimeMilestones.ts', () => ({ useRealtimeMilestones: () => 'live' }))
 vi.mock('../data/useRealtimeMilestoneSections.ts', () => ({ useRealtimeMilestoneSections: () => 'live' }))
 vi.mock('../data/useMilestones.ts', () => ({
   useMilestones: () => ({ data: MILESTONES, isLoading: false, error: state.loadError, refetch: vi.fn() }),
-  useMilestoneSections: () => ({ data: SECTIONS, isLoading: false, error: null, refetch: vi.fn() }),
+  useMilestoneSections: () => ({ data: [...SECTIONS, ...deps.extraSections], isLoading: false, error: null, refetch: vi.fn() }),
   useSetSectionDrafted: () => ({ mutate: vi.fn(), isError: false, error: null }),
 }))
 vi.mock('../data/useTaskHistory.ts', () => ({
@@ -91,6 +95,8 @@ beforeEach(() => {
   who.id = 'm1'
   who.roles = []
   state.loadError = null
+  deps.links = []
+  deps.extraSections = []
   tasks = [
     task('t1', { title: 'Draft the cover', state: 'wip', section_id: 'sec1', milestone_key: 'MS1-1', starts_on: '2026-11-20', due_date: '2026-11-25' }),
     task('t2', { title: 'Bodywork budget line', section_id: 'sec1', milestone_key: 'MS1-1', due_date: '2026-11-27', owner_id: 'm3', subteam_key: 'BODY' }),
@@ -651,5 +657,73 @@ describe('keyboard alternatives to dragging (UI-06)', () => {
     await user.click(confirm.getByRole('button', { name: 'Move it' }))
     expect(updateTask).toHaveBeenCalledTimes(1)
     expect(updateTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', milestoneKey: 'MS1-2' }))
+  })
+})
+
+describe('subsections, prerequisites and blockers', () => {
+  const SUB = { id: 'sub1', milestone_key: 'MS1-1', ordinal: 3, name: 'Line items', is_drafted: false, owner_id: null, updated_at: '', parent_section_id: 'sec2' }
+
+  it('draws a subsection under its parent section only, never as a top-level section', async () => {
+    deps.extraSections = [SUB]
+    tasks.push(task('t9', { title: 'Itemise the budget', section_id: 'sub1', milestone_key: 'MS1-1', due_date: '2026-11-20' }))
+    const user = userEvent.setup()
+    renderGantt('/gantt?open=MS1-1')
+    const top = within(screen.getByTestId('gantt-milestone-MS1-1'))
+    expect(top.getByTestId('gantt-section-sec2')).toBeInTheDocument()
+    // Before the parent is opened its subsection is folded away, like a section's tasks.
+    expect(top.queryByRole('button', { name: /Line items/ })).not.toBeInTheDocument()
+    await user.click(top.getByRole('button', { name: /Budget/ }))
+    await user.click(top.getByRole('button', { name: /Line items/ }))
+    const sub = within(screen.getByTestId('gantt-section-sub1'))
+    expect(sub.getByTestId('gantt-task-t9')).toBeInTheDocument()
+    // The parent's own list does not show the subsection's task twice.
+    expect(within(screen.getByTestId('gantt-section-sec2')).getAllByTestId('gantt-task-t9')).toHaveLength(1)
+  })
+
+  it('counts a subsection\'s tasks in its parent section\'s progress, once', async () => {
+    deps.extraSections = [SUB]
+    tasks.push(task('t9', { title: 'Itemise the budget', section_id: 'sub1', milestone_key: 'MS1-1', state: 'done' }))
+    renderGantt('/gantt?open=MS1-1')
+    const parentRow = screen.getByTestId('gantt-section-sec2')
+    expect(within(parentRow).getByLabelText('Budget drafted').closest('label')).toHaveTextContent('1/1')
+  })
+
+  it('offers a subsection as a place to move a task, by name, from the keyboard-reachable select', async () => {
+    deps.extraSections = [SUB]
+    const user = userEvent.setup()
+    renderGantt('/gantt?open=MS1-1&sections=sec1&task=t1')
+    const select = within(screen.getByTestId('gantt-task-more-t1')).getByLabelText('Move to')
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toContain('MS1-1 · Budget › Line items')
+    await user.selectOptions(select, within(select).getByRole('option', { name: 'MS1-1 · Budget › Line items' }))
+    expect(updateTask).toHaveBeenCalledWith({ id: 't1', sectionId: 'sub1', milestoneKey: 'MS1-1' })
+  })
+
+  it('shows what a task waits for, flags a schedule conflict, and never invents a link', async () => {
+    tasks.push(task('t9', { title: 'Order the carbon', subteam_key: 'BODY', owner_id: 'm3', due_date: '2026-11-24', milestone_key: 'MS1-1', section_id: 'sec1' }))
+    deps.links = [{ task_id: 't1', depends_on_task_id: 't9' }]
+    renderGantt('/gantt?open=MS1-1&sections=sec1&task=t1')
+    expect(screen.getByTestId('gantt-waits-t1')).toHaveTextContent('Waits for 1')
+    const more = within(screen.getByTestId('gantt-task-more-t1'))
+    expect(more.getByTestId('gantt-prereqs-t1')).toHaveTextContent('Order the carbon')
+    // t1 starts 20 Nov, its prerequisite is due 24 Nov: advisory conflict.
+    expect(more.getByTestId('gantt-conflict-t1-t9')).toBeInTheDocument()
+    expect(screen.queryByTestId('gantt-waits-t2')).not.toBeInTheDocument()
+  })
+
+  it('asks for a reason before blocking a task with no prerequisite, then sends it with the state', async () => {
+    const user = userEvent.setup()
+    renderGantt('/gantt?open=MS1-1&sections=sec1')
+    await user.selectOptions(screen.getByLabelText('Move Draft the cover to another lane'), 'blocked')
+    expect(updateTask).not.toHaveBeenCalled()
+    const form = within(screen.getByTestId('gantt-block-form-t1'))
+    await user.type(form.getByLabelText(/Why is/), 'Waiting for the printer')
+    await user.click(form.getByRole('button', { name: 'Block task' }))
+    expect(updateTask).toHaveBeenCalledWith({ id: 't1', state: 'blocked', blockedReason: 'Waiting for the printer' })
+  })
+
+  it('shows a blocked task\'s written reason, or says none was kept', async () => {
+    tasks.push(task('t10', { title: 'Blocked with reason', state: 'blocked', blocked_reason: 'Sponsor has not paid', section_id: 'sec1', milestone_key: 'MS1-1' }))
+    renderGantt('/gantt?open=MS1-1&sections=sec1&task=t10')
+    expect(screen.getByTestId('gantt-blocker-t10')).toHaveTextContent('Sponsor has not paid')
   })
 })

@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
 import { useAuth } from '../auth/context.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
+import { useClauses } from '../data/useClauses.ts'
 import { useMembers } from '../data/useMembers.ts'
+import { useTaskActor } from '../data/useTaskActor.ts'
+import { hasDepartmentAuthority } from '../auth/permissions.ts'
 import { useRealtimeSpecs } from '../data/useRealtimeSpecs.ts'
 import { useRecordMeasurement, useSpecs } from '../data/useSpecs.ts'
 import { mergeSearchParams, readSetParam, writeSetParam } from '../lib/searchParams.ts'
@@ -23,6 +26,10 @@ export default function SpecSheet() {
   const record = useRecordMeasurement()
   const auth = useAuth()
   const permissions = usePermissions()
+  const actor = useTaskActor()
+  const clauses = useClauses()
+  // Which department owns each requirement, to show who may confirm readiness or record competition results.
+  const clauseDepartment = useMemo(() => new Map((clauses.data ?? []).map((c) => [c.clause_key, c.subteam_key])), [clauses.data])
 
   const memberNames = useMemo(
     () => new Map((members.data ?? []).map((member) => [member.id, member.full_name])),
@@ -112,6 +119,11 @@ export default function SpecSheet() {
                 actorId={actorId}
                 canMeasure={actorId !== null}
                 canAdministerSpecs={permissions.canEditSpecTargets}
+                canManageEvidence={
+                  actorId !== null &&
+                  (permissions.canEditSpecTargets ||
+                    (actor !== null && spec.clause_key !== null && hasDepartmentAuthority(actor, clauseDepartment.get(spec.clause_key) ?? null)))
+                }
                 onRecord={record.mutateAsync}
                 expanded={open.has(spec.id as string)}
                 onToggle={() => toggle(spec.id as string)}
@@ -120,13 +132,14 @@ export default function SpecSheet() {
           </div>
           <div id="spec-table-notes" className="mt-4 space-y-1 text-xs text-slate-600">
             <p>
-              The outline colour follows the database's zone: red fails the regulatory rule, amber passes it but misses the
-              project goal, green passes and meets the goal, no colour means it cannot be judged yet. It describes our own
+              The outline colour follows the database's zone: red fails the regulatory rule, amber passes it but nobody has
+              confirmed the current measurement ready, green passes and a person confirmed it ready, no colour means it
+              cannot be judged yet. Passing a limit or meeting a goal alone never turns a row green. It describes our own
               measurement only — it is not scrutineering approval.
             </p>
             <p data-testid="competition-note">
-              Competition: Reqon records no other team's measurements, so this column has nothing to show. It is a place for
-              that data, not a comparison.
+              Competition: a result read at the event, recorded apart from our own measurements. It never replaces
+              Current (ours) and does not change readiness. Empty means none has been recorded — not zero.
             </p>
             <p>Open a row to record a measurement, see the acceptable threshold and goal, and its history.</p>
           </div>

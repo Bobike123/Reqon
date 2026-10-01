@@ -20,6 +20,8 @@ export type TaskFormValues = {
   // the Gantt's Unlink is the place for that).
   milestone: string
   owner: string // '' = unassigned
+  // Only meaningful while the task is Blocked; '' otherwise.
+  blockedReason: string
 }
 
 export type EditPlan =
@@ -29,12 +31,20 @@ export type EditPlan =
 
 type Editable = Pick<
   Task,
-  'id' | 'title' | 'detail' | 'starts_on' | 'due_date' | 'priority' | 'milestone_key' | 'owner_id' | 'links_required'
->
+  'id' | 'title' | 'detail' | 'starts_on' | 'due_date' | 'priority' | 'milestone_key' | 'owner_id' | 'links_required' | 'state' | 'blocked_reason'
+> & Partial<Pick<Task, 'source_proposal' | 'section_id'>>
 
 const MAX_TITLE = 200
+export const MAX_BLOCKER_REASON = 500
 
-export function planTaskEdit(task: Editable, values: TaskFormValues, canReassign: boolean): EditPlan {
+export function planTaskEdit(
+  task: Editable,
+  values: TaskFormValues,
+  canReassign: boolean,
+  // Whether the task has at least one prerequisite task, which explains a
+  // blocker on its own so the written reason may then be left empty.
+  context: { hasPrerequisites?: boolean } = {},
+): EditPlan {
   const edit: TaskEdit = { id: task.id }
   const changed: string[] = []
 
@@ -59,13 +69,35 @@ export function planTaskEdit(task: Editable, values: TaskFormValues, canReassign
     changed.push(...schedule.changed)
   }
 
+  if (task.state === 'blocked') {
+    const reason = values.blockedReason.trim()
+    if (reason !== (task.blocked_reason ?? '')) {
+      if (reason.length > MAX_BLOCKER_REASON) {
+        return { kind: 'invalid', reason: `A blocker reason can be at most ${MAX_BLOCKER_REASON} characters.` }
+      }
+      if (reason === '' && !context.hasPrerequisites) {
+        return { kind: 'invalid', reason: 'A blocked task must say why. Write the reason, link the task it is waiting for, or move it out of Blocked.' }
+      }
+      edit.blockedReason = reason === '' ? null : reason
+      changed.push(reason === '' ? 'blocker reason removed' : 'blocker reason')
+    }
+  }
+
   if (values.priority !== task.priority) {
     edit.priority = values.priority
     changed.push('priority')
   }
   if (values.milestone !== '' && values.milestone !== task.milestone_key) {
     edit.milestoneKey = values.milestone
-    changed.push('milestone')
+    // A section belongs to one milestone, and the database refuses a task whose section and milestone
+    // disagree. Moving to another milestone therefore takes the task out of its section in the same
+    // write (it can be placed in one of the new milestone's sections on the Gantt), and says so.
+    if (task.section_id) {
+      edit.sectionId = null
+      changed.push('milestone (left its section)')
+    } else {
+      changed.push('milestone')
+    }
   }
   if (canReassign && values.owner !== (task.owner_id ?? '')) {
     edit.ownerId = values.owner || null
@@ -79,14 +111,16 @@ export function planTaskEdit(task: Editable, values: TaskFormValues, canReassign
 // bar: the two date fields only, under the same rules the database enforces
 // (starts_on <= due_date; a promoted task keeps a deadline).
 export function planScheduleEdit(
-  task: Pick<Task, 'id' | 'starts_on' | 'due_date' | 'links_required'>,
+  task: Pick<Task, 'id' | 'starts_on' | 'due_date' | 'links_required'> & Partial<Pick<Task, 'source_proposal'>>,
   start: string | null,
   due: string | null,
 ): EditPlan {
   const edit: TaskEdit = { id: task.id }
   const changed: string[] = []
   if (due !== task.due_date) {
-    if (due === null && task.links_required && task.due_date !== null) {
+    // The database keeps a deadline on any task that came from a proposal
+    // (source_proposal), and on one it still requires links for; say so first.
+    if (due === null && (task.links_required || Boolean(task.source_proposal)) && task.due_date !== null) {
       return { kind: 'invalid', reason: 'A task created from a proposal must keep a deadline. Change the date instead of removing it.' }
     }
     edit.dueDate = due

@@ -77,8 +77,14 @@ export function milestoneProgress(
 }
 
 // A section: the tasks linked to it; with none, its own drafted tick.
-export function sectionProgress(section: MilestoneSection, tasks: readonly ProgressSource[]): ProgressView {
-  const mine = tasks.filter((t) => t.section_id === section.id)
+// A section that has subsections counts their tasks as its own, each once.
+export function sectionProgress(
+  section: MilestoneSection,
+  tasks: readonly ProgressSource[],
+  subsectionIds: readonly string[] = [],
+): ProgressView {
+  const ids = new Set([section.id, ...subsectionIds])
+  const mine = tasks.filter((t) => t.section_id !== null && ids.has(t.section_id))
   const { counted, ...rest } = fromTasks(mine)
   if (counted > 0) return { basis: 'tasks', ...rest }
   return {

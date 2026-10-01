@@ -105,7 +105,7 @@ export function ProposalForm({
           </p>
         ) : (
           <p className="mt-2 text-sm text-slate-600">
-            The President, Vice President or a Developer can set these up in Settings.
+            The President or Vice President can set these up in Settings.
           </p>
         )}
       </div>

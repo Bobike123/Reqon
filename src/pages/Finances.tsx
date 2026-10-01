@@ -48,7 +48,7 @@ export default function Finances() {
         <PageHeader title="Finances" description={DESCRIPTION} />
         <ActionError error={lastRefusal} className="mb-3" />
         <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-          Finances are visible to the President, Vice President, Treasurer and Developer. You are
+          Finances are visible to the President, Vice President and Treasurer. You are
           signed in as {describeRoles(can.roles)}, so there is nothing to show you here. Ask the
           President if you need access.
         </p>
@@ -85,8 +85,8 @@ export default function Finances() {
           {can.canManageFinances
             ? can.hasRole('treasurer')
               ? 'You are the Treasurer: you can add, edit and delete entries.'
-              : 'You have full access as Developer: you can add, edit and delete entries.'
-            : `Read-only for ${describeRoles(can.roles)}. Only the Treasurer and the Developer can change these entries — the database refuses changes from anyone else.`}
+              : 'You can add, edit and delete entries.'
+            : `Read-only for ${describeRoles(can.roles)}. Only the Treasurer can change these entries.`}
         </p>
       </PageHeader>
 

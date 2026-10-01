@@ -40,7 +40,7 @@ export type RolePlan = {
 }
 
 const GAINS: Record<PrivilegedRole, string> = {
-  president: 'can change every setting and season, and give or take away every role except Developer',
+  president: 'can change every setting and season, and manage the roles available to the President',
   vicepresident: 'can change the roster, departments and milestones, and give or take away the Treasurer and Documentation roles',
   treasurer: 'can add, edit and delete financial entries',
   documentation: 'can edit meetings, the default agenda and milestone sections',

@@ -134,10 +134,10 @@ export function ProposalCard({
       {!canReview && !archived && (
         <p className="mt-2 text-xs text-slate-500" data-testid={`proposal-hint-${proposal.id}`}>
           {!departmentName
-            ? 'A Developer completes the details of this older proposal before it can become a board task.'
+            ? 'The missing details must be completed before this older proposal can become a board task.'
             : departmentHasHead
-              ? `The Head of ${departmentName}, or a Developer, decides whether this becomes a board task.`
-              : `${departmentName} has no active Head. The President or Vice President decides for it; a Developer can also act.`}
+              ? `The Head of ${departmentName}, the President or the Vice President decides whether this becomes a board task.`
+              : `${departmentName} has no active Head. The President or Vice President decides for it.`}
         </p>
       )}
     </li>

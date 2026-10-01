@@ -3,6 +3,7 @@ import type { Task, TaskState } from '../../data/useTasks.ts'
 import type { GanttTaskPerms } from './GanttTaskRow.tsx'
 import type { LinkTarget } from './ganttLinking.ts'
 import type { Span } from './ganttModel.ts'
+import type { TaskRef } from '../../tasks/dependencies.ts'
 
 // Everything the row levels (milestone, section, unsectioned group, task) share,
 // passed down as one object so each level's own props stay about that level.
@@ -41,7 +42,10 @@ export type GanttEnv = {
   expandedTask: string | null
   onToggleTask: (taskId: string) => void
 
-  onMove: (taskId: string, state: TaskState) => void
+  // What a task waits for (prerequisite tasks, any department), for the blocker
+  // line and the schedule-conflict cue. Managed on the Board card.
+  prerequisitesFor: (task: Task) => TaskRef[]
+  onMove: (taskId: string, state: TaskState, blockedReason?: string) => void
   onOwner: (taskId: string, ownerId: string | null) => void
   onLink: (task: Task, target: LinkTarget) => void
   onUnlinkSection: (task: Task) => void

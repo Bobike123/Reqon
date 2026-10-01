@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { RecordMeasurement, SpecVerdict } from '../../data/useSpecs.ts'
 import { formatInstant } from '../../lib/dates.ts'
-import { idealCell, measurementValue, regulatoryLimitText, zoneCue } from '../../specs/presentation.ts'
+import { competitionCell, idealCell, measurementValue, regulatoryLimitText, zoneCue } from '../../specs/presentation.ts'
 import { buttonSecondary } from '../../ui/buttons.ts'
 import { MeasurementEditor } from './MeasurementEditor.tsx'
+import { DirectionPanel, ReadinessPanel } from './ReadinessPanel.tsx'
 import { SpecStatuses, SpecThresholds } from './SpecComparison.tsx'
 import { SpecHistory } from './SpecHistory.tsx'
 
@@ -59,6 +60,7 @@ export function SpecRow({
   actorId,
   canMeasure,
   canAdministerSpecs,
+  canManageEvidence,
   onRecord,
   expanded,
   onToggle,
@@ -69,6 +71,9 @@ export function SpecRow({
   actorId: string | null
   canMeasure: boolean
   canAdministerSpecs: boolean
+  // Competition results and readiness: President, Vice President, Developer, or the authority of the
+  // requirement's department. Presentation only; the database decides.
+  canManageEvidence: boolean
   onRecord: (input: RecordMeasurement) => Promise<unknown>
   expanded: boolean
   onToggle: () => void
@@ -83,6 +88,7 @@ export function SpecRow({
   const ideal = idealCell(spec)
   const regulatory = regulatoryLimitText(spec)
   const detailsId = `spec-details-${specId}`
+  const competition = competitionCell(spec)
 
   return (
     <div
@@ -143,8 +149,15 @@ export function SpecRow({
         <Cell label="Regulatory limit" testId={`comparison-regulatory-${specId}`} missing={regulatory === null}>
           {regulatory ?? 'Rule incomplete'}
         </Cell>
-        <Cell label="Competition" testId={`competition-${specId}`} missing>
-          <Unknown said="No competition data" />
+        <Cell label="Competition" testId={`competition-${specId}`} missing={competition === null}>
+          {competition === null ? (
+            <Unknown said="No competition data" />
+          ) : (
+            <>
+              {competition.value}
+              {competition.verdict && <span className="block font-sans text-[0.68rem] font-normal text-slate-500">{competition.verdict}</span>}
+            </>
+          )}
         </Cell>
       </div>
 
@@ -168,13 +181,24 @@ export function SpecRow({
             </div>
 
             <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(28rem,1.2fr)] xl:items-start">
-              {canMeasure ? (
-                <MeasurementEditor spec={spec} onRecord={onRecord} />
-              ) : (
-                <section className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                  Read-only: only active members can record observations.
-                </section>
-              )}
+              <div className="space-y-3">
+                {canMeasure ? (
+                  <MeasurementEditor spec={spec} onRecord={onRecord} />
+                ) : (
+                  <section className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                    Read-only: only active members can record observations.
+                  </section>
+                )}
+                <ReadinessPanel spec={spec} canManage={canManageEvidence} memberNames={memberNames} />
+                <DirectionPanel spec={spec} canReview={canAdministerSpecs} memberNames={memberNames} />
+                {canManageEvidence ? (
+                  <MeasurementEditor spec={spec} onRecord={onRecord} context="competition" />
+                ) : (
+                  <p className="rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600" data-testid={`competition-readonly-${specId}`}>
+                    Competition results are recorded by the President, Vice President or the authority of the requirement’s department.
+                  </p>
+                )}
+              </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>

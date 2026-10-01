@@ -13,6 +13,7 @@ import {
   canSubmitProposal,
   describeRoles,
   permissionsFor,
+  taskDepartmentTargets,
   type PrivilegedRole,
   type TaskActor,
 } from './permissions.ts'
@@ -194,6 +195,40 @@ describe('task-level authorization (ADR-0003)', () => {
   })
 })
 
+// set_task_department (20260126000400), checked in the database by task_department_test.sql: President,
+// Vice President and Developer move any task anywhere; a Head only between departments they head.
+describe('moving a task to another department (F6-01)', () => {
+  const active = [{ key: 'GEOM' }, { key: 'BODY' }, { key: 'ELEC' }]
+  const keys = (ds: { key: string }[]) => ds.map((d) => d.key)
+  const unassigned = { subteam_key: null, archived_at: null }
+  const geomTask = { subteam_key: 'GEOM', archived_at: null }
+
+  it('lets the President, the Vice President and a Developer classify unassigned work into any department', () => {
+    const president: TaskActor = { id: 'p', status: 'active', isDeveloper: false, headOf: [], isGovernance: true }
+    const developer: TaskActor = { id: 'd', status: 'active', isDeveloper: true, headOf: [] }
+    expect(keys(taskDepartmentTargets(president, unassigned, active))).toEqual(['GEOM', 'BODY', 'ELEC'])
+    expect(keys(taskDepartmentTargets(developer, geomTask, active))).toEqual(['BODY', 'ELEC'])
+  })
+
+  it('lets a Head move work only between departments they head, and never classify unassigned work', () => {
+    const twoHats: TaskActor = { id: 'h', status: 'active', isDeveloper: false, headOf: ['GEOM', 'BODY'] }
+    const oneHat: TaskActor = { id: 'h1', status: 'active', isDeveloper: false, headOf: ['GEOM'] }
+    expect(keys(taskDepartmentTargets(twoHats, geomTask, active))).toEqual(['BODY'])
+    expect(taskDepartmentTargets(oneHat, geomTask, active)).toEqual([])
+    expect(taskDepartmentTargets(twoHats, unassigned, active)).toEqual([])
+    expect(taskDepartmentTargets(twoHats, { subteam_key: 'ELEC', archived_at: null }, active)).toEqual([])
+  })
+
+  it('offers nothing to a member, an alumnus, or for an archived task', () => {
+    const member: TaskActor = { id: 'm', status: 'active', isDeveloper: false, headOf: [] }
+    const retired: TaskActor = { id: 'r', status: 'alumni', isDeveloper: true, headOf: [], isGovernance: true }
+    const developer: TaskActor = { id: 'd', status: 'active', isDeveloper: true, headOf: [] }
+    expect(taskDepartmentTargets(member, unassigned, active)).toEqual([])
+    expect(taskDepartmentTargets(retired, unassigned, active)).toEqual([])
+    expect(taskDepartmentTargets(developer, { subteam_key: 'GEOM', archived_at: '2026-09-01' }, active)).toEqual([])
+  })
+})
+
 describe('proposal authority (ADR-0003, ADR-0005)', () => {
   const head: TaskActor = { id: 'head', status: 'active', isDeveloper: false, headOf: ['GEOM'] }
   const otherHead: TaskActor = { id: 'other', status: 'active', isDeveloper: false, headOf: ['BODY'] }
@@ -251,7 +286,7 @@ describe('role names shown to people', () => {
 
   it('describes any set of roles in words, including none', () => {
     expect(describeRoles([])).toBe('Member (no privileged role)')
-    expect(describeRoles(['developer', 'treasurer'])).toBe('Treasurer and Developer')
-    expect(describeRoles(['developer', 'president', 'vicepresident'])).toBe('President, Vice President and Developer')
+    expect(describeRoles(['developer', 'treasurer'])).toBe('Treasurer')
+    expect(describeRoles(['developer', 'president', 'vicepresident'])).toBe('President, Vice President')
   })
 })

@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const SEASON = { id: 'season-a', label: '2026/27', is_current: true }
 const MEMBER = { id: 'm1', full_name: 'Ada Rider', status: 'active' }
 let signedInMember = MEMBER
+let signedInRoles: string[] = []
 const NOW = '2026-09-20T10:00:00Z'
 
 // The real seeded rule: Fairing width, max 600 mm, clause B.2.1.9.
@@ -89,10 +90,12 @@ function deriveGoalStatus(s: Record<string, unknown>): string {
   return 'not_set'
 }
 
-function deriveZone(verdict: string, goalStatus: string): string {
+// As spec_verdicts does (Phase 4): green needs a person's readiness confirmation; passing, even with the
+// goal met, is amber; an unmeasured specification is grey.
+function deriveZone(verdict: string, _goalStatus: string, readiness: string | null): string {
   if (verdict === 'fail') return 'red'
-  if (verdict === 'pass' && goalStatus === 'met') return 'green'
-  if (verdict === 'pass' && ['short', 'unacceptable'].includes(goalStatus)) return 'amber'
+  if (verdict === 'pass' && readiness === 'ready') return 'green'
+  if (verdict === 'pass') return 'amber'
   return 'grey'
 }
 
@@ -129,7 +132,14 @@ function makeBuilder(table: string) {
       : table === 'spec_verdicts' ? specs.map((s) => {
           const verdict = deriveVerdict(s)
           const goal_status = deriveGoalStatus(s)
-          return { ...s, verdict, goal_status, zone: deriveZone(verdict, goal_status) }
+          return {
+            readiness: 'not_confirmed', readiness_reason: null, readiness_confirmed_at: null, readiness_confirmed_by: null,
+            readiness_note: null, readiness_measurement_id: null, readiness_revoked_at: null,
+            competition_measurement_id: null, competition_value: null, competition_value_bool: null,
+            competition_measured_at: null, competition_verdict: null,
+            direction_needs_review: false, direction_reviewed_at: null, direction_reviewed_by: null, direction_note: null,
+            ...s, verdict, goal_status, zone: deriveZone(verdict, goal_status, (s.readiness as string | undefined) ?? null),
+          }
         })
       : table === 'spec_measurements' ? measurements
       : []
@@ -177,6 +187,8 @@ const supabase = {
       } : spec)
       return { data: row, error: null }
     }
+    if (fn === 'confirm_spec_readiness' || fn === 'review_spec_direction') return { data: { id: 'ok' }, error: null }
+    if (fn === 'revoke_spec_readiness') return { data: true, error: null }
     if (fn !== 'record_spec_measurement') return { data: null, error: { message: `unexpected rpc ${fn}`, code: 'XX000' } }
     if (recordGate) await recordGate
     const row = record(args)
@@ -193,7 +205,7 @@ const supabase = {
 }
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 vi.mock('../auth/context.ts', () => ({
-  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: signedInMember, roles: [] }),
+  useAuth: () => ({ status: 'member', user: { id: 'm1' }, member: signedInMember, roles: signedInRoles }),
 }))
 
 const { default: SpecSheet } = await import('./SpecSheet.tsx')
@@ -224,6 +236,7 @@ async function typeAndReview(row: HTMLElement, text: string, user = userEvent.se
 
 beforeEach(() => {
   signedInMember = MEMBER
+  signedInRoles = []
   specs = [{ ...FAIRING }]
   measurements = []
   rpcCalls = []
@@ -334,7 +347,8 @@ describe('Save measurement records exactly one observation', () => {
     expect(args).toMatchObject({ p_season_id: 'season-a', p_spec_id: 'spec-fairing', p_value_numeric: 612 })
     expect(args.p_request_id).toMatch(/^[0-9a-f-]{36}$/)
     // Who measured and when it was recorded belong to the server.
-    expect(Object.keys(args).sort()).toEqual(['p_request_id', 'p_season_id', 'p_spec_id', 'p_value_numeric'])
+    expect(Object.keys(args).sort()).toEqual(['p_context', 'p_request_id', 'p_season_id', 'p_spec_id', 'p_unit', 'p_value_numeric'])
+    expect(args.p_context).toBe('team')
     expect(measurements[0].measured_by).toBe('m1')
   })
 
@@ -748,6 +762,23 @@ describe('history correction and withdrawal', () => {
     expect(measurements[0]).toMatchObject({ invalidation_reason: 'Measured the wrong assembly' })
   })
 
+  it('keeps competition results out of the team trend and its progression text', async () => {
+    const user = userEvent.setup()
+    specs = [{ ...SPEC, id: 'spec-mass', parameter: 'Vehicle mass', unit: 'kg', current_measurement_id: 'newest', measured: 153 }]
+    measurements = [
+      observation('newest', 153, '2026-09-22T10:00:00Z'),
+      observation('competition-day', 120, '2026-09-21T10:00:00Z', { context: 'competition' }),
+      observation('oldest', 171, '2026-09-05T10:00:00Z'),
+    ]
+    renderSheet()
+    const row = await screen.findByTestId('spec-spec-mass')
+    await user.click(within(row).getByRole('button', { name: 'Show history' }))
+    expect(await within(row).findByTestId('progression-spec-mass')).toHaveTextContent('171 → 153 kg')
+    expect(within(row).getByTestId('trend-spec-mass').querySelector('svg')).toHaveAttribute('data-values', '171,153')
+    // It is still listed in the history table, labelled.
+    expect(within(within(row).getByTestId('history-table-spec-mass')).getAllByRole('row')).toHaveLength(4)
+  })
+
   it('keeps backdated rows in database order and gives numeric chart values the reverse chronological progression', async () => {
     const user = userEvent.setup()
     specs = [{ ...SPEC, id: 'spec-mass', parameter: 'Vehicle mass', unit: 'kg', current_measurement_id: 'newest', measured: 153 }]
@@ -827,24 +858,120 @@ describe('the compact table', () => {
       // limit 600 mm (max), lower is better.
       { ...FAIRING, id: 'z-red', measured: 612, current_measurement_id: 'm-r', sort_order: 1 },
       { ...FAIRING, id: 'z-amber', measured: 580, goal: 550, current_measurement_id: 'm-a', sort_order: 2 },
-      { ...FAIRING, id: 'z-green', measured: 540, goal: 550, current_measurement_id: 'm-g', sort_order: 3 },
+      { ...FAIRING, id: 'z-green', measured: 540, goal: 550, current_measurement_id: 'm-g', sort_order: 3, readiness: 'ready' },
       { ...FAIRING, id: 'z-grey', sort_order: 4 },
     ]
     renderSheet('/specs')
     expect(await screen.findByTestId('zone-cue-z-red')).toHaveTextContent('Fails the rule')
-    expect(screen.getByTestId('zone-cue-z-amber')).toHaveTextContent('Passes the rule · goal not met')
-    expect(screen.getByTestId('zone-cue-z-green')).toHaveTextContent('Passes the rule · goal met')
+    expect(screen.getByTestId('zone-cue-z-amber')).toHaveTextContent('Passes the rule · not confirmed ready')
+    expect(screen.getByTestId('zone-cue-z-green')).toHaveTextContent('Passes the rule · confirmed ready')
     expect(screen.getByTestId('zone-cue-z-grey')).toHaveTextContent('Not judged yet')
     expect(screen.getByTestId('spec-z-red').className).toMatch(/shadow-\[/)
     expect(screen.getByTestId('spec-z-grey').className).not.toMatch(/shadow-\[/)
   })
 
   it('says competition data is unavailable instead of inventing it, even for a green row', async () => {
-    specs = [{ ...FAIRING, measured: 540, goal: 550, current_measurement_id: 'meas-x' }]
+    specs = [{ ...FAIRING, measured: 540, goal: 550, current_measurement_id: 'meas-x', readiness: 'ready' }]
     renderSheet('/specs')
     await waitFor(() => expect(screen.getByTestId('spec-spec-fairing')).toHaveAttribute('data-zone', 'green'))
     expect(await screen.findByTestId('competition-spec-fairing')).toHaveTextContent('No competition data')
-    expect(screen.getByTestId('competition-note')).toHaveTextContent(/records no other team/)
+    expect(screen.getByTestId('competition-note')).toHaveTextContent(/never replaces/)
     expect(screen.queryByText(/approved/i)).not.toBeInTheDocument()
+  })
+})
+
+// --- Phase 4: readiness, competition evidence and reviewed directions ---------------------------
+
+describe('readiness, competition and direction', () => {
+  const PASSING = () => ({ ...FAIRING, measured: 540, current_measurement_id: 'meas-current', measured_at: NOW })
+
+  it('an ordinary member sees that nothing is confirmed, cannot confirm it, and cannot record a competition result', async () => {
+    specs = [PASSING()]
+    renderSheet()
+    const panel = await screen.findByTestId('readiness-spec-fairing')
+    expect(within(panel).getByTestId('readiness-state-spec-fairing')).toHaveTextContent('Not confirmed ready')
+    expect(within(panel).queryByRole('button', { name: /Confirm ready/ })).not.toBeInTheDocument()
+    expect(within(panel).getByTestId('readiness-why-not-spec-fairing')).toHaveTextContent(/confirms readiness/)
+    expect(screen.getByTestId('competition-readonly-spec-fairing')).toBeInTheDocument()
+    expect(screen.queryByTestId('measurement-editor-spec-fairing-competition')).not.toBeInTheDocument()
+    expect(screen.getByTestId('spec-spec-fairing')).toHaveAttribute('data-zone', 'amber')
+  })
+
+  it('a Developer confirms the CURRENT measurement with a note; nothing is sent without the note', async () => {
+    signedInRoles = ['developer']
+    const user = userEvent.setup()
+    specs = [PASSING()]
+    renderSheet()
+    const panel = await screen.findByTestId('readiness-spec-fairing')
+    const button = within(panel).getByRole('button', { name: 'Confirm ready' })
+    expect(button).toBeDisabled()
+    await user.type(within(panel).getByLabelText('What was checked?'), 'Measured with the jig')
+    await user.click(button)
+    await waitFor(() => expect(rpcCalls.filter((c) => c.fn === 'confirm_spec_readiness')).toHaveLength(1))
+    expect(rpcCalls.find((c) => c.fn === 'confirm_spec_readiness')?.args).toEqual({
+      p_spec_id: 'spec-fairing', p_measurement_id: 'meas-current', p_note: 'Measured with the jig',
+    })
+  })
+
+  it('shows a lapsed confirmation as "was ready", never as ready, with the reason', async () => {
+    specs = [{ ...PASSING(), readiness: 'lapsed', readiness_reason: 'A newer measurement became the current one.', readiness_confirmed_at: '2026-09-01T10:00:00Z' }]
+    renderSheet()
+    const panel = await screen.findByTestId('readiness-spec-fairing')
+    expect(within(panel).getByTestId('readiness-state-spec-fairing')).toHaveTextContent(/^Was ready on .* — no longer/)
+    expect(within(panel).getByTestId('readiness-detail-spec-fairing')).toHaveTextContent('A newer measurement became the current one.')
+    expect(screen.getByTestId('spec-spec-fairing')).toHaveAttribute('data-zone', 'amber')
+  })
+
+  it('a Developer records a competition result apart from ours, after an explicit review and save', async () => {
+    signedInRoles = ['developer']
+    const user = userEvent.setup()
+    specs = [PASSING()]
+    renderSheet()
+    const editor = await screen.findByTestId('measurement-editor-spec-fairing-competition')
+    await user.type(within(editor).getByLabelText(/^New measurement/), '590')
+    await user.click(within(editor).getByRole('button', { name: 'Review' }))
+    expect(rpcCalls).toHaveLength(0) // reviewing writes nothing
+    await user.click(within(editor).getByRole('button', { name: 'Save competition result' }))
+    await waitFor(() => expect(rpcCalls).toHaveLength(1))
+    expect(rpcCalls[0].fn).toBe('record_spec_measurement')
+    expect(rpcCalls[0].args).toMatchObject({ p_context: 'competition', p_unit: 'mm', p_value_numeric: 590 })
+  })
+
+  it('shows the competition value in its own column, with its own verdict, never as Current (ours)', async () => {
+    specs = [{ ...PASSING(), competition_measurement_id: 'c1', competition_value: 612, competition_verdict: 'fail' }]
+    renderSheet()
+    const cell = await screen.findByTestId('competition-spec-fairing')
+    expect(cell).toHaveTextContent('612 mm')
+    expect(cell).toHaveTextContent('Fails the rule')
+    expect(screen.getByTestId('comparison-current-spec-fairing')).toHaveTextContent('540 mm')
+  })
+
+  it('says a higher/lower direction is not reviewed, and lets a Developer confirm it with a reason', async () => {
+    signedInRoles = ['developer']
+    const user = userEvent.setup()
+    specs = [{ ...PASSING(), direction_needs_review: true }]
+    renderSheet()
+    const panel = await screen.findByTestId('direction-review-spec-fairing')
+    expect(within(panel).getByTestId('direction-unreviewed-spec-fairing')).toHaveTextContent(/Not reviewed/)
+    const confirm = within(panel).getByRole('button', { name: 'Confirm direction' })
+    expect(confirm).toBeDisabled()
+    await user.type(within(panel).getByLabelText('The engineering reason'), 'Narrower is better for drag')
+    // The derived direction is what is being questioned: nothing is preselected, so a reason alone is not enough.
+    expect(confirm).toBeDisabled()
+    await user.selectOptions(within(panel).getByLabelText('For the project, which is better?'), 'lower_better')
+    expect(confirm).toBeEnabled()
+    await user.click(confirm)
+    await waitFor(() => expect(rpcCalls.filter((c) => c.fn === 'review_spec_direction')).toHaveLength(1))
+    expect(rpcCalls.find((c) => c.fn === 'review_spec_direction')?.args).toEqual({
+      p_spec_id: 'spec-fairing', p_direction: 'lower_better', p_note: 'Narrower is better for drag',
+    })
+  })
+
+  it('offers an ordinary member no direction control', async () => {
+    specs = [{ ...PASSING(), direction_needs_review: true }]
+    renderSheet()
+    const panel = await screen.findByTestId('direction-review-spec-fairing')
+    expect(within(panel).queryByRole('button', { name: 'Confirm direction' })).not.toBeInTheDocument()
+    expect(panel).toHaveTextContent(/President or Vice President reviews it/)
   })
 })

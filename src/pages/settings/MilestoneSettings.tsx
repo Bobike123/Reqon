@@ -1,3 +1,4 @@
+import { milestoneLabel } from '../../milestones/label.ts'
 import { useMilestones, useUpdateMilestone } from '../../data/useMilestones.ts'
 import { ActionError, ErrorState } from '../../ui/states.tsx'
 
@@ -19,9 +20,9 @@ export function MilestoneSettings() {
         {(milestones.data ?? []).map((m) => (
           <li key={m.key} className="flex flex-wrap items-center gap-2 px-3 py-2" data-testid={`ms-row-${m.key}`}>
             <span className="w-32 shrink-0 text-sm text-slate-900">
-              <span className="font-mono text-xs">{m.key}</span> {m.name}
+              <span className="font-mono text-xs">{milestoneLabel(m)}</span> {m.name}
             </span>
-            <label className="sr-only" htmlFor={`ms-opens-${m.key}`}>Opens on for {m.key}</label>
+            <label className="sr-only" htmlFor={`ms-opens-${m.key}`}>Opens on for {milestoneLabel(m)}</label>
             <input
               id={`ms-opens-${m.key}`} type="date" defaultValue={m.opens_on ?? ''}
               onBlur={(e) => {
@@ -31,7 +32,7 @@ export function MilestoneSettings() {
               }}
               className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
             />
-            <label className="sr-only" htmlFor={`ms-due-${m.key}`}>Due on for {m.key}</label>
+            <label className="sr-only" htmlFor={`ms-due-${m.key}`}>Due on for {milestoneLabel(m)}</label>
             <input
               id={`ms-due-${m.key}`} type="date" defaultValue={m.due_on ?? ''}
               onBlur={(e) => {
@@ -41,7 +42,7 @@ export function MilestoneSettings() {
               }}
               className="min-h-11 rounded border border-slate-300 px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
             />
-            <label className="sr-only" htmlFor={`ms-points-${m.key}`}>Max points for {m.key}</label>
+            <label className="sr-only" htmlFor={`ms-points-${m.key}`}>Max points for {milestoneLabel(m)}</label>
             <input
               id={`ms-points-${m.key}`} type="number" min={0} defaultValue={m.max_points}
               onBlur={(e) => {

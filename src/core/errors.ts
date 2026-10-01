@@ -21,9 +21,13 @@ export class DataError extends Error {
   // something broke. The UI words these differently, and re-reads the
   // caller's roles in case they changed since the screen loaded.
   permission: boolean
+  // True when the write was refused because the row changed after the caller
+  // read it (a versioned write matched no row). Nothing was written; the screen
+  // has been refreshed and the person can look again and re-apply.
+  conflict: boolean
 
   // `what` names the action so it reads after "You don't have permission to …".
-  constructor(what: string, error: PostgrestError | null, options: { permission?: boolean } = {}) {
+  constructor(what: string, error: PostgrestError | null, options: { permission?: boolean; conflict?: boolean } = {}) {
     const permission =
       options.permission ??
       (error !== null && (error.code === '42501' || GENERIC_REFUSAL.test(error.message)))
@@ -32,12 +36,20 @@ export class DataError extends Error {
     this.code = error?.code ?? null
     this.details = error?.details ?? null
     this.permission = permission
+    this.conflict = options.conflict ?? false
   }
 }
 
 function refusalMessage(what: string, error: PostgrestError | null): string {
   if (error && !GENERIC_REFUSAL.test(error.message)) return error.message
   return `You don't have permission to ${what}. Nothing was changed. Ask the President if you need this.`
+}
+
+// A refusal because someone else changed the row first, however deeply wrapped.
+export function isConflictError(error: unknown): boolean {
+  if (error instanceof DataError) return error.conflict
+  if (error instanceof Error && error.cause !== undefined) return isConflictError(error.cause)
+  return false
 }
 
 // A permission refusal, however deeply it has been wrapped.

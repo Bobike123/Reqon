@@ -210,7 +210,7 @@ for (const [label, role] of [['President', 'president'], ['Vice President', 'vic
       expect(screen.getByText(formatEuros(1000000))).toBeInTheDocument()
       expect(screen.getByText(formatEuros(1000000 - 455000))).toBeInTheDocument()
       expect(screen.getByTestId('finance-access')).toHaveTextContent(
-        `Read-only for ${label}. Only the Treasurer and the Developer can change`,
+        `Read-only for ${label}. Only the Treasurer can change`,
       )
       expect(screen.queryByRole('button', { name: 'Add entry' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /^Edit / })).not.toBeInTheDocument()
@@ -223,7 +223,7 @@ describe('the Developer', () => {
   it('has full access: writes the ledger like the Treasurer', async () => {
     const user = userEvent.setup()
     renderFinances(['developer'])
-    expect(await screen.findByTestId('finance-access')).toHaveTextContent('full access as Developer')
+    expect(await screen.findByTestId('finance-access')).toHaveTextContent('You can add, edit and delete entries')
     await user.click(await screen.findByRole('button', { name: 'Add entry' }))
     const dialog = await dialogNamed('Add an entry')
     await user.type(dialog.getByLabelText('Description'), 'Server bill')
@@ -240,7 +240,7 @@ describe('the Developer', () => {
 describe('an ordinary member', () => {
   it('is told who can see finances, and nothing is requested on their behalf', async () => {
     renderFinances([])
-    expect(await screen.findByText(/visible to the President, Vice President, Treasurer and Developer/)).toBeInTheDocument()
+    expect(await screen.findByText(/visible to the President, Vice President and Treasurer/)).toBeInTheDocument()
     expect(screen.getByText(/Member \(no privileged role\)/)).toBeInTheDocument()
     expect(requests).toEqual([])
   })
@@ -274,7 +274,7 @@ describe('losing access in the middle of an action', () => {
     who.roles = [] // every role taken away on another device
     await user.click(confirm.getByRole('button', { name: 'Delete entry' }))
 
-    expect(await screen.findByText(/visible to the President, Vice President, Treasurer and Developer/)).toBeInTheDocument()
+    expect(await screen.findByText(/visible to the President, Vice President and Treasurer/)).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent(
       "Not permitted: You don't have permission to delete financial entries. Nothing was changed.",
     )
@@ -291,7 +291,7 @@ describe('losing access in the middle of an action', () => {
     who.roles = []
     await user.click(dialog.getByRole('button', { name: 'Add entry' }))
 
-    expect(await screen.findByText(/visible to the President, Vice President, Treasurer and Developer/)).toBeInTheDocument()
+    expect(await screen.findByText(/visible to the President, Vice President and Treasurer/)).toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent("Not permitted: You don't have permission to add financial entries.")
   })
 })

@@ -1,3 +1,4 @@
+import { milestoneLabel } from '../milestones/label.ts'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { useCallback, useId, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -135,7 +136,7 @@ export function ProposalsPanel({
     [members.data],
   )
   const milestoneOptions = useMemo<Option[]>(
-    () => (milestones.data ?? []).map((m) => ({ value: m.key, label: `${m.key} — ${m.name}` })),
+    () => (milestones.data ?? []).map((m) => ({ value: m.key, label: `${milestoneLabel(m)} — ${m.name}` })),
     [milestones.data],
   )
   const requirementOptions = useMemo(() => buildRequirementOptions(clauses.data ?? []), [clauses.data])
@@ -246,9 +247,9 @@ export function ProposalsPanel({
         </span>
       </h3>
       <p className="mt-0.5 text-xs text-slate-600">
-        {actor?.isDeveloper
-          ? 'As a Developer you may decide proposals in any department.'
-          : `Proposals you may decide${actor?.headOf.length ? ` as Head for ${(actor.headOf).map((k) => nameOfDepartment(k) ?? k).join(', ')}` : ''}${actor?.governs?.length ? `${actor.headOf.length ? ', and' : ''} as governance fallback where no active Head exists: ${actor.governs.map((k) => nameOfDepartment(k) ?? k).join(', ')}` : ''}.`}
+        {actor?.isDeveloper || actor?.isGovernance
+          ? 'You may decide proposals in any department.'
+          : `Proposals you may decide${actor?.headOf.length ? ` as Head for ${(actor.headOf).map((k) => nameOfDepartment(k) ?? k).join(', ')}` : ''}.`}
       </p>
       {queueByDepartment.size > 1 && (
         <ul className="mt-2 flex flex-wrap gap-1.5 text-xs" aria-label="Waiting per department">
@@ -460,7 +461,7 @@ function ProposalTally({ proposals, promoted }: { proposals: Proposal[]; promote
         ))}
       </ol>
       <p className="mt-2 border-t border-slate-100 pt-2 text-xs text-pretty text-slate-600">
-        The department&apos;s Head reviews these; where there is no active Head, the President or Vice President acts, and a Developer can also act.{' '}
+        The department&apos;s Head reviews these; where there is no active Head, the President or Vice President acts.{' '}
         Parked proposals (<span className="tabular-nums">{count('parked')}</span>) stay in the queue, marked; rejected and promoted proposals move to History.
       </p>
     </div>

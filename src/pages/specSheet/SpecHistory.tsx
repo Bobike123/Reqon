@@ -46,8 +46,10 @@ function referenceLines(spec: SpecVerdict): ReferenceLine[] {
 }
 
 function TrendChart({ spec, rows }: { spec: SpecVerdict; rows: SpecMeasurement[] }) {
+  // Our own progression only: a competition result is a different fact and is listed in the table, never drawn
+  // as a point on the team's trend.
   const accepted = rows
-    .filter((row) => row.invalidated_at === null && row.value_numeric !== null)
+    .filter((row) => row.invalidated_at === null && row.value_numeric !== null && row.context !== 'competition')
     .slice()
     .reverse()
   if (spec.measure_kind === 'boolean' || accepted.length < 2) return null
@@ -324,6 +326,7 @@ export function SpecHistory({
                         {!row.note && !row.source && <span className="text-slate-400">—</span>}
                       </td>
                       <td className="max-w-72 px-2 py-2 align-top">
+                        {row.context === 'competition' && <span className="block font-medium" data-testid={`history-context-${row.id}`}>Competition result (kept apart from ours)</span>}
                         {row.origin === 'correction' && <span className="block font-medium">Correction of an earlier observation</span>}
                         {row.origin === 'legacy_import' && <span className="block">Imported legacy current value</span>}
                         {row.invalidated_at ? (

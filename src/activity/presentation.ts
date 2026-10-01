@@ -95,6 +95,22 @@ export function presentActivity(row: ActivityRow, names: ReadonlyMap<string, str
       return { ...base, icon: '✎', summary: 'Review note updated' }
     case 'requirements_changed':
       return { ...base, icon: '§', summary: 'Proposal requirements changed' }
+    case 'commented':
+      return { ...base, icon: '✎', summary: `Discussion: ${text(d.kind)?.replaceAll('_', ' ') ?? 'comment'} added` }
+    case 'revised':
+      return { ...base, icon: '✎', summary: `Proposal revised${Array.isArray(d.fields) && d.fields.length > 0 ? `: ${d.fields.join(', ')}` : ''}` }
+    case 'approved':
+      return { ...base, icon: '✓', summary: 'Proposal approved' }
+    case 'approval_invalidated':
+      return { ...base, icon: '↺', summary: 'Approval withdrawn: the proposal changed after it was approved' }
+    case 'approval_withdrawn':
+      return { ...base, icon: '↺', summary: 'Approval withdrawn' }
+    case 'blocker_changed':
+      return { ...base, icon: '!', summary: `Blocker reason: ${fromTo(d)}` }
+    case 'dependency_added':
+      return { ...base, icon: '⇢', summary: `Now waits for “${text(d.depends_on_title) ?? 'another task'}”` }
+    case 'dependency_removed':
+      return { ...base, icon: '⇢', summary: `No longer waits for “${text(d.depends_on_title) ?? 'another task'}”` }
     case 'legacy_repaired':
       return { ...base, icon: '✓', summary: 'Older proposal completed with required details' }
     default:

@@ -11,8 +11,9 @@
 --  Covers: one-level depth, self/cycle prevention, top-level-only cap,
 --  archive/restore rules between parent and child, who may configure the
 --  hierarchy, department_authority() for own Head / parent Head / sibling /
---  other Head / several headships / revoked and retired Heads / the no-Head
---  governance fallback / archived departments / unassigned work, and that the
+--  other Head / several headships / revoked and retired Heads / the President
+--  and Vice President in every department (role hierarchy 20260130000000, which
+--  replaced the no-Head-only fallback) / archived departments / unassigned work, and that the
 --  RLS task paths and proposal review follow it.
 -- =============================================================================
 
@@ -168,7 +169,8 @@ begin
   perform pg_temp.expect('... nor on a sibling subdepartment', pg_temp.val(hs, 'department_authority(''H_SA2'')'), 'null');
   perform pg_temp.expect('Head of another department has nothing here', pg_temp.val(hb, 'department_authority(''H_SA1'')'), 'null');
   perform pg_temp.expect('Developer -> developer', pg_temp.val(dev, 'department_authority(''H_SA1'')'), 'developer');
-  perform pg_temp.expect('President has no authority where a Head exists', pg_temp.val(pre, 'department_authority(''H_SA1'')'), 'null');
+  -- Role hierarchy (20260130000000) supersedes the Phase 2 no-Head-only fallback: the President ranks above a Head.
+  perform pg_temp.expect('President -> president even where a Head exists', pg_temp.val(pre, 'department_authority(''H_SA1'')'), 'president');
   perform pg_temp.expect('Treasurer -> none', pg_temp.val(tre, 'department_authority(''H_SA1'')'), 'null');
   perform pg_temp.expect('member -> none', pg_temp.val(mem, 'department_authority(''H_SA1'')'), 'null');
   perform pg_temp.expect('is_department_head is true through the parent', pg_temp.val(ha, 'is_department_head(''H_SA1'')'), 'true');
@@ -195,7 +197,8 @@ begin
   perform pg_temp.expect('parent Head may review a subdepartment proposal', pg_temp.val(ha, format('can_review_proposal(%L)', prop)), 'true');
   perform pg_temp.expect('subdepartment Head may review it', pg_temp.val(hs, format('can_review_proposal(%L)', prop)), 'true');
   perform pg_temp.expect('another Head may not', pg_temp.val(hb, format('can_review_proposal(%L)', prop)), 'false');
-  perform pg_temp.expect('the President may not (a Head exists)', pg_temp.val(pre, format('can_review_proposal(%L)', prop)), 'false');
+  perform pg_temp.expect('the President may review it although a Head exists', pg_temp.val(pre, format('can_review_proposal(%L)', prop)), 'true');
+  perform pg_temp.expect('a Treasurer may not', pg_temp.val(tre, format('can_review_proposal(%L)', prop)), 'false');
 
   -- ======================================================= several headships
   update subteams set lead_id = hm where key = 'H_SA2';
@@ -219,18 +222,19 @@ begin
   insert into subteams (key, name, parent_key) values ('H_SN', 'Sub no head', pb);
   insert into tasks (season_id, title, subteam_key, owner_id) values (season, 'H in SN', 'H_SN', mem2) returning id into t_sn;
   insert into tasks (season_id, title, subteam_key, owner_id) values (season, 'H in SN 2', 'H_SN', mem2) returning id into t_sn2;
-  perform pg_temp.expect('President -> governance_fallback where neither department nor parent has a Head', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'governance_fallback');
-  perform pg_temp.expect('Vice President -> governance_fallback there', pg_temp.val(vp, 'department_authority(''H_SN'')'), 'governance_fallback');
+  perform pg_temp.expect('President -> president where neither department nor parent has a Head', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'president');
+  perform pg_temp.expect('Vice President -> vicepresident there', pg_temp.val(vp, 'department_authority(''H_SN'')'), 'vicepresident');
   perform pg_temp.expect('Treasurer -> none there', pg_temp.val(tre, 'department_authority(''H_SN'')'), 'null');
   perform pg_temp.expect('the President edits a task there', pg_temp.attempt(pre, format('update tasks set detail = ''pre'' where id = %L', t_sn)), 'ALLOWED');
   perform pg_temp.expect('the Vice President archives one there', pg_temp.attempt(vp, format('select archive_task(%L)', t_sn2)), 'ALLOWED');
   perform pg_temp.expect('a member still cannot', pg_temp.attempt(mem, format('update tasks set detail = ''x'' where id = %L', t_sn)), 'DENIED');
   update subteams set lead_id = hb where key = pb;
-  perform pg_temp.expect('once the parent has a Head the fallback stops', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'null');
-  perform pg_temp.expect('... and the President can no longer edit there', pg_temp.attempt(pre, format('update tasks set detail = ''x'' where id = %L', t_sn)), 'DENIED');
+  perform pg_temp.expect('a Head appointed to the parent does not remove the President''s authority', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'president');
+  perform pg_temp.expect('... and the President still edits there', pg_temp.attempt(pre, format('update tasks set detail = ''x'' where id = %L', t_sn)), 'ALLOWED');
+  perform pg_temp.expect('... while the Treasurer still cannot', pg_temp.attempt(tre, format('update tasks set detail = ''y'' where id = %L', t_sn)), 'DENIED');
   update members set status = 'alumni' where id = hb;
   perform pg_temp.expect('a retired Head has no authority', pg_temp.val(hb, 'department_authority(''H_SN'')'), 'null');
-  perform pg_temp.expect('... and a retired Head does not count as a Head: the fallback returns', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'governance_fallback');
+  perform pg_temp.expect('... and the President''s authority does not depend on any Head', pg_temp.val(pre, 'department_authority(''H_SN'')'), 'president');
   update members set status = 'active' where id = hb;
 
   -- ================================================ archived and unassigned
@@ -241,7 +245,7 @@ begin
   perform pg_temp.expect('... nor its parent''s Head', pg_temp.val(ha, 'department_authority(''H_SARCH'')'), 'null');
   perform pg_temp.expect('... nor the President', pg_temp.val(pre, 'department_authority(''H_SARCH'')'), 'null');
   perform pg_temp.expect('... a Developer still does', pg_temp.val(dev, 'department_authority(''H_SARCH'')'), 'developer');
-  perform pg_temp.expect('unassigned work: President -> governance_fallback', pg_temp.val(pre, 'department_authority(null)'), 'governance_fallback');
+  perform pg_temp.expect('unassigned work: President -> president', pg_temp.val(pre, 'department_authority(null)'), 'president');
   perform pg_temp.expect('unassigned work: Developer -> developer', pg_temp.val(dev, 'department_authority(null)'), 'developer');
   perform pg_temp.expect('unassigned work: a Head -> none', pg_temp.val(ha, 'department_authority(null)'), 'null');
   perform pg_temp.expect('unassigned work: member -> none', pg_temp.val(mem, 'department_authority(null)'), 'null');

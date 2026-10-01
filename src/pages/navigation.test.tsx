@@ -30,11 +30,12 @@ const PROGRESS = [
 // J has no numbered rules at all.
 const book = (over: Record<string, unknown>) => ({
   season_id: 's', regs_ref: 'R', level: 'chapter', kind: null, number: null, page: 1, sort_order: 0,
-  has_numbered_rules: true, imported_rules: 0, requirements: 0, resolved: 0, not_applicable: 0, in_progress: 0, blocked: 0, ...over,
+  has_numbered_rules: true, imported_rules: 0, requirements: 0, resolved: 0, not_applicable: 0, in_progress: 0, blocked: 0,
+  applicable: 0, complied: 0, verified: 0, content_state: null, ...over,
 })
 const BOOK = [
-  book({ chapter_code: 'B', label: 'SECTION B', heading: 'GENERAL TECHNICAL REGULATIONS', chapter_sort: 2, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2 }),
-  book({ level: 'subchapter', chapter_code: 'B', kind: 'article', number: 1, label: 'ARTICLE 1', heading: 'TECHNICAL REQUIREMENTS OF THE PROTOTYPE AND RESTRICTIONS', chapter_sort: 2, sort_order: 1, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2 }),
+  book({ chapter_code: 'B', label: 'SECTION B', heading: 'GENERAL TECHNICAL REGULATIONS', chapter_sort: 2, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2, applicable: 15, complied: 1, verified: 0 }),
+  book({ level: 'subchapter', chapter_code: 'B', kind: 'article', number: 1, label: 'ARTICLE 1', heading: 'TECHNICAL REQUIREMENTS OF THE PROTOTYPE AND RESTRICTIONS', chapter_sort: 2, sort_order: 1, imported_rules: 22, requirements: 17, resolved: 3, not_applicable: 2, applicable: 15, complied: 1, verified: 0 }),
   book({ chapter_code: 'D', label: 'SECTION D', heading: 'SPECIFIC TECHNICAL REGULATIONS FOR THE CATEGORY “MOTOSTUDENT ELECTRIC”', chapter_sort: 4, page: 82, out_of_scope: true }),
   book({ chapter_code: 'J', label: 'SECTION J', heading: 'ANNEXES', chapter_sort: 10, has_numbered_rules: false }),
 ]
@@ -69,7 +70,7 @@ vi.mock('../data/useNowMetrics.ts', () => ({
   useSubteamProgress: () => ({ data: PROGRESS, isLoading: false, error: null }),
   useBookProgress: () => ({ data: BOOK, isLoading: false, error: null, refetch: vi.fn() }),
   useAttention: () => ({
-    data: metrics.attentionLoading || metrics.attentionError ? undefined : [{ kind: 'task', ref: 't-late', title: 'Late fairing drawing', owner_id: 'm1', season_id: 's', reason: 'overdue', starred: false, clause_key: null }],
+    data: metrics.attentionLoading || metrics.attentionError ? undefined : [{ kind: 'task', ref: 't-late', title: 'Late fairing drawing', owner_id: 'm1', season_id: 's', reason: 'overdue', starred: false, clause_key: null, is_overdue: true, is_blocked: false, is_urgent: false, is_starred: false }],
     isLoading: metrics.attentionLoading,
     error: metrics.attentionError,
     refetch: vi.fn(),
@@ -97,6 +98,7 @@ vi.mock('../data/useRealtimeClauseStatus.ts', () => ({
 }))
 // The Register also reads linked work and the season's edition.
 vi.mock('../data/useRealtimeTasks.ts', () => ({ useRealtimeTasks: () => 'live' }))
+vi.mock('../data/useRealtimeTaskDependencies.ts', () => ({ useRealtimeTaskDependencies: () => 'live' }))
 vi.mock('../data/useRealtimeTaskRequirements.ts', () => ({ useRealtimeTaskRequirements: () => 'live' }))
 vi.mock('../data/useTaskHistory.ts', () => ({
   useTaskRequirements: () => ({ data: [], isLoading: false, error: null }),
@@ -170,9 +172,9 @@ describe('Now dashboard', () => {
     expect(screen.queryByRole('heading', { name: 'Departments' })).not.toBeInTheDocument()
     expect(document.querySelector('[data-testid^="department-"]')).toBeNull()
     expect(screen.queryByText('Work')).not.toBeInTheDocument()
-    expect(screen.getByTestId('book-chapter-B-counts')).toHaveTextContent('3/17 resolved')
-    expect(screen.getByTestId('book-chapter-B-na')).toHaveTextContent('2 not applicable')
-    expect(screen.getByTestId('now-requirements-total')).toHaveTextContent('3 / 17')
+    expect(screen.getByTestId('book-chapter-B-counts')).toHaveTextContent('1/15 complied')
+    expect(screen.getByTestId('book-chapter-B-na')).toHaveTextContent('2 not applicable (left out of the count)')
+    expect(screen.getByTestId('now-requirements-total')).toHaveTextContent('1 / 15')
   })
 
   it('keeps chapters without imported rules, telling another category and a confirmed zero from missing data', () => {

@@ -127,13 +127,13 @@ describe('week ruler', () => {
 
 describe('progress', () => {
   it('counts done against everything still alive', () => {
-    expect(progressOf([task('a', 'done', 's1'), task('b', 'wip', 's1')])).toEqual({
+    expect(progressOf([task('a', 'done', 's1'), task('b', 'wip', 's1')])).toMatchObject({
       done: 1, total: 2, percent: 50, archivedUnfinished: 0,
     })
   })
 
   it('drops cancelled work from both sides, so it never reads 0% forever', () => {
-    expect(progressOf([task('a', 'done', 's1'), task('b', 'cancelled', 's1')])).toEqual({
+    expect(progressOf([task('a', 'done', 's1'), task('b', 'cancelled', 's1')])).toMatchObject({
       done: 1, total: 1, percent: 100, archivedUnfinished: 0,
     })
   })

@@ -103,6 +103,11 @@ begin
   insert into specs (season_id, parameter, comparator, direction, target)
     values (sB, 'SM other season', 'max', 'lower_better', 10) returning id into spOther;
 
+  -- Phase 4 (20260129000500): a higher/lower direction derived from the rule is scored only once a person has
+  -- reviewed it, and the zone is green only with a readiness confirmation. This file is about the verdict
+  -- matrix, so its fixtures are marked reviewed; the review and readiness rules have spec_evidence_test.sql.
+  update specs set direction_reviewed_at = now() where season_id in (sA, sB);
+
   -- ===================================================== regulatory verdict matrix
   perform pg_temp.chk('V1 min: at the limit passes, below fails',
     spec_regulatory_verdict('min', 85, null, true, true, null, null, 85, null) = 'pass'
@@ -348,8 +353,8 @@ begin
   perform pg_temp.chk('I14 there is no global maximum: a specification with no bound accepts a large value', q = 'ok', q);
   q := pg_temp.act(mem, format($$select record_spec_measurement(p_season_id => %L, p_spec_id => %L, p_value_bool => true, p_measured_at => %L, p_request_id => gen_random_uuid())$$, sA, spBool, pg_temp.d(5)));
   select * into sp from spec_verdicts where id = spBool;
-  perform pg_temp.chk('I15 a boolean specification records a yes/no value: passes and meets its goal, green',
-    q = 'ok' and sp.measured is null and sp.measured_bool is true and sp.verdict = 'pass' and sp.goal_status = 'met' and sp.zone = 'green', q);
+  perform pg_temp.chk('I15 a boolean specification records a yes/no value: passes and meets its goal, but amber until a person confirms readiness (Phase 4)',
+    q = 'ok' and sp.measured is null and sp.measured_bool is true and sp.verdict = 'pass' and sp.goal_status = 'met' and sp.zone = 'amber', q);
   perform pg_temp.act(mem, format($$select record_spec_measurement(p_season_id => %L, p_spec_id => %L, p_value_bool => true, p_measured_at => %L, p_request_id => gen_random_uuid())$$, sA, spBoolOpen, pg_temp.d(5)));
   select * into sp from spec_verdicts where id = spBoolOpen;
   perform pg_temp.chk('I16 a measured value against an unknown regulation is unevaluable and grey, never green',
@@ -364,7 +369,7 @@ begin
   perform pg_temp.chk('I19 the range rule is now evaluated: 1 on the exclusive lower bound fails (red)', sp.verdict = 'fail' and sp.zone = 'red');
   perform pg_temp.act(mem, format($$select record_spec_measurement(p_season_id => %L, p_spec_id => %L, p_value_numeric => '15', p_measured_at => %L, p_request_id => gen_random_uuid())$$, sA, spRange, pg_temp.d(22)));
   select * into sp from spec_verdicts where id = spRange;
-  perform pg_temp.chk('I20 15 is inside the range and inside the goal band: pass, met, green', sp.verdict = 'pass' and sp.goal_status = 'met' and sp.zone = 'green');
+  perform pg_temp.chk('I20 15 is inside the range and inside the goal band: pass, met, amber until readiness is confirmed (Phase 4)', sp.verdict = 'pass' and sp.goal_status = 'met' and sp.zone = 'amber');
 
   -- ======================================================================== permissions
   n0 := (select count(*) from spec_measurements);

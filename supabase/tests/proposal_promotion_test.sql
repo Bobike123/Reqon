@@ -110,12 +110,14 @@ begin
   perform pg_temp.as_user(pre);
   begin
     perform promote_proposal(prop, season);
-    select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', false, 'no exception was raised');
+    select * into lines, failures from pg_temp.note(lines, failures, 'the President may promote (role hierarchy) but only an approved proposal', false, 'no exception was raised');
   exception
-    when insufficient_privilege then
-      select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', true);
+    -- Role hierarchy (20260130000000) supersedes ADR-0003 here: the President has the authority, and the
+    -- refusal is the approval rule (22023), never a permission error.
+    when sqlstate '22023' then
+      select * into lines, failures from pg_temp.note(lines, failures, 'the President may promote (role hierarchy) but only an approved proposal', true);
     when others then
-      select * into lines, failures from pg_temp.note(lines, failures, 'the President alone cannot promote (ADR-0003)', false, format('wrong error: %s %s', sqlstate, sqlerrm));
+      select * into lines, failures from pg_temp.note(lines, failures, 'the President may promote (role hierarchy) but only an approved proposal', false, format('wrong error: %s %s', sqlstate, sqlerrm));
   end;
   perform pg_temp.as_user(hd2);
   begin

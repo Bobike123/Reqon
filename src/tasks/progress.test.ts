@@ -1,54 +1,52 @@
 import { describe, expect, it } from 'vitest'
-import { taskProgress, tasksInMilestone } from './progress.ts'
+import { departmentRollup, sectionRollup, taskProgress } from './progress.ts'
 
-const t = (id: string, state: string, extra: Record<string, unknown> = {}) =>
-  ({ id, state, archived_at: null, section_id: null, milestone_key: null, ...extra }) as never
+// The SAME fixture as supabase/tests/progress_views_test.sql, with the SAME expected figures, so the SQL view
+// (authoritative) and this mirror cannot drift apart. Format: total|done|archivedDone|archivedUnfinished|cancelled|openActive|percent.
+const line = (p: ReturnType<typeof taskProgress>) =>
+  [p.total, p.done, p.archivedDone, p.archivedUnfinished, p.cancelled, p.openActive, p.percent === null ? 'null' : p.percent].join('|')
 
-describe('taskProgress (one rule, ADR-0006)', () => {
-  it('reports "no linked work" (null), never 0% or 100%, when there is nothing to count', () => {
-    expect(taskProgress([])).toEqual({ done: 0, total: 0, percent: null, archivedUnfinished: 0 })
-    expect(taskProgress([t('a', 'cancelled')])).toEqual({ done: 0, total: 0, percent: null, archivedUnfinished: 0 })
-  })
-
-  it('counts a task once even if it is passed twice', () => {
-    expect(taskProgress([t('a', 'done'), t('a', 'done'), t('b', 'todo')])).toMatchObject({ done: 1, total: 2, percent: 50 })
-  })
-
-  it('excludes cancelled work from both sides', () => {
-    expect(taskProgress([t('a', 'done'), t('b', 'cancelled')])).toMatchObject({ done: 1, total: 1, percent: 100 })
-  })
-
-  it('counts an archived Done task as complete', () => {
-    const done = t('a', 'done', { archived_at: '2026-09-01T00:00:00Z' })
-    expect(taskProgress([done, t('b', 'todo')])).toMatchObject({ done: 1, total: 2, archivedUnfinished: 0 })
-  })
-
-  it('keeps archived unfinished work in the denominator and reports it separately', () => {
-    const stale = t('a', 'wip', { archived_at: '2026-09-01T00:00:00Z' })
-    expect(taskProgress([stale, t('b', 'done')])).toEqual({ done: 1, total: 2, percent: 50, archivedUnfinished: 1 })
-  })
+const ARCHIVED = '2026-10-01T00:00:00Z'
+const t = (id: string, state: 'todo' | 'wip' | 'done' | 'cancelled' | 'blocked', subteam_key: string | null, over: { archived?: boolean; section_id?: string | null } = {}) => ({
+  id, state, subteam_key, section_id: over.section_id ?? null, archived_at: over.archived ? ARCHIVED : null,
 })
 
-describe('tasksInMilestone', () => {
-  const sections = new Set(['sec-1'])
+describe('the one progress rule (mirror of v_task_progress)', () => {
+  const departments = [
+    { key: 'PARENT', parent_key: null }, { key: 'CHILD_A', parent_key: 'PARENT' }, { key: 'CHILD_B', parent_key: 'PARENT' },
+  ]
+  const tasks = [
+    t('parent-done', 'done', 'PARENT'), t('parent-todo', 'todo', 'PARENT'),
+    t('a-done-archived', 'done', 'CHILD_A', { archived: true }), t('a-wip-archived', 'wip', 'CHILD_A', { archived: true }),
+    t('a-cancelled', 'cancelled', 'CHILD_A'), t('b-todo', 'todo', 'CHILD_B'),
+  ]
 
-  it('includes an unsectioned task attached to the milestone', () => {
-    const tasks = [t('a', 'todo', { milestone_key: 'MS1' })]
-    expect(tasksInMilestone(tasks, 'MS1', sections)).toHaveLength(1)
+  it('archived DONE keeps its contribution; archived UNFINISHED stays undone and is reported; cancelled leaves the denominator', () => {
+    expect(line(taskProgress(tasks.filter((x) => x.subteam_key === 'CHILD_A')))).toBe('2|1|1|1|1|0|50')
   })
 
-  it('does not double-count a task that has both the key and a section of the milestone', () => {
-    const tasks = [t('a', 'todo', { milestone_key: 'MS1', section_id: 'sec-1' })]
-    expect(tasksInMilestone(tasks, 'MS1', sections)).toHaveLength(1)
+  it('a department with open work only is a real 0 %; one with nothing but cancelled work is "no linked work" (null)', () => {
+    expect(line(taskProgress(tasks.filter((x) => x.subteam_key === 'CHILD_B')))).toBe('1|0|0|0|0|1|0')
+    expect(line(taskProgress([t('only', 'cancelled', 'X')]))).toBe('0|0|0|0|1|0|null')
+    expect(taskProgress([]).percent).toBeNull()
   })
 
-  it('still finds a legacy task that has only a section', () => {
-    const tasks = [t('a', 'todo', { section_id: 'sec-1' })]
-    expect(tasksInMilestone(tasks, 'MS1', sections)).toHaveLength(1)
+  it('the roll-up comes from the UNIQUE tasks of the parent and its children (40 %), not from averaging 50 % and 0 %', () => {
+    expect(line(departmentRollup(tasks, departments, 'PARENT'))).toBe('5|2|1|1|1|2|40')
+    expect(line(departmentRollup(tasks, departments, 'CHILD_A'))).toBe('2|1|1|1|1|0|50')
   })
 
-  it('leaves other milestones\' tasks out', () => {
-    const tasks = [t('a', 'todo', { milestone_key: 'MS2' }), t('b', 'todo', { section_id: 'other' })]
-    expect(tasksInMilestone(tasks, 'MS1', sections)).toEqual([])
+  it('a section counts its subsection\'s tasks once: 2 of 3 = 67 %, not the average of 100 % and 50 %', () => {
+    const sections = [{ id: 'sec1', parent_section_id: null }, { id: 'sub1', parent_section_id: 'sec1' }]
+    const work = [
+      t('A', 'done', 'P', { section_id: 'sec1' }), t('B', 'wip', 'P', { section_id: 'sub1' }), t('C', 'done', 'P', { section_id: 'sub1' }),
+    ]
+    expect(line(sectionRollup(work, sections, 'sub1'))).toBe('2|1|0|0|0|1|50')
+    expect(line(sectionRollup(work, sections, 'sec1'))).toBe('3|2|0|0|0|1|67')
+  })
+
+  it('counts a task that appears twice (two requirement links) once', () => {
+    const c = t('C', 'done', 'P')
+    expect(line(taskProgress([c, c, t('B', 'wip', 'P'), c]))).toBe('2|1|0|0|0|1|50')
   })
 })

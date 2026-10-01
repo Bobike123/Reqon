@@ -84,8 +84,8 @@ describe('indexLinkedWork', () => {
 
 describe('progressHeadline', () => {
   it('is singular for one task', () => {
-    expect(progressHeadline({ done: 0, total: 1, percent: 0, archivedUnfinished: 0 })).toBe('0 / 1 linked task done')
-    expect(progressHeadline({ done: 2, total: 3, percent: 67, archivedUnfinished: 0 })).toBe('2 / 3 linked tasks done')
+    expect(progressHeadline({ done: 0, total: 1, percent: 0, archivedUnfinished: 0, archivedDone: 0, cancelled: 0, openActive: 1 })).toBe('0 / 1 linked task done')
+    expect(progressHeadline({ done: 2, total: 3, percent: 67, archivedUnfinished: 0, archivedDone: 0, cancelled: 0, openActive: 1 })).toBe('2 / 3 linked tasks done')
   })
 })
 

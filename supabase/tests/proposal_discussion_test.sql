@@ -66,7 +66,7 @@ create or replace function pg_temp.expect(label text, got text, expected text) r
 language sql as $fn$ insert into pg_temp.results (label, got, expected) values (label, got, expected); $fn$;
 
 -- A complete, open proposal in a department, authored by p_author.
-create or replace function pg_temp.mk(p_dept text, p_author uuid, p_state text default 'open', p_due date default '2026-12-01')
+create or replace function pg_temp.mk(p_dept text, p_author uuid, p_state text default 'open', p_due date default '2099-12-01')
 returns uuid language plpgsql as $fn$
 declare
   pid uuid;
@@ -209,7 +209,9 @@ begin
   perform pg_temp.expect('the author cannot approve their own proposal', pg_temp.attempt(au, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('another department''s Head cannot approve', pg_temp.attempt(hb, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('a subdepartment Head has no authority over the parent', pg_temp.attempt(hs, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
-  perform pg_temp.expect('the President cannot approve where a Head exists', pg_temp.attempt(pre, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
+  -- Role hierarchy (20260130000000): the President ranks above the Head. Asked without approving, so the Head's
+  -- own approval below still applies to revision 1.
+  perform pg_temp.expect('the President may approve although a Head exists', pg_temp.val(pre, format('can_review_proposal(%L)', p)), 'true');
   perform pg_temp.expect('the Treasurer cannot', pg_temp.attempt(tre, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('a retired member cannot', pg_temp.attempt(alum, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('anon cannot', pg_temp.attempt(null, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
@@ -252,13 +254,13 @@ begin
   perform pg_temp.expect('a plain member cannot decide for a department without a Head', pg_temp.attempt(mem, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('an unrelated Head cannot', pg_temp.attempt(ha, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
   perform pg_temp.expect('the Treasurer cannot', pg_temp.attempt(tre, format('select approve_proposal(%L, 1, ''ok'')', p)), 'DENIED');
-  perform pg_temp.expect('the Vice President can, as governance_fallback', pg_temp.val(vp, format('(approve_proposal(%L, 1, ''No Head yet; fits the plan'')).approved_as', p)), 'governance_fallback');
+  perform pg_temp.expect('the Vice President can, recorded as vicepresident', pg_temp.val(vp, format('(approve_proposal(%L, 1, ''No Head yet; fits the plan'')).approved_as', p)), 'vicepresident');
   update subteams set lead_id = hnew where key = pc;
-  perform pg_temp.expect('once a Head is appointed the fallback stops: the President cannot promote', pg_temp.attempt(pre, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
-  perform pg_temp.expect('... nor the VP who approved', pg_temp.attempt(vp, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
+  perform pg_temp.expect('a Head being appointed leaves the President''s authority in place', pg_temp.val(pre, format('can_review_proposal(%L)', p)), 'true');
+  perform pg_temp.expect('... and the Vice President''s', pg_temp.val(vp, format('can_review_proposal(%L)', p)), 'true');
   perform pg_temp.expect('the approval is still valid: the new Head promotes it', pg_temp.attempt(hnew, format('select promote_proposal(%L, %L)', p, season)), 'ALLOWED');
   perform pg_temp.expect('... and the record still says who approved and as what',
-    (select (approved_by = vp and approved_as = 'governance_fallback' and state = 'decided' and outcome = 'approved')::text from task_proposals where id = p), 'true');
+    (select (approved_by = vp and approved_as = 'vicepresident' and state = 'decided' and outcome = 'approved')::text from task_proposals where id = p), 'true');
   update subteams set lead_id = null where key = pc;
   p := pg_temp.mk(pc, au);
   perform pg_temp.expect('the President decides for a department without a Head in one step (approve_and_promote)',
@@ -337,17 +339,18 @@ begin
     perform pg_temp.expect('a ' || r || ' proposal cannot be promoted', pg_temp.attempt(ha, format('select promote_proposal(%L, %L)', p, season)), 'ERROR 22023%');
   end loop;
 
-  p := pg_temp.mk(pa, au, 'open', '2026-12-01');
+  p := pg_temp.mk(pa, au, 'open', '2099-12-01');
   perform pg_temp.val(ha, format('(approve_proposal(%L, 1, ''ok'')).state', p));
   perform pg_temp.expect('a member cannot promote (even the author)', pg_temp.attempt(au, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
   perform pg_temp.expect('another department''s Head cannot promote', pg_temp.attempt(hb, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
-  perform pg_temp.expect('the President cannot promote where a Head exists', pg_temp.attempt(pre, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
+  perform pg_temp.expect('the President may promote where a Head exists (asked without promoting)', pg_temp.val(pre, format('can_review_proposal(%L)', p)), 'true');
+  perform pg_temp.expect('the Treasurer cannot promote', pg_temp.attempt(tre, format('select promote_proposal(%L, %L)', p, season)), 'DENIED');
   perform pg_temp.expect('a wrong season is refused', pg_temp.attempt(ha, format('select promote_proposal(%L, %L)', p, s2)), 'ERROR 22023%');
   perform pg_temp.expect('a retired owner is refused and nothing is created', pg_temp.attempt(ha, format('select promote_proposal(%L, %L, %L)', p, season, inactive)) || '/' ||
     (select count(*)::text from tasks where source_proposal = p), 'ERROR 23514: A task can only be assigned to an active member./0');
-  tid := pg_temp.val(ha, format('(select (task).id from promote_proposal(%L, %L, %L, ''2026-10-01''))', p, season, mem));
+  tid := pg_temp.val(ha, format('(select (task).id from promote_proposal(%L, %L, %L, %L))', p, season, mem, today_cph + 1));
   perform pg_temp.expect('the Head promotes: one task, started on the given day, owned by the chosen member, from this proposal',
-    (select (count(*) = 1 and bool_and(id::text = tid and starts_on = '2026-10-01' and due_date = '2026-12-01' and owner_id = mem
+    (select (count(*) = 1 and bool_and(id::text = tid and starts_on = today_cph + 1 and due_date = '2099-12-01' and owner_id = mem
        and subteam_key = pa and source_proposal = p and links_required and state = 'todo' and created_by = ha))::text from tasks where source_proposal = p), 'true');
   perform pg_temp.expect('... with its requirement links copied', (select count(*)::text from task_requirements where task_id = tid::uuid), '1');
   perform pg_temp.expect('... and the proposal archived as promoted, with its approval kept as evidence',
@@ -363,11 +366,44 @@ begin
   p := pg_temp.mk(pa, au, 'open', '2026-09-01');
   perform pg_temp.val(ha, format('(approve_proposal(%L, 1, ''ok'')).state', p));
   perform pg_temp.expect('a deadline already past: the task starts on its deadline, never after it',
-    pg_temp.val(ha, format('(select (task).starts_on from promote_proposal(%L, %L, null, ''2026-10-01''))', p, season)), '2026-09-01');
+    pg_temp.val(ha, format('(select (task).starts_on from promote_proposal(%L, %L, null, %L))', p, season, today_cph)), '2026-09-01');
   p := pg_temp.mk(pa, au, 'open', '2099-01-01');
   perform pg_temp.val(ha, format('(approve_proposal(%L, 1, ''ok'')).state', p));
   perform pg_temp.expect('no day given: the club''s day (Europe/Copenhagen) is used',
     pg_temp.val(ha, format('(select (task).starts_on = (now() at time zone ''Europe/Copenhagen'')::date from promote_proposal(%L, %L))', p, season)), 'true');
+
+  -- M2 (20260128000400): the approval covers the owner, and a start date cannot invent history.
+  p := pg_temp.mk(pa, au, 'open', '2099-01-01');
+  perform pg_temp.expect('a proposal that names an owner ...', pg_temp.val(au, format('(revise_proposal(%L, 1, %L::jsonb)).revision', p, jsonb_build_object('owner_id', mem))), '2');
+  perform pg_temp.val(ha, format('(approve_proposal(%L, 2, ''ok'')).state', p));
+  perform pg_temp.expect('... keeps that owner: promotion with another one is refused',
+    pg_temp.attempt(ha, format('select promote_proposal(%L, %L, %L)', p, season, au)), 'ERROR 22023%different owner%');
+  perform pg_temp.expect('... a start date years in the past is refused',
+    pg_temp.attempt(ha, format('select promote_proposal(%L, %L, null, %L)', p, season, today_cph - 400)), 'ERROR 22023%starts today%');
+  perform pg_temp.expect('... and so is one far in the future',
+    pg_temp.attempt(ha, format('select promote_proposal(%L, %L, null, %L)', p, season, today_cph + 30)), 'ERROR 22023%starts today%');
+  perform pg_temp.expect('... nothing was created by the refusals', (select count(*)::text from tasks where source_proposal = p), '0');
+  perform pg_temp.expect('... but the same owner, and a reader-local day one day either side of the club''s, are accepted',
+    pg_temp.attempt(ha, format('select promote_proposal(%L, %L, %L, %L)', p, season, mem, today_cph - 1)), 'ALLOWED');
+
+  -- L1: a maintenance write to a promoted proposal keeps its approval evidence.
+  perform set_config('reqon.proposal_write', 'on', true);
+  update task_proposals set title = 'Renamed after promotion' where id = p;
+  perform set_config('reqon.proposal_write', 'off', true);
+  perform pg_temp.expect('L1: the approval evidence of a promoted proposal survives a maintenance write',
+    (select (approved_revision = 2 and approved_by = ha)::text from task_proposals where id = p) || ':' ||
+    (select count(*)::text from activity where entity = 'proposal' and entity_id = p::text and action = 'approval_invalidated'), 'true:0');
+
+  -- L4: whitespace that is not a space is not text.
+  p := pg_temp.mk(pa, au);
+  perform pg_temp.expect('L4: a comment of newlines only is refused', pg_temp.attempt(mem, format('select add_proposal_comment(%L, %L)', p, E'\n\t \n')), 'ERROR 23514%');
+  perform pg_temp.expect('L4: an approval note of newlines only is refused', pg_temp.attempt(ha, format('select approve_proposal(%L, 1, %L)', p, E'\n\n')), 'ERROR 23514%');
+
+  -- L2: a no-op department move needs the same authority as a real one.
+  perform pg_temp.expect('L2: a member cannot use a no-op department move to read a proposal back',
+    pg_temp.attempt(mem, format('select set_proposal_department(%L, %L, ''noop'', 1)', p, pa)), 'DENIED');
+  perform pg_temp.expect('L2: the author (before review) still may',
+    pg_temp.attempt(au, format('select set_proposal_department(%L, %L, ''noop'', 1)', p, pa)), 'ALLOWED');
 
   -- Promotion is the only supported ordinary creation path and always supplies
   -- a start. A maintenance/import insert remains distinct and keeps an absent
@@ -388,10 +424,10 @@ begin
   perform pg_temp.expect('none of the failures left a partial approval, note or task',
     (select state::text || ':' || coalesce(approved_revision::text, '-') from task_proposals where id = p) || ':' ||
     (select count(*)::text from proposal_comments where proposal_id = p and kind = 'approval') || ':' || ((select count(*) from tasks) - before_n)::text, 'open:-:0:0');
-  tid := pg_temp.val(ha, format('(select (task).id from approve_and_promote(%L, %L, 1, ''Approved and started'', null, ''2026-10-05''))', p, season));
+  tid := pg_temp.val(ha, format('(select (task).id from approve_and_promote(%L, %L, 1, ''Approved and started'', null, %L))', p, season, today_cph));
   perform pg_temp.expect('the whole thing in one call: approved, one task, started on the day',
     (select (state = 'decided' and approved_by = ha)::text from task_proposals where id = p) || ':' ||
-    (select count(*)::text || ':' || max(starts_on::text) from tasks where source_proposal = p), 'true:1:2026-10-05');
+    (select count(*)::text || ':' || max(starts_on::text) from tasks where source_proposal = p), 'true:1:' || today_cph::text);
   perform pg_temp.expect('a retry returns the same task and adds no second approval',
     pg_temp.val(ha, format('(select (task).id::text || created::text from approve_and_promote(%L, %L, 1, ''again''))', p, season)) || ':' ||
     (select count(*)::text from proposal_comments where proposal_id = p and kind = 'approval'), tid || 'false:1');
@@ -422,7 +458,7 @@ begin
   perform pg_temp.expect('a task cannot cite a rule of another edition', pg_temp.attempt(mem, format('select link_task_requirement(%L, %L)', t, cl_other)), 'ERROR 23514%edition%');
   perform pg_temp.expect('... but one of its own season''s', pg_temp.attempt(mem, format('select link_task_requirement(%L, %L)', t, cl1)), 'ALLOWED');
   perform pg_temp.expect('a proposal cannot be raised citing another edition',
-    pg_temp.attempt(mem, format('select submit_proposal(%L, ''Edition check'', %L, ''2026-12-01'', %L, array[%L])', season, pa, ms, cl_other)), 'ERROR 23514%edition%');
+    pg_temp.attempt(mem, format('select submit_proposal(%L, ''Edition check'', %L, ''2099-12-01'', %L, array[%L])', season, pa, ms, cl_other)), 'ERROR 23514%edition%');
   p := pg_temp.mk(pa, au);
   perform pg_temp.expect('nor have its requirements replaced by one', pg_temp.attempt(ha, format('select set_proposal_requirements(%L, array[%L], 1)', p, cl_other)), 'ERROR 23514%edition%');
 

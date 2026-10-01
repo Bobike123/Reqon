@@ -1,3 +1,4 @@
+import { milestoneLabel } from '../../milestones/label.ts'
 import { useState } from 'react'
 import type { Milestone } from '../../data/useMilestones.ts'
 import type { Task } from '../../data/useTasks.ts'
@@ -67,7 +68,7 @@ export function UnsectionedRow({
         </div>
         <Track
           today={env.todayLeft}
-          summary={`Unsectioned work under ${milestone.key}: ${under.length} task${under.length === 1 ? '' : 's'}, ${words}`}
+          summary={`Unsectioned work under ${milestoneLabel(milestone)}: ${under.length} task${under.length === 1 ? '' : 's'}, ${words}`}
         >
           {span && (
             <Bar
@@ -100,7 +101,7 @@ export function UnsectionedRow({
                   !perms.canEdit
                     ? null
                     : canUnlinkMilestone(task)
-                      ? { kind: 'action', label: `Unlink ${task.title} from ${milestone.key}`, onUnlink: () => env.onUnlinkMilestone(task) }
+                      ? { kind: 'action', label: `Unlink ${task.title} from ${milestoneLabel(milestone)}`, onUnlink: () => env.onUnlinkMilestone(task) }
                       : { kind: 'kept', reason: 'Keeps its submission (made from a proposal)' }
                 }
                 expanded={env.expandedTask === task.id}
@@ -109,7 +110,8 @@ export function UnsectionedRow({
                 currentTargetKey={currentTargetKey(task)}
                 onMoveTo={(to) => env.onMoveTo(task, to)}
                 onSchedule={(start, due) => env.onSchedule(task, start, due)}
-                onMove={(state) => env.onMove(task.id, state)}
+                prerequisites={env.prerequisitesFor(task)}
+                onMove={(state, reason) => env.onMove(task.id, state, reason)}
                 onOwner={(ownerId) => env.onOwner(task.id, ownerId)}
               />
             )
@@ -117,7 +119,7 @@ export function UnsectionedRow({
 
           {under.length === 0 && (
             <p className="sticky left-0 z-10 w-fit bg-white pl-12 text-[11px] text-slate-600">
-              Nothing is linked to {milestone.key} without a section. Link a Board task below, or link it to a section
+              Nothing is linked to {milestoneLabel(milestone)} without a section. Link a Board task below, or link it to a section
               above.
             </p>
           )}
@@ -129,7 +131,7 @@ export function UnsectionedRow({
           )}
 
           <LinkTaskTool
-            targetLabel={`${milestone.key} (no section yet)`}
+            targetLabel={`${milestoneLabel(milestone)} (no section yet)`}
             direct={direct.map((t) => ({ id: t.id, title: t.title }))}
             moves={relink.map((t) => ({ id: t.id, title: t.title, from: relinkFrom(t, (id) => env.sectionNames.get(id) ?? null) }))}
             onLink={link}

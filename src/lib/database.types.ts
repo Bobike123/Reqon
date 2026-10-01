@@ -731,6 +731,7 @@ export type Database = {
           name: string
           ordinal: number
           owner_id: string | null
+          parent_section_id: string | null
           updated_at: string
         }
         Insert: {
@@ -740,6 +741,7 @@ export type Database = {
           name: string
           ordinal: number
           owner_id?: string | null
+          parent_section_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -749,6 +751,7 @@ export type Database = {
           name?: string
           ordinal?: number
           owner_id?: string | null
+          parent_section_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -766,12 +769,22 @@ export type Database = {
             referencedRelation: "members"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "milestone_sections_parent_section_id_fkey"
+            columns: ["parent_section_id"]
+            isOneToOne: false
+            referencedRelation: "milestone_sections"
+            referencedColumns: ["id"]
+          },
         ]
       }
       milestones: {
         Row: {
+          accepted_by: string | null
+          accepted_on: string | null
           aim: string | null
           article_ref: string | null
+          code: string
           due_on: string | null
           is_blocking: boolean
           key: string
@@ -781,10 +794,15 @@ export type Database = {
           opens_on: string | null
           ordinal: number
           season_id: string
+          submitted_by: string | null
+          submitted_on: string | null
         }
         Insert: {
+          accepted_by?: string | null
+          accepted_on?: string | null
           aim?: string | null
           article_ref?: string | null
+          code: string
           due_on?: string | null
           is_blocking?: boolean
           key: string
@@ -794,10 +812,15 @@ export type Database = {
           opens_on?: string | null
           ordinal: number
           season_id: string
+          submitted_by?: string | null
+          submitted_on?: string | null
         }
         Update: {
+          accepted_by?: string | null
+          accepted_on?: string | null
           aim?: string | null
           article_ref?: string | null
+          code?: string
           due_on?: string | null
           is_blocking?: boolean
           key?: string
@@ -807,8 +830,17 @@ export type Database = {
           opens_on?: string | null
           ordinal?: number
           season_id?: string
+          submitted_by?: string | null
+          submitted_on?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "milestones_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "milestones_season_id_fkey"
             columns: ["season_id"]
@@ -829,6 +861,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_subteam_progress"
             referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "milestones_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1080,6 +1119,7 @@ export type Database = {
       }
       spec_measurements: {
         Row: {
+          context: string
           corrects_id: string | null
           id: string
           invalidated_at: string | null
@@ -1098,6 +1138,7 @@ export type Database = {
           value_numeric: number | null
         }
         Insert: {
+          context?: string
           corrects_id?: string | null
           id?: string
           invalidated_at?: string | null
@@ -1116,6 +1157,7 @@ export type Database = {
           value_numeric?: number | null
         }
         Update: {
+          context?: string
           corrects_id?: string | null
           id?: string
           invalidated_at?: string | null
@@ -1140,6 +1182,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "spec_measurements"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_corrects_id_fkey"
+            columns: ["corrects_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["competition_measurement_id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_corrects_id_fkey"
+            columns: ["corrects_id"]
+            isOneToOne: false
+            referencedRelation: "v_spec_competition_current"
+            referencedColumns: ["measurement_id"]
           },
           {
             foreignKeyName: "spec_measurements_invalidated_by_fkey"
@@ -1192,6 +1248,116 @@ export type Database = {
           },
         ]
       }
+      spec_readiness: {
+        Row: {
+          confirmed_at: string
+          confirmed_by: string | null
+          id: string
+          measurement_id: string
+          note: string
+          revoke_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          season_id: string
+          spec_id: string
+        }
+        Insert: {
+          confirmed_at?: string
+          confirmed_by?: string | null
+          id?: string
+          measurement_id: string
+          note: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          season_id: string
+          spec_id: string
+        }
+        Update: {
+          confirmed_at?: string
+          confirmed_by?: string | null
+          id?: string
+          measurement_id?: string
+          note?: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          season_id?: string
+          spec_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "spec_readiness_confirmed_by_fkey"
+            columns: ["confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["competition_measurement_id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["measurement_id"]
+            isOneToOne: false
+            referencedRelation: "v_spec_competition_current"
+            referencedColumns: ["measurement_id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "specs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       specs: {
         Row: {
           acceptable: number | null
@@ -1200,6 +1366,9 @@ export type Database = {
           condition: string | null
           current_measurement_id: string | null
           direction: string
+          direction_note: string | null
+          direction_reviewed_at: string | null
+          direction_reviewed_by: string | null
           goal: number | null
           goal_bool: boolean | null
           goal_max: number | null
@@ -1232,6 +1401,9 @@ export type Database = {
           condition?: string | null
           current_measurement_id?: string | null
           direction: string
+          direction_note?: string | null
+          direction_reviewed_at?: string | null
+          direction_reviewed_by?: string | null
           goal?: number | null
           goal_bool?: boolean | null
           goal_max?: number | null
@@ -1264,6 +1436,9 @@ export type Database = {
           condition?: string | null
           current_measurement_id?: string | null
           direction?: string
+          direction_note?: string | null
+          direction_reviewed_at?: string | null
+          direction_reviewed_by?: string | null
           goal?: number | null
           goal_bool?: boolean | null
           goal_max?: number | null
@@ -1302,6 +1477,27 @@ export type Database = {
             columns: ["current_measurement_id"]
             isOneToOne: false
             referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["competition_measurement_id"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "v_spec_competition_current"
+            referencedColumns: ["measurement_id"]
+          },
+          {
+            foreignKeyName: "specs_direction_reviewed_by_fkey"
+            columns: ["direction_reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
             referencedColumns: ["id"]
           },
           {
@@ -1402,6 +1598,73 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "v_subteam_progress"
             referencedColumns: ["key"]
+          },
+        ]
+      }
+      task_dependencies: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          depends_on_task_id: string
+          season_id: string
+          task_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          depends_on_task_id: string
+          season_id: string
+          task_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          depends_on_task_id?: string
+          season_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_dependencies_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_depends_on_task_id_fkey"
+            columns: ["depends_on_task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "task_dependencies_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1648,6 +1911,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -1673,6 +1938,8 @@ export type Database = {
           archive_reason?: string | null
           archived_at?: string | null
           archived_by?: string | null
+          blocked_reason?: string | null
+          blocked_since?: string | null
           completed_at?: string | null
           completion_source?: string | null
           created_at?: string
@@ -1698,6 +1965,8 @@ export type Database = {
           archive_reason?: string | null
           archived_at?: string | null
           archived_by?: string | null
+          blocked_reason?: string | null
+          blocked_since?: string | null
           completed_at?: string | null
           completion_source?: string | null
           created_at?: string
@@ -1806,9 +2075,18 @@ export type Database = {
           acceptable: number | null
           clause_key: string | null
           comparator: string | null
+          competition_measured_at: string | null
+          competition_measurement_id: string | null
+          competition_value: number | null
+          competition_value_bool: boolean | null
+          competition_verdict: string | null
           condition: string | null
           current_measurement_id: string | null
           direction: string | null
+          direction_needs_review: boolean | null
+          direction_note: string | null
+          direction_reviewed_at: string | null
+          direction_reviewed_by: string | null
           goal: number | null
           goal_bool: boolean | null
           goal_max: number | null
@@ -1824,6 +2102,13 @@ export type Database = {
           parameter: string | null
           plausible_max: number | null
           plausible_min: number | null
+          readiness: string | null
+          readiness_confirmed_at: string | null
+          readiness_confirmed_by: string | null
+          readiness_measurement_id: string | null
+          readiness_note: string | null
+          readiness_reason: string | null
+          readiness_revoked_at: string | null
           season_id: string | null
           sort_order: number | null
           target: number | null
@@ -1839,6 +2124,34 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "spec_readiness_confirmed_by_fkey"
+            columns: ["readiness_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["readiness_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["readiness_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["competition_measurement_id"]
+          },
+          {
+            foreignKeyName: "spec_readiness_measurement_id_fkey"
+            columns: ["readiness_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "v_spec_competition_current"
+            referencedColumns: ["measurement_id"]
+          },
+          {
             foreignKeyName: "specs_clause_key_fkey"
             columns: ["clause_key"]
             isOneToOne: false
@@ -1850,6 +2163,27 @@ export type Database = {
             columns: ["current_measurement_id"]
             isOneToOne: false
             referencedRelation: "spec_measurements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["competition_measurement_id"]
+          },
+          {
+            foreignKeyName: "specs_current_measurement_fkey"
+            columns: ["current_measurement_id"]
+            isOneToOne: false
+            referencedRelation: "v_spec_competition_current"
+            referencedColumns: ["measurement_id"]
+          },
+          {
+            foreignKeyName: "specs_direction_reviewed_by_fkey"
+            columns: ["direction_reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "members"
             referencedColumns: ["id"]
           },
           {
@@ -1884,9 +2218,12 @@ export type Database = {
       }
       v_book_progress: {
         Row: {
+          applicable: number | null
           blocked: number | null
           chapter_code: string | null
           chapter_sort: number | null
+          complied: number | null
+          content_state: string | null
           has_numbered_rules: boolean | null
           heading: string | null
           imported_rules: number | null
@@ -1903,6 +2240,7 @@ export type Database = {
           resolved: number | null
           season_id: string | null
           sort_order: number | null
+          verified: number | null
         }
         Relationships: []
       }
@@ -1921,19 +2259,79 @@ export type Database = {
         }
         Relationships: []
       }
+      v_spec_competition_current: {
+        Row: {
+          measured_at: string | null
+          measured_by: string | null
+          measurement_id: string | null
+          recorded_at: string | null
+          season_id: string | null
+          spec_id: string | null
+          value_bool: boolean | null
+          value_numeric: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "spec_measurements_measured_by_fkey"
+            columns: ["measured_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "seasons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_current_season"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_season_id_fkey"
+            columns: ["season_id"]
+            isOneToOne: false
+            referencedRelation: "v_subteam_progress"
+            referencedColumns: ["season_id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "spec_verdicts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "spec_measurements_spec_id_fkey"
+            columns: ["spec_id"]
+            isOneToOne: false
+            referencedRelation: "specs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_subteam_progress: {
         Row: {
+          applicable: number | null
           blocked: number | null
           book_section: string | null
+          complied: number | null
           duties: number | null
           in_progress: number | null
           is_parked: boolean | null
           key: string | null
           lead_id: string | null
           name: string | null
+          not_applicable: number | null
           resolved: number | null
           season_id: string | null
           total_rules: number | null
+          verified: number | null
         }
         Relationships: [
           {
@@ -1944,6 +2342,21 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      v_task_progress: {
+        Row: {
+          archived_done: number | null
+          archived_unfinished: number | null
+          cancelled: number | null
+          done: number | null
+          open_active: number | null
+          percent: number | null
+          scope: string | null
+          scope_key: string | null
+          season_id: string | null
+          total: number | null
+        }
+        Relationships: []
       }
     }
     Functions: {
@@ -1973,6 +2386,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      add_task_dependency: {
+        Args: { p_depends_on_task_id: string; p_task_id: string }
+        Returns: boolean
       }
       apply_role_plan: { Args: { p_changes: Json }; Returns: undefined }
       approve_and_promote: {
@@ -2038,6 +2455,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -2072,6 +2491,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -2106,6 +2527,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -2139,6 +2562,10 @@ export type Database = {
         Args: { p_season: string; p_today: string }
         Returns: {
           clause_key: string
+          is_blocked: boolean
+          is_overdue: boolean
+          is_starred: boolean
+          is_urgent: boolean
           kind: string
           owner_id: string
           reason: string
@@ -2165,19 +2592,47 @@ export type Database = {
       can_manage_milestone_structure: { Args: never; Returns: boolean }
       can_manage_roles: { Args: never; Returns: boolean }
       can_manage_seasons: { Args: never; Returns: boolean }
+      can_manage_spec_evidence: {
+        Args: { p_spec_id: string }
+        Returns: boolean
+      }
       can_review_proposal: { Args: { p_proposal_id: string }; Returns: boolean }
       can_view_finances: { Args: never; Returns: boolean }
       change_reason_detail: { Args: never; Returns: Json }
+      clean_text: { Args: { p_text: string }; Returns: string }
+      confirm_spec_readiness: {
+        Args: { p_measurement_id: string; p_note: string; p_spec_id: string }
+        Returns: {
+          confirmed_at: string
+          confirmed_by: string | null
+          id: string
+          measurement_id: string
+          note: string
+          revoke_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          season_id: string
+          spec_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "spec_readiness"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       correct_spec_measurement: {
         Args: {
           p_measured_at?: string
           p_measurement_id: string
           p_reason: string
           p_request_id: string
+          p_unit?: string
           p_value_bool?: boolean
           p_value_numeric?: number
         }
         Returns: {
+          context: string
           corrects_id: string | null
           id: string
           invalidated_at: string | null
@@ -2214,6 +2669,7 @@ export type Database = {
       invalidate_spec_measurement: {
         Args: { p_measurement_id: string; p_reason: string }
         Returns: {
+          context: string
           corrects_id: string | null
           id: string
           invalidated_at: string | null
@@ -2244,6 +2700,10 @@ export type Database = {
       is_developer: { Args: never; Returns: boolean }
       is_finite_number: { Args: { n: number }; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
+      lapse_spec_readiness: {
+        Args: { p_by?: string; p_reason: string; p_spec_id: string }
+        Returns: boolean
+      }
       link_task_requirement: {
         Args: { p_clause_key: string; p_task_id: string }
         Returns: boolean
@@ -2327,16 +2787,19 @@ export type Database = {
       }
       record_spec_measurement: {
         Args: {
+          p_context?: string
           p_measured_at?: string
           p_note?: string
           p_request_id: string
           p_season_id: string
           p_source?: string
           p_spec_id: string
+          p_unit?: string
           p_value_bool?: boolean
           p_value_numeric?: number
         }
         Returns: {
+          context: string
           corrects_id: string | null
           id: string
           invalidated_at: string | null
@@ -2368,6 +2831,10 @@ export type Database = {
           p_season_id: string
           p_subteam_key: string
         }
+        Returns: boolean
+      }
+      remove_task_dependency: {
+        Args: { p_depends_on_task_id: string; p_task_id: string }
         Returns: boolean
       }
       reorder_departments: {
@@ -2423,6 +2890,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -2495,6 +2964,50 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      review_spec_direction: {
+        Args: { p_direction: string; p_note: string; p_spec_id: string }
+        Returns: {
+          acceptable: number | null
+          clause_key: string | null
+          comparator: string
+          condition: string | null
+          current_measurement_id: string | null
+          direction: string
+          direction_note: string | null
+          direction_reviewed_at: string | null
+          direction_reviewed_by: string | null
+          goal: number | null
+          goal_bool: boolean | null
+          goal_max: number | null
+          goal_tolerance: number | null
+          id: string
+          ideal: number | null
+          measure_kind: string | null
+          measured: number | null
+          measured_at: string | null
+          measured_bool: boolean | null
+          measured_by: string | null
+          parameter: string
+          plausible_max: number | null
+          plausible_min: number | null
+          season_id: string
+          sort_order: number
+          target: number | null
+          target_bool: boolean | null
+          target_max: number | null
+          target_max_inclusive: boolean
+          target_min_inclusive: boolean
+          target_text: string | null
+          target_tolerance: number | null
+          unit: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "specs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       revise_proposal: {
         Args: {
           p_changes: Json
@@ -2539,7 +3052,38 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      revoke_spec_readiness: {
+        Args: { p_reason: string; p_spec_id: string }
+        Returns: boolean
+      }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }
+      set_milestone_submission: {
+        Args: { p_accepted_on: string; p_key: string; p_submitted_on: string }
+        Returns: {
+          accepted_by: string | null
+          accepted_on: string | null
+          aim: string | null
+          article_ref: string | null
+          code: string
+          due_on: string | null
+          is_blocking: boolean
+          key: string
+          max_points: number
+          name: string
+          notes: string | null
+          opens_on: string | null
+          ordinal: number
+          season_id: string
+          submitted_by: string | null
+          submitted_on: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "milestones"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       set_proposal_department: {
         Args: {
           p_expected_revision: number
@@ -2637,6 +3181,8 @@ export type Database = {
           archive_reason: string | null
           archived_at: string | null
           archived_by: string | null
+          blocked_reason: string | null
+          blocked_since: string | null
           completed_at: string | null
           completion_source: string | null
           created_at: string
@@ -2699,6 +3245,33 @@ export type Database = {
       spec_zone: {
         Args: { p_goal_status: string; p_verdict: string }
         Returns: string
+      }
+      start_season: {
+        Args: {
+          p_category: string
+          p_copy_from?: string
+          p_edition: string
+          p_label: string
+          p_regs_ref: string
+        }
+        Returns: {
+          bike_number: number | null
+          category: string
+          club_name: string
+          created_at: string
+          edition: string
+          id: string
+          is_current: boolean
+          label: string
+          regs_ref: string
+          university: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "seasons"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       submit_proposal: {
         Args: {

@@ -139,7 +139,10 @@ const { useClauses } = await import('./useClauses.ts')
 const { useClauseStatus, useSetClauseStatus } = await import('./useClauseStatus.ts')
 const { useTasks } = await import('./useTasks.ts')
 const { useMembers } = await import('./useMembers.ts')
-const { useMilestoneSections } = await import('./useMilestones.ts')
+const { useMilestoneSections, useMilestonesForSeason } = await import('./useMilestones.ts')
+const { useSpecsForSeason } = await import('./useSpecs.ts')
+const { useBookProgress } = await import('./useNowMetrics.ts')
+const { useSeasonId: useSeasonIdForTest } = await import('../season/context.ts')
 const { SeasonProvider } = await import('../season/SeasonProvider.tsx')
 
 const SEASON_A = { id: 'season-a', label: '2026/27', is_current: true }
@@ -181,6 +184,53 @@ describe('query keys', () => {
   it('keeps global reference data out of the season namespace', () => {
     expect(queryKeys.clauses).toEqual(['clauses'])
     expect(queryKeys.members).toEqual(['members'])
+  })
+})
+
+// Phase 4 (season integrity): a season switch must never show the other season's specification
+// verdicts, milestones or Book progress, and each season's entry stays cached under its own key.
+describe('season isolation of the Phase 4 reads', () => {
+  it('every season-scoped key factory is prefixed by the season and differs per season', () => {
+    const factories = Object.entries(queryKeys).filter(
+      ([, value]) => typeof value === 'function' && (value as (...a: unknown[]) => unknown).length >= 1,
+    ) as [string, (...a: string[]) => readonly unknown[]][]
+    let checked = 0
+    for (const [name, factory] of factories) {
+      const a = factory('season-a', 'x')
+      if (a[0] !== 'season') continue // global factories (clauses by edition, etc.)
+      const b = factory('season-b', 'x')
+      expect(a[1], name).toBe('season-a')
+      expect(b[1], name).toBe('season-b')
+      expect(JSON.stringify(a), name).not.toBe(JSON.stringify(b))
+      checked += 1
+    }
+    expect(checked).toBeGreaterThanOrEqual(12)
+  })
+
+  it.each([
+    ['spec_verdicts', queryKeys.specVerdicts],
+    ['milestones', queryKeys.milestones],
+    ['v_book_progress', queryKeys.bookProgress],
+  ])('%s: switching A to B shows only B and keeps A cached apart', async (table, keyFor) => {
+    tableRows.set(table, [
+      { id: 'a-row', key: 'a-row', season_id: 'season-a', sort_order: 1 },
+      { id: 'b-row', key: 'b-row', season_id: 'season-b', sort_order: 1 },
+    ])
+    type Rows = { data?: { season_id?: string | null }[] }
+    const useSpecsHere = (): Rows => useSpecsForSeason(useSeasonIdForTest())
+    const useMilestonesHere = (): Rows => useMilestonesForSeason(useSeasonIdForTest())
+    const useBookHere = (): Rows => useBookProgress()
+    const hookFor = { spec_verdicts: useSpecsHere, milestones: useMilestonesHere, v_book_progress: useBookHere }[table] as () => Rows
+    const { result } = renderHook(hookFor, { wrapper })
+    await waitFor(() => expect(result.current.data?.[0]?.season_id).toBe('season-a'))
+
+    currentSeasonRow = SEASON_B
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.currentSeason })
+    })
+    await waitFor(() => expect(result.current.data?.[0]?.season_id).toBe('season-b'))
+    expect(result.current.data?.every((r) => r.season_id === 'season-b')).toBe(true)
+    expect(queryClient.getQueryData<{ season_id: string }[]>(keyFor('season-a'))?.every((r) => r.season_id === 'season-a')).toBe(true)
   })
 })
 

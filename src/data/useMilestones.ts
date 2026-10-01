@@ -130,3 +130,32 @@ export function useSetSectionDrafted() {
     },
   })
 }
+
+// Recording that a milestone was SUBMITTED to the organisers and that they ACCEPTED it. These are two dates
+// a person records; finishing every linked task records neither. The database checks who may (President,
+// Vice President, Developer, Documentation), keeps acceptance after submission, refuses future dates and
+// audits every change. Not optimistic: the stamps (who, when) come from the server.
+export function useSetMilestoneSubmission() {
+  const queryClient = useQueryClient()
+  const seasonId = useSeasonId()
+  return useMutation<unknown, Error, { key: string; submittedOn: string | null; acceptedOn: string | null }, { seasonId: string | undefined }>({
+    // The season the command was issued under, so a switch mid-request refreshes the right one.
+    onMutate: () => ({ seasonId }),
+    mutationFn: async ({ key, submittedOn, acceptedOn }) => {
+      const { data, error } = await supabase.rpc('set_milestone_submission', {
+        p_key: key,
+        // The functions treat NULL as "clear", so both are always sent.
+        p_submitted_on: submittedOn as string,
+        p_accepted_on: acceptedOn as string,
+      })
+      if (error) throw new DataError('record the submission', error)
+      return data
+    },
+    onSettled: (_data, _error, _vars, context) => {
+      const forSeason = context?.seasonId ?? seasonId
+      if (!forSeason) return
+      void queryClient.invalidateQueries({ queryKey: queryKeys.milestones(forSeason) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.activityAll(forSeason) })
+    },
+  })
+}

@@ -8,12 +8,18 @@ export function SeasonSettings({ canManageSeasons }: { canManageSeasons: boolean
   const createSeason = useCreateSeason()
   const setCurrent = useSetCurrentSeason()
   const [newSeason, setNewSeason] = useState({ label: '', edition: '' })
+  const [copyStructure, setCopyStructure] = useState(true)
+  const current = (seasons.data ?? []).find((s) => s.is_current)
 
   async function submitSeason(e: FormEvent) {
     e.preventDefault()
     if (createSeason.isPending || !newSeason.label.trim()) return
     try {
-      await createSeason.mutateAsync({ label: newSeason.label.trim(), edition: newSeason.edition.trim() || null })
+      await createSeason.mutateAsync({
+        label: newSeason.label.trim(),
+        edition: newSeason.edition.trim() || null,
+        copyFrom: copyStructure && current ? current.id : null,
+      })
       setNewSeason({ label: '', edition: '' })
     } catch {
       // Refused or failed: the message is shown, and what was typed stays.
@@ -60,7 +66,7 @@ export function SeasonSettings({ canManageSeasons }: { canManageSeasons: boolean
           <p className="mt-0.5 mb-2 text-xs text-slate-600">
             The new season starts empty: the rulebook carries over untouched, and none
             of this year&apos;s progress is copied. Nothing becomes current until you
-            press “Make current”.
+            press “Make current”. Old seasons, their tasks, measurements and history stay exactly as they are.
           </p>
           <label className="block text-xs font-medium text-slate-600" htmlFor="new-season-label">Label</label>
           <input
@@ -80,6 +86,21 @@ export function SeasonSettings({ canManageSeasons }: { canManageSeasons: boolean
             placeholder="X"
             className="mt-1 min-h-11 w-full rounded border border-slate-300 px-2 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
           />
+          <label className="mt-3 flex items-start gap-2 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={copyStructure && Boolean(current)}
+              onChange={(e) => setCopyStructure(e.target.checked)}
+              disabled={!current}
+              className="mt-0.5 h-4 w-4 accent-slate-900"
+              data-testid="copy-structure"
+            />
+            <span>
+              Copy the milestone and section structure{current ? ` from ${current.label}` : ''}. Names, order and points are
+              copied under the same labels (for example MS1-1); dates stay TBC, and nothing drafted, submitted, owned or
+              measured comes along.
+            </span>
+          </label>
           <button
             type="submit"
             disabled={createSeason.isPending}

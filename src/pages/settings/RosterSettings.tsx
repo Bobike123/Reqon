@@ -220,8 +220,8 @@ export function RosterSettings() {
       <p className="mb-2 text-xs text-pretty text-slate-600">
         A <strong className="font-medium text-slate-800">job title</strong> says what someone works
         on — Chassis, Aerodynamics, Finance. It is a label and grants nothing. A{' '}
-        <strong className="font-medium text-slate-800">privileged role</strong> badge — President,
-        Vice President, Treasurer, Developer — is what the database actually lets them do.{' '}
+        <strong className="font-medium text-slate-800">privileged role</strong> badge — for example,
+        President, Vice President or Treasurer — is what the database actually lets them do.{' '}
         <strong className="font-medium text-slate-800">Head of Department</strong> is set on the
         department, and lets them review its proposals and manage its tasks.
       </p>
@@ -271,14 +271,12 @@ export function RosterSettings() {
         to stop someone signing in, remove their login in the Supabase dashboard as well.
       </p>
       <p className="mt-1 text-xs text-pretty text-slate-500">
-        The President and Vice President run these settings and the Treasurer changes money.
-        A Developer can do all of it, roles included — the role exists so the app can be
-        maintained and repaired, so give it out sparingly.{' '}
+        The President and Vice President run these settings and the Treasurer changes money.{' '}
         {canManageRoles && canManageSeasons
-          ? 'You can give or take away roles — only a Developer changes the Developer role, and the club always keeps at least one President.'
+          ? 'You can give or take away the roles available to you, and the club always keeps at least one President.'
           : canManageRoles
-            ? 'You can give or take away the Treasurer and Documentation roles; the President or a Developer handles the others.'
-            : 'Roles are given and taken away by the President, the Vice President or a Developer.'}
+            ? 'You can give or take away the Treasurer and Documentation roles; the President handles the others.'
+            : 'Roles are given and taken away by the President or Vice President.'}
       </p>
       <p role="status" className="mt-1 min-h-4 text-xs font-medium text-emerald-800">
         {roleSettings.roleMessage}

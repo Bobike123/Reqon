@@ -81,8 +81,8 @@ export default async function globalSetup() {
   // acceptable upper bound 158, goal 145, ideal 138); reusing them keeps this
   // E2E run's expected verdicts traceable to the same documented scenario.
   const specId = runSql(
-    `insert into specs (season_id, parameter, comparator, target, unit, direction, acceptable, goal, ideal, plausible_min, plausible_max) ` +
-      `values ('${season[0]}', 'E2E Vehicle Mass (Phase 13 fixture)', 'max', 160, 'kg', 'lower_better', 158, 145, 138, 50, 300) returning id`,
+    `insert into specs (season_id, parameter, comparator, target, unit, direction, direction_reviewed_at, direction_note, acceptable, goal, ideal, plausible_min, plausible_max) ` +
+      `values ('${season[0]}', 'E2E Vehicle Mass (Phase 13 fixture)', 'max', 160, 'kg', 'lower_better', now(), 'E2E fixture: reviewed', 158, 145, 138, 50, 300) returning id`,
   ).trim()
 
   // Four more synthetic specs so the mass-measurement E2E scenario also
@@ -90,8 +90,8 @@ export default async function globalSetup() {
   // real browser — the real seeded regulation specs include these
   // comparators but none carries acceptable/goal/ideal, and none is boolean.
   const higherId = runSql(
-    `insert into specs (season_id, parameter, comparator, target, unit, direction, plausible_min, plausible_max) ` +
-      `values ('${season[0]}', 'E2E Ground Clearance (Phase 13 fixture)', 'min', 100, 'mm', 'higher_better', 0, 500) returning id`,
+    `insert into specs (season_id, parameter, comparator, target, unit, direction, direction_reviewed_at, direction_note, plausible_min, plausible_max) ` +
+      `values ('${season[0]}', 'E2E Ground Clearance (Phase 13 fixture)', 'min', 100, 'mm', 'higher_better', now(), 'E2E fixture: reviewed', 0, 500) returning id`,
   ).trim()
   const exactId = runSql(
     `insert into specs (season_id, parameter, comparator, target, target_tolerance, unit, direction, plausible_min, plausible_max) ` +

@@ -1003,6 +1003,107 @@ for pair in "$MEAS_SPEC_A:10" "$MEAS_SPEC_B:20"; do
   fi
 done
 
+# ------------------------------------------------------ readiness and season races (Phase 4)
+# confirm_spec_readiness() and record_spec_measurement() both take the specification's row lock, so a
+# confirmation can never outlive the measurement it confirmed: confirm-then-measure leaves it lapsed
+# (durably), measure-then-confirm refuses the stale confirmation. Two concurrent start_season() calls
+# with one label (any casing) produce exactly one season.
+echo "==> fixture for the readiness races (two specifications with a passing current measurement)"
+READY_SPEC_A='00000000-0000-4000-8000-0000000000f1'
+READY_SPEC_B='00000000-0000-4000-8000-0000000000f2'
+psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+insert into specs (id, season_id, parameter, comparator, direction, target, unit) values
+  ('$READY_SPEC_A', '$MEAS_SEASON', 'Readiness race confirm first', 'min', 'higher_better', 1, 'kg'),
+  ('$READY_SPEC_B', '$MEAS_SEASON', 'Readiness race measure first', 'min', 'higher_better', 1, 'kg');
+SQL
+ready_measure_sql() {
+  cat <<SQL
+begin;
+$(as_user_sql "$MEAS_M1")
+select (record_spec_measurement(p_season_id => '$MEAS_SEASON', p_spec_id => '$1', p_value_numeric => 5, p_measured_at => '2026-02-01T00:00:00Z', p_request_id => '$2')).id as measurement_id;
+commit;
+SQL
+}
+for pair in "$READY_SPEC_A:00000000-0000-4000-8000-0000000000d1" "$READY_SPEC_B:00000000-0000-4000-8000-0000000000d2"; do
+  psql_in -f - <<<"$(ready_measure_sql "${pair%%:*}" "${pair##*:}")" >/dev/null 2>&1
+done
+readiness_race() {
+  local label="$1" spec="$2" first="$3" expect_live="$4" req="$5"
+  local first_measurement confirm_pre="" confirm_post="" measure_pre="" measure_post=""
+  first_measurement=$(psql_in -tA -c "select current_measurement_id from specs where id = '$spec'" | tr -d '[:space:]')
+  if [ "$first" = "confirm" ]; then
+    measure_pre="select pg_sleep(0.6);"; confirm_post="select pg_sleep(1.8);"
+  else
+    confirm_pre="select pg_sleep(0.6);"; measure_post="select pg_sleep(1.8);"
+  fi
+  local confirm_sql measure_sql
+  confirm_sql="begin;
+$(as_user_sql "$PRESIDENT_ID")
+$confirm_pre
+select (confirm_spec_readiness('$spec', '$first_measurement', 'checked on the scale')).id;
+$confirm_post
+commit;"
+  measure_sql="begin;
+$(as_user_sql "$MEAS_M2")
+$measure_pre
+select (record_spec_measurement(p_season_id => '$MEAS_SEASON', p_spec_id => '$spec', p_value_numeric => 7, p_measured_at => '2026-02-02T00:00:00Z', p_request_id => '$req')).id;
+$measure_post
+commit;"
+  echo "==> racing confirm_spec_readiness() against a newer measurement ($label)"
+  psql_in -f - <<<"$confirm_sql" > "$WORK/ready_${label}_confirm.txt" 2>&1 &
+  local rc=$!
+  psql_in -f - <<<"$measure_sql" > "$WORK/ready_${label}_measure.txt" 2>&1 &
+  local rm=$!
+  wait "$rc" "$rm" || true
+  local live stale current ok=1
+  live=$(psql_in -tA -c "select count(*) from spec_readiness where spec_id = '$spec' and revoked_at is null" | tr -d '[:space:]')
+  stale=$(psql_in -tA -c "select count(*) from spec_readiness r join specs s on s.id = r.spec_id where r.spec_id = '$spec' and r.revoked_at is null and r.measurement_id is distinct from s.current_measurement_id" | tr -d '[:space:]')
+  current=$(psql_in -tA -c "select measured from specs where id = '$spec'" | tr -d '[:space:]')
+  [ "$live" = "$expect_live" ] || { echo "!! FAIL ($label): expected $expect_live live confirmation(s), found $live"; ok=0; }
+  [ "$stale" = "0" ] || { echo "!! FAIL ($label): a live confirmation points at a measurement that is no longer current"; ok=0; }
+  [ "$current" = "7" ] || { echo "!! FAIL ($label): the newer measurement (7) is not current: $current"; ok=0; }
+  if [ "$first" = "measure" ]; then
+    command grep -q 'changed since you looked' "$WORK/ready_${label}_confirm.txt" || { echo "!! FAIL ($label): the stale confirmation was not refused"; ok=0; }
+  fi
+  if [ "$ok" != "1" ]; then
+    echo "--- confirm ---"; cat "$WORK/ready_${label}_confirm.txt"
+    echo "--- measure ---"; cat "$WORK/ready_${label}_measure.txt"
+    RACE_OK=0
+  else
+    echo "    ok  $label: $live live confirmation(s), none stale, newer measurement current"
+  fi
+}
+readiness_race "confirm-first" "$READY_SPEC_A" "confirm" 0 '00000000-0000-4000-8000-0000000000d3'
+readiness_race "measure-first" "$READY_SPEC_B" "measure" 0 '00000000-0000-4000-8000-0000000000d4'
+# confirm-first: the confirmation was written, then lapsed durably by the newer measurement.
+LAPSED=$(psql_in -tA -c "select count(*) from spec_readiness where spec_id = '$READY_SPEC_A' and revoked_at is not null" | tr -d '[:space:]')
+[ "$LAPSED" = "1" ] || { echo "!! FAIL: confirm-first should leave one lapsed confirmation, found $LAPSED"; RACE_OK=0; }
+
+season_sql() {
+  cat <<SQL
+begin;
+$(as_user_sql "$PRESIDENT_ID")
+select pg_sleep(0.3);
+select (start_season('$1', null, null, null, null)).id;
+commit;
+SQL
+}
+echo "==> racing two start_season() calls with one label"
+psql_in -f - <<<"$(season_sql 'VERIFY-P4-RACE')" > "$WORK/season_race_a.txt" 2>&1 &
+rsa=$!
+psql_in -f - <<<"$(season_sql 'verify-p4-race')" > "$WORK/season_race_b.txt" 2>&1 &
+rsb=$!
+wait "$rsa" "$rsb" || true
+SEASONS_MADE=$(psql_in -tA -c "select count(*) from seasons where lower(label) = 'verify-p4-race'" | tr -d '[:space:]')
+SEASON_REFUSALS=$(cat "$WORK/season_race_a.txt" "$WORK/season_race_b.txt" | command grep -c 'already exists' || true)
+if [ "$SEASONS_MADE" != "1" ] || [ "$SEASON_REFUSALS" != "1" ]; then
+  echo "!! FAIL: start_season race: expected 1 season and 1 refusal, got $SEASONS_MADE and $SEASON_REFUSALS"
+  echo "--- A ---"; cat "$WORK/season_race_a.txt"; echo "--- B ---"; cat "$WORK/season_race_b.txt"
+  RACE_OK=0
+else
+  echo "    ok  one season created, the concurrent duplicate refused"
+fi
+
 # ------------------------------------------------------ archive race (Phase 14)
 # archive_task() locks the task FOR UPDATE before checking it (finding F14-01),
 # so two concurrent archives of one task by its Head give exactly one success;
@@ -1142,6 +1243,105 @@ delete from department_members where subteam_key like 'P2R_%';
 delete from tasks where id in ('$P2_TASK_A', '$P2_TASK_B');
 delete from subteams where key like 'P2R_%';
 delete from member_roles where member_id = '$P2_DEV';
+SQL
+
+# ------------------------------------- task-side races (backend completion Phase 3)
+#   * Two links that would together close a circle (A waits for B, B waits for A):
+#     add_task_dependency() serialises them on the season's advisory lock, so
+#     exactly one link exists and the other session is refused with "circle",
+#     whichever session starts first.
+#   * Two edits of one task, both carrying the updated_at they read (the client's
+#     compare-and-swap, src/data/useTasks.ts): exactly one row is written; the
+#     second matches zero rows and the client reports "changed elsewhere".
+echo "==> fixture for the task-side races (a Developer and two tasks)"
+P3_DEV='00000000-0000-4000-8000-0000000000c1'
+P3_TASK_A='00000000-0000-4000-8000-0000000000c3'
+P3_TASK_B='00000000-0000-4000-8000-0000000000c4'
+psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+insert into auth.users (id, email) values ('$P3_DEV', 'verify-p3-dev@roles.test');
+insert into members (id, full_name, role) values ('$P3_DEV', 'Verify P3 Developer', 'Software');
+insert into member_roles (member_id, role) values ('$P3_DEV', 'developer');
+insert into tasks (id, season_id, title, state) values
+  ('$P3_TASK_A', '$SEASON_ID', 'P3 race task A', 'todo'),
+  ('$P3_TASK_B', '$SEASON_ID', 'P3 race task B', 'todo');
+SQL
+
+dependency_cycle_race() {
+  local label="$1" first="$2"
+  local a_pre="" a_post="" b_pre="" b_post=""
+  if [ "$first" = "a" ]; then a_post="select pg_sleep(1.8);"; b_pre="select pg_sleep(0.6);"
+  else a_pre="select pg_sleep(0.6);"; b_post="select pg_sleep(1.8);"; fi
+  psql_in -v ON_ERROR_STOP=1 -q -c "delete from task_dependencies where task_id in ('$P3_TASK_A', '$P3_TASK_B')" >/dev/null
+  local sql_a="begin;
+$(as_user_sql "$P3_DEV")
+$a_pre
+select add_task_dependency('$P3_TASK_A', '$P3_TASK_B');
+$a_post
+commit;"
+  local sql_b="begin;
+$(as_user_sql "$P3_DEV")
+$b_pre
+select add_task_dependency('$P3_TASK_B', '$P3_TASK_A');
+$b_post
+commit;"
+  echo "==> racing two prerequisite links that would close a circle ($label)"
+  psql_in -f - <<<"$sql_a" > "$WORK/dep_race_${label}_a.txt" 2>&1 &
+  local ra=$!
+  psql_in -f - <<<"$sql_b" > "$WORK/dep_race_${label}_b.txt" 2>&1 &
+  local rb=$!
+  wait "$ra" "$rb" || true
+  local links refused
+  links=$(psql_in -tA -c "select count(*) from task_dependencies where task_id in ('$P3_TASK_A', '$P3_TASK_B')" | tr -d '[:space:]')
+  refused=$(cat "$WORK/dep_race_${label}_a.txt" "$WORK/dep_race_${label}_b.txt" | command grep -c 'circle' || true)
+  if [ "$links" != "1" ] || [ "$refused" -lt 1 ]; then
+    echo "!! FAIL ($label): expected exactly one link and one refusal for the circle, got $links link(s) and $refused refusal(s)"
+    echo "--- session A ---"; cat "$WORK/dep_race_${label}_a.txt"
+    echo "--- session B ---"; cat "$WORK/dep_race_${label}_b.txt"
+    RACE_OK=0
+  else
+    echo "    ok  $label: one link, the other refused as a circle"
+  fi
+}
+dependency_cycle_race "a-first" "a"
+dependency_cycle_race "b-first" "b"
+
+stale_edit_race() {
+  local base
+  base=$(psql_in -tA -c "select updated_at from tasks where id = '$P3_TASK_A'" | tr -d '\n')
+  local sql_a="begin;
+$(as_user_sql "$P3_DEV")
+update tasks set title = 'P3 edited by A' where id = '$P3_TASK_A' and updated_at = '$base' returning id;
+select pg_sleep(1.8);
+commit;"
+  local sql_b="begin;
+$(as_user_sql "$P3_DEV")
+select pg_sleep(0.6);
+update tasks set title = 'P3 edited by B' where id = '$P3_TASK_A' and updated_at = '$base' returning id;
+commit;"
+  echo "==> racing two edits of one task that both carry the version they read"
+  psql_in -f - <<<"$sql_a" > "$WORK/stale_a.txt" 2>&1 &
+  local ra=$!
+  psql_in -f - <<<"$sql_b" > "$WORK/stale_b.txt" 2>&1 &
+  local rb=$!
+  wait "$ra" "$rb" || true
+  local wrote title
+  wrote=$(cat "$WORK/stale_a.txt" "$WORK/stale_b.txt" | command grep -c '^UPDATE 1' || true)
+  title=$(psql_in -tA -c "select title from tasks where id = '$P3_TASK_A'" | tr -d '\n')
+  if [ "$wrote" != "1" ] || [ "$title" != "P3 edited by A" ]; then
+    echo "!! FAIL: expected exactly one of two versioned edits to write (A first), got $wrote write(s), title '$title'"
+    echo "--- session A ---"; cat "$WORK/stale_a.txt"
+    echo "--- session B ---"; cat "$WORK/stale_b.txt"
+    RACE_OK=0
+  else
+    echo "    ok  two versioned edits: one written, the stale one matched zero rows"
+  fi
+}
+stale_edit_race
+
+psql_in -v ON_ERROR_STOP=1 >/dev/null <<SQL
+delete from activity where entity = 'task' and entity_id in ('$P3_TASK_A', '$P3_TASK_B');
+delete from tasks where id in ('$P3_TASK_A', '$P3_TASK_B');
+delete from member_roles where member_id = '$P3_DEV';
 SQL
 
 echo "==> running supabase/tests/*.sql"
