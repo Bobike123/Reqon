@@ -11,7 +11,7 @@ import { BlockReasonForm } from '../board/BlockReasonForm.tsx'
 import { Bar, Marker, ROW, STICKY_LABEL, selectSmall, Track } from './GanttChart.tsx'
 import type { LinkTarget } from './ganttLinking.ts'
 import { taskMark, taskSummary } from './ganttMarks.ts'
-import type { Span } from './ganttModel.ts'
+import { shortDay, spanCaption, type Span } from './ganttModel.ts'
 import { ScheduleHandles, type ScheduleDates } from './ScheduleHandles.tsx'
 import { TASK_DRAG_TYPE } from './ganttDrag.ts'
 
@@ -249,6 +249,7 @@ export function GanttTaskRow({
               variant="outline"
               tone={mark.overdue ? 'border-red-600 text-red-800' : mark.done ? 'border-slate-400 text-slate-600' : 'border-slate-600 text-slate-800'}
               glyph={mark.done ? '✓' : mark.overdue ? '!' : undefined}
+              caption={spanCaption(mark.span)}
               title={`${task.title}: ${formatDay(mark.span.from)} → ${formatDay(mark.span.to)}${mark.overdue ? ' · overdue' : ''}`}
             />
           )}
@@ -259,6 +260,7 @@ export function GanttTaskRow({
               kind="task-deadline"
               overdue={mark.overdue}
               done={mark.done}
+              caption={`Due ${shortDay(mark.day)}`}
               title={`${task.title}: due ${formatDay(mark.day)}${mark.overdue ? ' · overdue' : ''}`}
             />
           )}
@@ -268,6 +270,7 @@ export function GanttTaskRow({
               range={range}
               kind="task-start"
               done={mark.done}
+              caption={`From ${shortDay(mark.day)}`}
               title={`${task.title}: starts ${formatDay(mark.day)} (no deadline)`}
             />
           )}

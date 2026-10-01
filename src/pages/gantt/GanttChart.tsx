@@ -16,13 +16,30 @@ import { placeBar, placeDay, type Span } from './ganttModel.ts'
 //   "!" inside the mark, red             overdue open work
 //   "✓" inside the mark, muted           completed work
 // Every mark is decorative to assistive technology (aria-hidden); the same fact
-// is written out as text in the row's summary (`summary` on Track).
+// is written out as text in the row's summary (`summary` on Track). Marks may
+// carry a short date caption ("20 Nov → 25 Nov", "Due 27 Nov") drawn beside
+// them, so periods and deadlines read without hovering.
 
 export const ROW = 'grid grid-cols-[minmax(15rem,22rem)_1fr] items-start gap-3'
 
 // The label column stays visible while the timeline scrolls under it — the whole
 // point of the weekly scale is a chart wider than the screen.
 export const STICKY_LABEL = 'sticky left-0 z-10 self-stretch'
+
+// A mark's date caption: after the mark, or before it when the mark sits near
+// the right edge so the text stays inside the track.
+function Caption({ from, to, text }: { from: number; to: number; text: string }) {
+  const style = to <= 75 ? { left: `calc(${to}% + 6px)` } : { right: `calc(${100 - from}% + 6px)` }
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute top-1/2 z-[1] -translate-y-1/2 whitespace-nowrap rounded bg-white/80 px-0.5 text-[10px] leading-4 text-slate-700"
+      style={style}
+    >
+      {text}
+    </span>
+  )
+}
 
 export const selectSmall =
   'min-h-11 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0'
@@ -71,6 +88,7 @@ export function Bar({
   title,
   variant = 'solid',
   glyph,
+  caption,
 }: {
   span: Span
   range: Span
@@ -80,26 +98,30 @@ export function Bar({
   variant?: 'solid' | 'outline'
   // "!" for overdue, "✓" for done — a second cue beside colour.
   glyph?: string
+  caption?: string
 }) {
   const box = placeBar(span, range)
   if (!box) return null
   return (
-    <span
-      title={title}
-      className={`absolute inset-y-1 min-w-[3px] overflow-hidden rounded ${
-        variant === 'outline' ? 'border-2 bg-white/70' : ''
-      } ${tone}`}
-      style={{ left: `${box.left}%`, width: `${box.width}%` }}
-    >
-      {percent !== undefined && percent > 0 && (
-        <span aria-hidden="true" className="absolute inset-y-0 left-0 bg-slate-900/35" style={{ width: `${percent}%` }} />
-      )}
-      {glyph && (
-        <span aria-hidden="true" className="relative z-[1] px-0.5 text-[11px] font-bold leading-5">
-          {glyph}
-        </span>
-      )}
-    </span>
+    <>
+      <span
+        title={title}
+        className={`absolute inset-y-1 min-w-[3px] overflow-hidden rounded ${
+          variant === 'outline' ? 'border-2 bg-white/70' : ''
+        } ${tone}`}
+        style={{ left: `${box.left}%`, width: `${box.width}%` }}
+      >
+        {percent !== undefined && percent > 0 && (
+          <span aria-hidden="true" className="absolute inset-y-0 left-0 bg-slate-900/35" style={{ width: `${percent}%` }} />
+        )}
+        {glyph && (
+          <span aria-hidden="true" className="relative z-[1] px-0.5 text-[11px] font-bold leading-5">
+            {glyph}
+          </span>
+        )}
+      </span>
+      {caption && <Caption from={box.left} to={box.left + box.width} text={caption} />}
+    </>
   )
 }
 
@@ -121,6 +143,7 @@ export function Marker({
   title,
   overdue,
   done,
+  caption,
 }: {
   day: string
   range: Span
@@ -128,19 +151,23 @@ export function Marker({
   title: string
   overdue?: boolean
   done?: boolean
+  caption?: string
 }) {
   const left = placeDay(day, range)
   if (left === null) return null
   const glyph = done ? '✓' : overdue ? '!' : MARKER_GLYPH[kind]
   const tone = done ? 'text-slate-500' : overdue ? 'text-red-700' : kind === 'milestone-deadline' ? 'text-slate-900' : 'text-slate-700'
   return (
-    <span
-      aria-hidden="true"
-      title={title}
-      className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-base font-bold leading-none ${tone}`}
-      style={{ left: `${left}%` }}
-    >
-      {glyph}
-    </span>
+    <>
+      <span
+        aria-hidden="true"
+        title={title}
+        className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-base font-bold leading-none ${tone}`}
+        style={{ left: `${left}%` }}
+      >
+        {glyph}
+      </span>
+      {caption && <Caption from={left} to={left} text={caption} />}
+    </>
   )
 }

@@ -38,7 +38,7 @@ export function GanttLegend({ id }: { id?: string }) {
       </ul>
       <p className="mt-1 text-xs text-slate-600">
         A task with no dates draws nothing and says so. A submission with no opening date shows only its deadline;
-        one with no deadline says “deadline TBC”. Nothing is estimated.
+        one with no dates at all draws nothing. Nothing is estimated.
       </p>
     </section>
   )

@@ -4,6 +4,7 @@ import type { Task } from '../../data/useTasks.ts'
 import { formatDay } from '../../lib/dates.ts'
 import { sectionsFor, subsectionsOf, topLevelSections } from '../milestones/milestoneModel.ts'
 import { Bar, Marker, ROW, STICKY_LABEL, Track } from './GanttChart.tsx'
+import { shortDay } from './ganttModel.ts'
 import { SectionRow } from './SectionRow.tsx'
 import { UnsectionedRow } from './UnsectionedRow.tsx'
 import type { GanttEnv } from './ganttEnv.ts'
@@ -45,7 +46,7 @@ export function MilestoneRow({
   const topSections = topLevelSections(sections, milestone.key)
   const marks = milestoneMarks(milestone, env.today)
   const progress = milestoneProgress(mySections, progressTasks, milestone.key)
-  const words = progressLabel(progress)
+  const words = progressLabel(progress, 'submission', 'done')
   const lens = env.lens.active
     ? lensProgress(mySections, progressTasks.filter(env.lens.matches), milestone.key)
     : null
@@ -56,7 +57,7 @@ export function MilestoneRow({
     progress.basis === 'tasks'
       ? `Overall ${progress.percent}%`
       : progress.basis === 'drafted'
-        ? `${progress.done}/${progress.total} drafted`
+        ? `${progress.done}/${progress.total} done`
         : 'No linked work'
 
   return (
@@ -99,7 +100,7 @@ export function MilestoneRow({
 
         <Track
           today={env.todayLeft}
-          label={marks.deadline === null ? (marks.opensOnly ? `Opens ${formatDay(marks.opensOnly)} · deadline TBC` : 'Deadline TBC') : undefined}
+          label={marks.deadline === null && marks.opensOnly ? `Opens ${formatDay(marks.opensOnly)} · deadline TBC` : undefined}
           summary={milestoneSummary(milestone, env.today, words)}
         >
           {marks.window && (
@@ -119,6 +120,8 @@ export function MilestoneRow({
               range={env.range}
               kind="milestone-deadline"
               overdue={late}
+              // One caption for the whole submission: its window, ending at the deadline.
+              caption={`${marks.window ? `${shortDay(marks.window.from)} → ` : ''}Due ${shortDay(marks.deadline)}`}
               title={`${milestoneLabel(milestone)} deadline: ${formatDay(marks.deadline)}${marks.passed ? ' (passed)' : ''}${
                 marks.window ? '' : ' — no opening date published'
               }`}
