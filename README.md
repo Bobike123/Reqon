@@ -217,6 +217,9 @@ Push to the main branch. All three hosts rebuild automatically. If you changed
 environment variables, you must **redeploy** — they are baked in at build time,
 so an existing deployment keeps the old values.
 
+Pushing does **not** deploy database migrations. Those go through the Supabase
+CLI, before the matching frontend — see §6a.
+
 ---
 
 ## 5. Where the credentials live
@@ -239,8 +242,9 @@ variables.
 
 ## 6. What Supabase must look like
 
-The database schema is in `supabase/migrations/`. Run the migrations in order
-against a new project (SQL Editor → paste → Run), then load the reference data.
+The database schema is in `supabase/migrations/`. Apply it to a project only
+with the Supabase CLI (`supabase db push`, see §6a) — never by pasting files into
+the SQL Editor, which leaves the migration history empty.
 
 **Authentication settings:**
 1. **Authentication → Providers**: Email on, "Confirm email" **off** (accounts
@@ -282,8 +286,9 @@ top: purpose, existing-data compatibility, locking, authorization, rollback
 and deploy order. Read it before applying. `20260110` and `20260111` must be
 applied **before** deploying a frontend that calls their functions, and every
 migration from `20260115` on must deploy together with the matching client
-build — this repository has not yet deployed any of `20260115`–`20260123` to
-its own hosted project (see `docs/redesign/STATUS.md` for the exact gap).
+build. The table stops at `20260123`; `supabase/migrations/` is the complete
+list (59 files, through `20260130000000`, on 2026-10-02 — all of them are
+applied to the hosted project, see §6a).
 
 Run them in exactly this order. `20260105` rewrites the season switch from
 `20260104`, so running `04` again afterwards would break it. `20260105` also
@@ -299,25 +304,133 @@ select count(*) from clauses where is_team_duty;       -- 491
 select * from v_subteam_progress order by duties desc; -- DOCS 129, ADMIN 82, ...
 ```
 
+### 6a. Production migrations — the only supported workflow
+
+The Supabase CLI decides what is "pending" from one table,
+`supabase_migrations.schema_migrations`, by **version number**. It never looks
+at the schema. So every production migration goes through the CLI, from this
+repository:
+
+```bash
+npx supabase login
+npx supabase link --project-ref <project-ref>
+npx supabase migration list --linked      # every old version must show in BOTH columns
+npx supabase db push --linked --dry-run   # must list only the new file(s)
+npx supabase db push --linked
+```
+
+Never apply a migration to production any other way: not the SQL Editor, not
+`psql`, not an agent's MCP `apply_migration` tool. The SQL Editor records no
+history row. `apply_migration` records a platform timestamp instead of the
+repository version. Either way the next `db push` thinks the file is still
+pending. This is how the hosted project came to have 22 history rows for 59
+applied files.
+
+> **Warning — never run `supabase db push` against production while
+> `supabase migration list` shows a version in only one column.** Run
+> `db push --dry-run` first; if it proposes any file that is already applied,
+> or fails with "Remote migration versions not found in local migrations
+> directory", stop and repair the history first. Never use `--include-all`.
+> When the CLI suggests `supabase db pull`, ignore that here: `db pull` writes
+> a new migration from the live schema instead of fixing the bookkeeping. A
+> replay is not harmless: `20260101000001_reference_data.sql` upserts
+> milestones, and later files re-create older function bodies.
+
+**History repair of the hosted project — EXECUTED 2026-10-02** (CLI 2.117.0, by the project owner's login). Result: `migration list` 59 matched, none local- or remote-only; `db push --dry-run` "Remote database is up to date."; schema and all 28 data fingerprints identical before and after; the 22 removed rows were first dumped to the git-ignored `supabase/.backups/`. What was found and why: On 2026-10-02
+the hosted history had 22 rows, all keyed by platform timestamps
+(`20260924124502` … `20261001100523`). None of them is a repository version,
+and none of the 59 repository versions was recorded. The hosted schema was then
+proved equal to a fresh build of all 59 files, `20260130000000_role_hierarchy`
+included. The comparison covered 16 catalog classes: functions (bodies,
+`SECURITY DEFINER`, `search_path`), `EXECUTE` rights, columns, constraints,
+indexes, triggers, policies, views, enums, grants, RLS flags, the realtime
+publication, comments, and the `maintenance` functions. The only extra object
+was the Supabase platform function `rls_auto_enable()`. Of the 22 rows, 21 carry
+statement text md5-identical to their repository file. The
+`department_lifecycle` row differs from `20260115000000` only in comments.
+Nothing is missing from production, so the repair is bookkeeping only. It
+rewrites no schema and no data, and re-runs no SQL.
+
+Run it as the project owner, after `login` and `link` above:
+
+```bash
+# 0. read-only BEFORE snapshot: every 'schema' row ok; keep the 'data' rows
+#    (supabase/maintenance/2026-10-02_verify_migration_history.sql, SQL Editor)
+npx supabase migration list --linked   # expect 59 local-only, 22 remote-only
+# 1. forget the 22 platform-timestamp rows (each one is a repository file, see above)
+npx supabase migration repair --linked --status reverted \
+  20260924124502 20260929090632 20260929091048 20260929091309 20260929091406 20260929091509 20260929095225 \
+  20260930230849 20260930230918 20260930230944 20260930231006 20260930231007 20260930231142 20261001100141 \
+  20261001100158 20261001100232 20261001100256 20261001100331 20261001100408 20261001100439 20261001100504 \
+  20261001100523
+# 2. record the 59 repository versions that are proven applied — an explicit list,
+#    never `$(ls supabase/migrations)`: a file added later must NOT be marked applied
+npx supabase migration repair --linked --status applied \
+  20260101000000 20260101000001 20260102000000 20260103000000 20260104000000 20260105000000 20260106000000 \
+  20260107000000 20260108000000 20260109000000 20260110000000 20260111000000 20260112000000 20260113000000 \
+  20260114000000 20260115000000 20260116000000 20260117000000 20260118000000 20260119000000 20260120000000 \
+  20260121000000 20260122000000 20260123000000 20260124000000 20260125000000 20260125000100 20260125000200 \
+  20260125000300 20260125000400 20260125000500 20260125000600 20260126000000 20260126000100 20260126000200 \
+  20260126000300 20260126000400 20260126000500 20260126000600 20260126000700 20260127000000 20260127000100 \
+  20260127000200 20260127000300 20260128000000 20260128000100 20260128000200 20260128000300 20260128000400 \
+  20260128000500 20260129000000 20260129000100 20260129000200 20260129000300 20260129000400 20260129000500 \
+  20260129000600 20260129000700 20260130000000
+# 3. verify
+npx supabase migration list --linked          # 59 rows, both columns filled
+npx supabase db push --linked --dry-run       # "Remote database is up to date."
+# 4. re-run the verify SQL: 'schema' all ok, 'history' ok, 'data' identical to step 0
+```
+
+`bash scripts/backend-completion/rehearse-history-repair.sh` runs exactly these
+commands against a disposable copy, with the same 22 rows, and shows
+"Remote database is up to date." with an unchanged catalog. If any new
+migration was applied to production before the repair, stop: the expected hashes
+in the verify file no longer apply, and that file's version must be checked
+before it is added to step 2. Keep these commands as the record of what was run; do
+not run them again.
+
 ---
 
 ## 7. Adding someone to the club
 
-**Two steps, and the first one cannot happen inside the app.** Creating a login
-requires the `service_role` key, which must never reach a browser (§3).
+**In the app: Settings → Roster → Add someone to the roster.** Enter their full
+name, the email they will sign in with, a first password (at least 8
+characters) and a job title, then press **Add to roster**. That creates their
+login and their roster row in one step. Give them the password privately; they
+change it in **Settings → Your account**.
 
-1. **Supabase dashboard → Authentication → Users → Add user.** Give them an
-   email and a password, and tick "Auto Confirm User".
-2. Copy that user's **UUID** from the user list.
-3. In Reqon: **Settings → Roster → Add someone to the roster.** Paste
-   the UUID, enter their name and role, press **Link to roster**.
+Only an active **President, Vice President or Developer** can do this
+(`can_add_members()`, migration `20260131000000_member_onboarding.sql`). A new
+person never gets a privileged role here — hand one out afterwards with
+**Change roles**.
 
-Step 3 is what actually grants access. A person with a login but no `members`
-row sees "Your account is not on the club roster" and no data — the database
-returns nothing to them. The `members` table *is* the allowlist.
+How it stays safe: creating a login needs the `service_role` key, which must
+never reach a browser (§3). So the browser calls the **`create-member` Edge
+Function** (`supabase/functions/create-member/`), the only place that key is
+used, and sends nothing but the signed-in person's own session. The function
+asks the database *as that person* whether they may add members, creates the
+login, and then inserts the roster row *as that person*, so Row Level Security
+(`admin_roster_insert`) decides again. If the roster step fails, the login is
+deleted, so no half-made account is left behind.
 
-Only the President, Vice President or a Developer can do step 3. Linking someone
-gives them no privileged role.
+**Deploying the function (once, and after every change to it):**
+
+```bash
+npx supabase functions deploy create-member --project-ref zsmldveykmtmxuqqmddo
+```
+
+Supabase injects `SUPABASE_URL`, `SUPABASE_ANON_KEY` and
+`SUPABASE_SERVICE_ROLE_KEY` into the function itself; nothing is added to
+`.env.local` or Netlify/Vercel. Locally: `npx supabase functions serve create-member`.
+
+The `members` row is what actually grants access. A person with a login but no
+`members` row sees "Your account is not on the club roster" and no data — the
+database returns nothing to them. The `members` table *is* the allowlist.
+
+**A login that already exists** (made in **Supabase dashboard → Authentication →
+Users → Add user**) is linked instead: open **Their login already exists? Link it
+by UUID** under the same form, paste the user's UUID, name and job title, and
+press **Link to roster**.
 
 **Or do it in one query.** `supabase/scripts/new_member.sql` creates the login
 and the roster row in a single transaction: paste it into the **SQL Editor**,

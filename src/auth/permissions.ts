@@ -76,6 +76,10 @@ export type Permissions = {
   hasRole: (role: PrivilegedRole) => boolean
   // is_admin(): rulebook, departments, roster, milestones
   canAdminister: boolean
+  // can_add_members() (20260131000000): create a login and put a new person on
+  // the roster (President, Vice President, Developer). Its own boolean, like
+  // canManageDepartments, so it does not silently follow is_admin().
+  canAddMembers: boolean
   // can_manage_roles(): open role management (President, Vice President,
   // Developer). Which roles may be changed is canGrantRole(roles, role).
   canManageRoles: boolean
@@ -125,6 +129,7 @@ export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
     // The developer passes every check, for maintenance and security work:
     // supabase/migrations/20260107000000_developer_full_access.sql.
     canAdminister: admin,
+    canAddMembers: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
     canManageRoles: admin,
     canManageSeasons: mayDelete,
     canManageMilestoneStructure: editsMeetings,

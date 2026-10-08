@@ -99,16 +99,20 @@ test.describe('two-session realtime propagation and season switching (R38-R39)',
     const seasonBadge = page.locator('[data-tutorial="season-badge"]')
     await expect(seasonBadge).toContainText(m.season.label)
 
-    runSql(`update seasons set is_current = false where is_current`)
-    runSql(`update seasons set is_current = true where id = '${m.otherSeason.id}'`)
+    expect(m.otherSeason.id, 'global-setup must provide a second season').not.toBe('')
+    // Inside the try: if either statement fails, the finally still makes the
+    // fixture season current again, so one failure cannot leave the whole run
+    // without a current season.
     try {
+      runSql(`update seasons set is_current = false where is_current`)
+      runSql(`update seasons set is_current = true where id = '${m.otherSeason.id}'`)
       await page.reload()
       await expect(seasonBadge).toContainText(m.otherSeason.label, { timeout: 10_000 })
       // Nothing from the fixture's real season (its milestone key, created
       // above under the FIRST season) should appear under the new one.
       await expect(page.getByText(m.milestoneKey, { exact: false })).toHaveCount(0)
     } finally {
-      runSql(`update seasons set is_current = false where id = '${m.otherSeason.id}'`)
+      runSql(`update seasons set is_current = false where is_current and id <> '${m.season.id}'`)
       runSql(`update seasons set is_current = true where id = '${m.season.id}'`)
     }
   })

@@ -56,6 +56,16 @@ describe('the permission matrix', () => {
     })
   }
 
+  // can_add_members() (20260131000000): the create-member Edge Function and the
+  // roster INSERT policy both ask it.
+  it('only the President, the Vice President and the Developer add people to the roster', () => {
+    const adders = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
+      .filter((role) => permissionsFor([role]).canAddMembers)
+    expect(adders).toEqual(['developer', 'president', 'vicepresident'])
+    expect(permissionsFor([]).canAddMembers).toBe(false)
+    expect(NO_PERMISSIONS.canAddMembers).toBe(false)
+  })
+
   it('the President, the Vice President and the Developer open role management', () => {
     const managers = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
       .filter((r) => permissionsFor([r]).canManageRoles)

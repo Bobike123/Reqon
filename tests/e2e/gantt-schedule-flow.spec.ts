@@ -4,7 +4,9 @@ import { login } from './setup/login.ts'
 
 // Phase 14: the Gantt's pointer drag and its keyboard alternatives, in a real
 // browser against the real database. One fixture task (tagged, removed after)
-// owned by the member, on the season's first submission with no section.
+// owned by the member, on the season's first submission with no section. It is
+// driven by the Head of the task's department: since the gantt-fix change a plain
+// member only views the Gantt (no drag handles, no Move to), even for own tasks.
 //   * dragging the bar moves both dates and saves through the ordinary task
 //     update — nothing is written while dragging;
 //   * the task's own date fields do the same by keyboard;
@@ -38,7 +40,7 @@ test.describe('Gantt schedule and move (UI-06)', () => {
   test('dragging the bar moves both dates once, on release; the date fields do the same by keyboard', async ({ page }) => {
     const m = readManifest()
     const [start0, due0] = datesOf(taskId)
-    await login(page, m.users.member.email, m.password)
+    await login(page, m.users.headA.email, m.password)
     await page.goto(`/gantt?open=${encodeURIComponent(m.milestoneKey)}&scale=month`)
     const group = page.getByTestId(`gantt-unsectioned-${m.milestoneKey}`)
     const toggle = group.getByRole('button', { name: /Unsectioned work/ })
@@ -92,7 +94,7 @@ test.describe('Gantt schedule and move (UI-06)', () => {
   test('dragging the row onto a section of the same submission moves it there, as "Move to" does', async ({ page }) => {
     const m = readManifest()
     const [sectionId, sectionName] = runSql(`select id, name from milestone_sections where milestone_key = '${m.milestoneKey}' order by ordinal limit 1`).trim().split('|')
-    await login(page, m.users.member.email, m.password)
+    await login(page, m.users.headA.email, m.password)
     await page.goto(`/gantt?open=${encodeURIComponent(m.milestoneKey)}`)
     const group = page.getByTestId(`gantt-unsectioned-${m.milestoneKey}`)
     const toggle = group.getByRole('button', { name: /Unsectioned work/ })

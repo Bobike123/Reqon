@@ -2575,6 +2575,7 @@ export type Database = {
           title: string
         }[]
       }
+      can_add_members: { Args: never; Returns: boolean }
       can_delete_records: { Args: never; Returns: boolean }
       can_edit_meetings: { Args: never; Returns: boolean }
       can_edit_spec_targets: { Args: never; Returns: boolean }

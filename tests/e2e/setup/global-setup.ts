@@ -71,7 +71,15 @@ export default async function globalSetup() {
   runSql(`update subteams set lead_id = '${headB.id}' where key = 'ELEC'`)
 
   const season = runSql(`select id, label from seasons where is_current`).trim().split('|')
-  const otherSeason = runSql(`select id, label from seasons where not is_current limit 1`).trim().split('|')
+  // The season-switch test needs a second season. A fresh database (CI) has only
+  // the seeded one, so create an empty, non-current fixture season when none
+  // exists; global-teardown removes it again (createdByFixture).
+  let otherSeasonRow = runSql(`select id, label from seasons where not is_current limit 1`).trim()
+  const otherSeasonCreated = otherSeasonRow === ''
+  if (otherSeasonCreated) {
+    otherSeasonRow = runSql(`insert into seasons (label) values ('[E2E] other season') returning id, label`).trim().split('\n')[0]
+  }
+  const otherSeason = otherSeasonRow.split('|')
   const milestoneKey = runSql(`select key from milestones where season_id = '${season[0]}' order by ordinal limit 1`).trim()
   const clauseKey = runSql(`select clause_key from clauses where printed_ref = 'F.13.3.1'`).trim()
   if (!clauseKey) throw new Error('global-setup: seed clause F.13.3.1 not found')
@@ -123,7 +131,7 @@ export default async function globalSetup() {
       headB: { key: deptB[0], name: deptB[1], priorLeadId: deptB[2] || null },
     },
     season: { id: season[0], label: season[1] },
-    otherSeason: { id: otherSeason[0], label: otherSeason[1] },
+    otherSeason: { id: otherSeason[0], label: otherSeason[1], createdByFixture: otherSeasonCreated },
     milestoneKey,
     clauseKey,
     spec: { id: specId, parameter: 'E2E Vehicle Mass (Phase 13 fixture)' },

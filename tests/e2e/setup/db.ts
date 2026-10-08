@@ -31,7 +31,7 @@ export type FixtureManifest = {
     headB: { key: string; name: string; priorLeadId: string | null }
   }
   season: { id: string; label: string }
-  otherSeason: { id: string; label: string }
+  otherSeason: { id: string; label: string; createdByFixture: boolean }
   milestoneKey: string
   clauseKey: string
   spec: { id: string; parameter: string }

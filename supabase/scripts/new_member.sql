@@ -4,12 +4,11 @@
 --  Supabase dashboard -> SQL Editor -> New query -> paste this file -> change
 --  the five values under EDIT ME -> Run.
 --
---  This is the SQL version of the two-step process in README §7. The APP still
---  cannot create logins, and that has not changed: doing it from a browser
---  would need the service_role key, which bypasses Row Level Security, so
---  anyone could read and rewrite the whole database. The SQL Editor is a
---  different thing — it already runs inside the database as an administrator,
---  so no key is ever shipped anywhere.
+--  The usual way is now in the app: Settings -> Roster -> Add someone to the
+--  roster, which goes through the create-member Edge Function (README §7).
+--  This script is the fallback when the function is not deployed, or when you
+--  want to grant privileged roles in the same step. The SQL Editor runs inside
+--  the database as an administrator, so no key is ever shipped anywhere.
 --
 --  Safe to re-run: it refuses if that email already has a login, and a failure
 --  rolls the whole block back, leaving no half-made account behind.

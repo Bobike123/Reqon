@@ -41,6 +41,15 @@ export default async function globalTeardown() {
     runSql(`alter table spec_readiness enable trigger trg_guard_spec_readiness_rows`)
   }
 
+  // The second season, if global-setup had to create one (it is empty: the
+  // season-switch test only flips is_current, so the delete guard allows it).
+  if (manifest.otherSeason.createdByFixture) {
+    // Clear any other current season first: seasons_one_current allows one.
+    runSql(`update seasons set is_current = false where is_current and id <> '${manifest.season.id}'`)
+    runSql(`update seasons set is_current = true where id = '${manifest.season.id}'`)
+    runSql(`delete from seasons where id = '${manifest.otherSeason.id}' and not is_current`)
+  }
+
   // Restore each department's original Head (NULL if it had none).
   for (const dept of [manifest.departments.headA, manifest.departments.headB]) {
     runSql(

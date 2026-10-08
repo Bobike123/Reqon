@@ -558,7 +558,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'add-member',
     audience: 'admins',
     title: 'Adding a new member',
-    body: 'First create their login in the Supabase dashboard (Authentication → Users), then paste its UUID here with their name. The app can’t create logins: that needs a secret key.',
+    body: 'Type their name, email and a first password, then Add to roster. That creates their login and adds them in one step, with no privileged role; they change the password in Settings → Your account.',
   },
   {
     id: 'settings-departments',

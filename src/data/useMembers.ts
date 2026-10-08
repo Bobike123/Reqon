@@ -26,11 +26,10 @@ export function useMembers(): UseQueryResult<Member[], Error> {
   })
 }
 
-// There is no "create the login" step here on purpose. Creating a Supabase Auth
-// user needs the service_role key, which must NEVER reach a browser — it
-// bypasses Row Level Security entirely. An administrator creates the account in the
-// Supabase dashboard and pastes the resulting UUID here, which links the person
-// to the roster. See the note rendered above this form in Settings.
+// Links a login that ALREADY exists (made in the Supabase dashboard) to the
+// roster by its UUID. Creating the login itself needs the service_role key,
+// which must NEVER reach a browser — it bypasses Row Level Security entirely —
+// so that goes through the Edge Function in useCreateMember() below instead.
 export function useAddMember() {
   const queryClient = useQueryClient()
   return useMutation<void, Error, { id: string; fullName: string; role: string }>({
@@ -38,9 +37,63 @@ export function useAddMember() {
       const { error } = await supabase
         .from('members')
         .insert({ id, full_name: fullName, role })
-      // RLS decides whether this is allowed: `admin_roster_insert` requires is_admin().
+      // RLS decides whether this is allowed: `admin_roster_insert` requires can_add_members().
       // Privileged roles are NOT set here — see roles/useMemberRoles.ts.
       if (error) throw new DataError('add people to the roster', error)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.members })
+    },
+  })
+}
+
+export type NewMember = {
+  email: string
+  // A first password they change in Settings -> Your account. Sent once over
+  // HTTPS to the Edge Function; never stored or shown by the app.
+  password: string
+  fullName: string
+  jobTitle: string
+}
+
+// Creates the login AND the roster row in one step, through the `create-member`
+// Edge Function (supabase/functions/create-member). The service-role key lives
+// only there; the browser sends nothing but the signed-in person's own access
+// token. The function asks the database — as that person — whether they may
+// add members (can_add_members(): active President, Vice President or
+// Developer), and inserts the roster row as them too, so RLS decides twice.
+// Returns the new person's id.
+export function useCreateMember() {
+  const queryClient = useQueryClient()
+  return useMutation<string, Error, NewMember>({
+    mutationFn: async (member) => {
+      const what = 'add people to the roster'
+      const { data, error } = await supabase.functions.invoke<{ id: string }>('create-member', { body: member })
+      if (error) {
+        // A refusal or a validation problem comes back as JSON { error }; the
+        // function words it for a club member, so it is shown as written.
+        const response = (error as { context?: unknown }).context
+        let status = 0
+        let message: string | null = null
+        if (response instanceof Response) {
+          status = response.status
+          try {
+            const body: unknown = await response.json()
+            if (body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string') {
+              message = (body as { error: string }).error
+            }
+          } catch {
+            // Not JSON (a gateway error page): fall back to the generic wording.
+          }
+        }
+        // 401 is an expired or missing session, not a refusal: say so instead
+        // of "you don't have permission".
+        if (status === 401) throw new DataError(message ?? 'Your session has expired. Sign in again.', null)
+        if (status === 403) throw new DataError(what, null, { permission: true })
+        throw new DataError(message ?? `${what}: ${error.message}`, null)
+      }
+      if (!data?.id) throw new DataError(`${what}: the server sent no answer`, null)
+      return data.id
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members })

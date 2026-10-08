@@ -24,6 +24,8 @@ const LAST_PRESIDENT =
 
 let db: Record<string, Record<string, unknown>[]>
 let rpcCalls: { fn: string; args: unknown }[]
+// Every call to an Edge Function, in order (create-member).
+let functionCalls: { name: string; body: Record<string, unknown> }[] = []
 // Every role write the fake accepted, in order.
 let writes: string[] = []
 let caller: Member = PRES
@@ -60,6 +62,8 @@ function reset() {
   }
   db.v_current_season = db.seasons.filter((s) => s.is_current)
   rpcCalls = []
+  functionCalls = []
+  emails.clear()
   writes = []
   caller = PRES
 }
@@ -277,6 +281,32 @@ const supabase = {
     return { data: null, error: null }
   },
 }
+// supabase/functions/create-member: asks can_add_members() as the caller, then
+// creates the login and inserts the roster row as the caller. A refusal comes
+// back the way supabase-js reports a non-2xx answer: an error whose `context`
+// is the Response.
+function functionError(status: number, message: string) {
+  return {
+    data: null,
+    error: Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      context: new Response(JSON.stringify({ error: message }), { status }),
+    }),
+  }
+}
+const emails = new Set<string>()
+;(supabase as Record<string, unknown>).functions = {
+  invoke: async (name: string, { body }: { body: Record<string, unknown> }) => {
+    functionCalls.push({ name, body })
+    if (name !== 'create-member') return functionError(404, 'No such function.')
+    if (!isAdmin(caller)) return functionError(403, 'Only an active President, Vice President or Developer may add people to the roster. Nothing was changed.')
+    const email = String(body.email).toLowerCase()
+    if (emails.has(email)) return functionError(409, `A login already exists for ${email}. If they are not on the roster yet, link it by UUID instead.`)
+    emails.add(email)
+    const id = `login-${emails.size}`
+    db.members.push({ id, full_name: body.fullName, role: body.jobTitle, status: 'active' })
+    return { data: { id }, error: null }
+  },
+}
 vi.mock('../lib/supabase.ts', () => ({ get supabase() { return supabase } }))
 // Settings.tsx wires this for live department/Head updates (Phase 1). Real
 // channel behaviour is exercised elsewhere (data/realtimeEntities.test.tsx);
@@ -290,7 +320,7 @@ vi.mock('../auth/context.ts', () => ({
 
 const { default: Settings } = await import('./Settings.tsx')
 const { buildSeasonExport } = await import('../data/exportSeason.ts')
-const { useAddMember, useUpdateMember } = await import('../data/useMembers.ts')
+const { useAddMember, useCreateMember, useUpdateMember } = await import('../data/useMembers.ts')
 const { useUpdateSubteam } = await import('../data/useSubteams.ts')
 const { useUpdateMilestone } = await import('../data/useMilestones.ts')
 const { useSetCurrentSeason } = await import('../data/useSeasons.ts')
@@ -680,22 +710,95 @@ describe('roster', () => {
     expect(policyAllows('members', 'delete', {})).toBe(false)
   })
 
-  it('links a member by pasting the Auth UUID — it never creates the login', async () => {
+  it('lets the Vice President create a login and roster row in one step, with no privileged role', async () => {
+    caller = VP
     const user = userEvent.setup()
     const before = db.members.length
     renderSettings()
     await screen.findByText('Add someone to the roster')
-    // The safe two-step process is spelled out on screen.
-    expect(screen.getByText(/Authentication → Users → Add user/)).toBeInTheDocument()
-    expect(screen.getByText(/service_role key in your browser/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Full name'), 'Cam Newbie')
+    await user.type(screen.getByLabelText('Email they sign in with'), 'Cam@Club.test')
+    await user.type(screen.getByLabelText('First password'), 'first-pass-123')
+    await user.click(screen.getByRole('button', { name: 'Add to roster' }))
+
+    await waitFor(() => expect(db.members).toHaveLength(before + 1))
+    // Only the Edge Function is asked; the browser never writes auth or roles.
+    expect(functionCalls).toEqual([
+      { name: 'create-member', body: { email: 'Cam@Club.test', password: 'first-pass-123', fullName: 'Cam Newbie', jobTitle: 'Member' } },
+    ])
+    const added = db.members.find((m) => m.full_name === 'Cam Newbie')!
+    expect(rolesOf(String(added.id))).toEqual([])
+    expect(writes).toEqual([])
+    expect(await screen.findByText(/Cam Newbie is on the roster/)).toBeInTheDocument()
+    // The password does not linger in the form after it was used.
+    expect(screen.getByLabelText('First password')).toHaveValue('')
+  })
+
+  it('lets the President add someone too', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await screen.findByText('Add someone to the roster')
+    await user.type(screen.getByLabelText('Full name'), 'Dee New')
+    await user.type(screen.getByLabelText('Email they sign in with'), 'dee@club.test')
+    await user.type(screen.getByLabelText('First password'), 'first-pass-123')
+    await user.click(screen.getByRole('button', { name: 'Add to roster' }))
+    await waitFor(() => expect(db.members.some((m) => m.full_name === 'Dee New')).toBe(true))
+  })
+
+  it('shows the server\'s reason when the login already exists, and keeps what was typed', async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    await screen.findByText('Add someone to the roster')
+    for (const name of ['First Try', 'Second Try']) {
+      await user.clear(screen.getByLabelText('Full name'))
+      await user.type(screen.getByLabelText('Full name'), name)
+      await user.clear(screen.getByLabelText('Email they sign in with'))
+      await user.type(screen.getByLabelText('Email they sign in with'), 'same@club.test')
+      await user.type(screen.getByLabelText('First password'), 'first-pass-123')
+      await user.click(screen.getByRole('button', { name: 'Add to roster' }))
+      await waitFor(() => expect(functionCalls.at(-1)?.body.fullName).toBe(name))
+    }
+    expect(await screen.findByText(/A login already exists for same@club.test/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Full name')).toHaveValue('Second Try')
+    expect(db.members.filter((m) => m.full_name === 'Second Try')).toHaveLength(0)
+  })
+
+  for (const [label, who] of [['treasurer', TREAS], ['team member', CREW]] as const) {
+    it(`does not offer adding people to a ${label}`, async () => {
+      caller = who
+      renderSettings()
+      await screen.findByTestId('member-m2')
+      expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('First password')).not.toBeInTheDocument()
+    })
+  }
+
+  it('refuses the create-member call for a treasurer even if the UI is bypassed', async () => {
+    caller = TREAS
+    const before = db.members.length
+    const create = hook(() => useCreateMember())
+    await expect(
+      create.current.mutateAsync({ email: 'x@club.test', password: 'first-pass-123', fullName: 'Sneaky', jobTitle: 'Member' }),
+    ).rejects.toThrow(/don't have permission to add people to the roster/)
+    expect(db.members).toHaveLength(before)
+  })
+
+  it('still links an existing login by pasting its Auth UUID', async () => {
+    const user = userEvent.setup()
+    const before = db.members.length
+    renderSettings()
+    await screen.findByText('Add someone to the roster')
+    await user.click(screen.getByText('Their login already exists? Link it by UUID'))
 
     await user.type(screen.getByLabelText('Auth user UUID'), 'uuid-123')
-    await user.type(screen.getByLabelText('Full name'), 'Cam Newbie')
+    await user.type(screen.getByLabelText('Full name of the linked person'), 'Cam Newbie')
     await user.click(screen.getByRole('button', { name: 'Link to roster' }))
     await waitFor(() => expect(db.members).toHaveLength(before + 1))
     expect(db.members.find((m) => m.id === 'uuid-123')).toMatchObject({ full_name: 'Cam Newbie' })
-    // Linking someone gives them no privileged role.
+    // Linking someone gives them no privileged role, and calls no function.
     expect(rolesOf('uuid-123')).toEqual([])
+    expect(functionCalls).toEqual([])
   })
 
   it('offers the job titles the club already uses instead of a blank text box', async () => {

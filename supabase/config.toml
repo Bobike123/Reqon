@@ -385,6 +385,12 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Settings -> Roster -> "Add someone": creates a login and its roster row. The
+# gateway refuses any request without a valid user JWT; the function then
+# re-checks can_add_members() as the caller (supabase/functions/create-member).
+[functions.create-member]
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327
