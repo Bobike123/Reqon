@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { PageHeader } from '../ui/PageHeader.tsx'
-import { describePublicAccess } from '../auth/permissions.ts'
 import { usePermissions } from '../auth/usePermissions.ts'
 import { pageMain } from '../ui/layout.ts'
 import { AccountSettings } from './settings/AccountSettings.tsx'
@@ -66,10 +65,10 @@ function Section({
   )
 }
 
-// Used once, for what the signed-in person can do on this page.
+// Used once, for what the signed-in person cannot do on this page (shown only when there is something).
 function Notice({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" data-tutorial="settings-access">
+    <p className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
       {children}
     </p>
   )
@@ -77,6 +76,13 @@ function Notice({ children }: { children: ReactNode }) {
 
 export default function Settings() {
   const { canAdminister, canManageRoles, canManageDepartments, canManageSeasons, roles: myRoles } = usePermissions()
+  const restriction = canManageRoles && canManageSeasons
+    ? null
+    : canManageRoles
+      ? 'You cannot change seasons or the President and Vice President roles; those belong to the President.'
+      : canAdminister
+        ? 'You cannot change roles; only the President can give or take them away.'
+        : 'You cannot change the roster, departments, milestones or seasons; those are reserved for the President and Vice President. The database enforces this, so those forms are hidden rather than shown and refused.'
 
   return (
     <main id="main-content" tabIndex={-1} className={pageMain('reading')}>
@@ -86,18 +92,9 @@ export default function Settings() {
         tutorialId="settings-overview"
       />
 
-      {/* What this person can do here, in words — never left to be inferred
-          from which buttons happen to be missing. */}
-      <Notice>
-        Your access: <strong className="font-medium text-slate-900">{describePublicAccess(myRoles)}</strong>.{' '}
-        {canManageRoles && canManageSeasons
-          ? 'You can change everything on this page, including the roles available to you.'
-          : canManageRoles
-            ? 'You can change everything on this page except seasons and the President and Vice President roles, which belong to the President.'
-          : canAdminister
-            ? 'You can change everything on this page except roles, which only the President can give or take away.'
-            : 'Roster, department, milestone and season changes are reserved for the President and Vice President — the database enforces this, so those forms are hidden rather than shown and refused. Handover notes below are open to everyone.'}
-      </Notice>
+      {/* Only what this person CANNOT do here, in words — never left to be inferred from which buttons happen
+          to be missing. What they can do is not listed: the forms are simply there. */}
+      {restriction && <Notice>{restriction}</Notice>}
 
       <Section title="Your account" tutorialId="settings-account">
         <AccountSettings />

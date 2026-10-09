@@ -77,3 +77,9 @@ supabase/changes
 # Local pre-change data exports of the hosted project — never commit
 supabase/.backups/
 *.key
+
+# The backup operating documents are tracked (needed on the day of a restore).
+!ops/backup/docs/
+!ops/backup/docs/*.md
+
+ops

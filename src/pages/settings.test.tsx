@@ -367,7 +367,9 @@ describe('who sees what', () => {
     // The roster rows arrive with the members query, after the forms.
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including the roles available to you/)).toBeInTheDocument()
+    // Nothing is restricted, so no note about access is shown at all.
+    expect(screen.queryByText(/You cannot change/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Your access/)).not.toBeInTheDocument()
   })
 
   // Backend completion Phase 2: the Vice President now manages the Treasurer and
@@ -383,7 +385,7 @@ describe('who sees what', () => {
     expect(changeRolesButtons().length).toBeGreaterThan(0)
     expect(await within(screen.getByTestId('member-m1')).findByText('President')).toBeInTheDocument()
     expect(
-      screen.getByText(/except seasons and the President and Vice President roles/),
+      screen.getByText(/You cannot change seasons or the President and Vice President roles/),
     ).toBeInTheDocument()
     expect(screen.getByText(/You can give or take away the Treasurer and Documentation roles/)).toBeInTheDocument()
   })
@@ -408,9 +410,12 @@ describe('who sees what', () => {
       caller = who
       renderSettings()
       expect(
-        await screen.findByText(/reserved for the President and Vice President/),
+        await screen.findByText(/You cannot change the roster, departments, milestones or seasons/),
       ).toBeInTheDocument()
-      expect(screen.getByText(shown, { selector: 'strong' })).toBeInTheDocument()
+      expect(screen.getByText(/reserved for the President and Vice President/)).toBeInTheDocument()
+      // The page no longer announces the person's own role or what they may do.
+      expect(screen.queryByText(shown, { selector: 'strong' })).not.toBeInTheDocument()
+      expect(screen.queryByText(/Your access/)).not.toBeInTheDocument()
       await screen.findByTestId('member-m2')
       expect(screen.queryByText('Add someone to the roster')).not.toBeInTheDocument()
       expect(screen.queryByText('Departments')).not.toBeInTheDocument()
@@ -432,7 +437,9 @@ describe('who sees what', () => {
     expect(screen.getByText('Start a new season')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Change roles for Bo Wrench' })).toBeInTheDocument()
     expect(changeRolesButtons()).toHaveLength(db.members.length)
-    expect(screen.getByText(/including the roles available to you/)).toBeInTheDocument()
+    // Nothing is restricted, so no note about access is shown at all.
+    expect(screen.queryByText(/You cannot change/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Your access/)).not.toBeInTheDocument()
   })
 
   it('a job title of "President" grants nothing', async () => {

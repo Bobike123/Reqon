@@ -44,6 +44,7 @@ export RCLONE_CONFIG_BKR2_TYPE=s3 RCLONE_CONFIG_BKR2_PROVIDER=Other RCLONE_CONFI
 export RCLONE_CONFIG_BKATT_TYPE=s3 RCLONE_CONFIG_BKATT_PROVIDER=Other RCLONE_CONFIG_BKATT_ACCESS_KEY_ID="$S3KEY" RCLONE_CONFIG_BKATT_SECRET_ACCESS_KEY="$S3SECRET" RCLONE_CONFIG_BKATT_ENDPOINT="$API/storage/v1/s3" RCLONE_CONFIG_BKATT_REGION=local
 export RCLONE_CONFIG_BKDRIVE_TYPE=local
 BUCKET=backups-local; ATT=attachments-local
+env -u TMPDIR node "$ROOT/scripts/attachments/local-buckets.mjs" || { echo "could not create the local test buckets" >&2; exit 2; }
 R2="bkr2:$BUCKET"
 
 cleanup() {

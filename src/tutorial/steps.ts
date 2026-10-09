@@ -486,9 +486,9 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'settings-access',
     chapter: 'settings',
     route: '/settings',
-    target: 'settings-access',
+    target: 'settings-overview',
     title: 'Settings — what you can do here',
-    body: 'This line says what your role allows on this page. Everyone can change their password, write handover notes and download the season; the rest is for the President and Vice President.',
+    body: 'Everyone can change their password, write handover notes and download the season. Forms your role cannot use are hidden, and a note at the top says what you cannot change; the rest is for the President and Vice President.',
   },
   {
     id: 'settings-account',

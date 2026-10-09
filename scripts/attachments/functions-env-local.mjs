@@ -11,6 +11,7 @@
 import { execSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { ensureLocalBuckets } from './local-buckets.mjs'
 
 const ROOT = new URL('../..', import.meta.url).pathname
 const TARGET = `${ROOT}supabase/functions/.env.local`
@@ -37,6 +38,8 @@ for (const name of ['S3_PROTOCOL_ACCESS_KEY_ID', 'S3_PROTOCOL_ACCESS_KEY_SECRET'
     process.exit(1)
   }
 }
+
+await ensureLocalBuckets(ROOT) // the local R2 stand-ins are no longer declared in config.toml
 
 const previous = existsSync(TARGET) ? readFileSync(TARGET, 'utf8') : ''
 const purgeSecret = previous.match(/^ATTACHMENTS_PURGE_SECRET=(.+)$/m)?.[1] ?? randomBytes(24).toString('hex')

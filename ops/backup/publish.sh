@@ -7,7 +7,7 @@
 #   BACKUP_FOLDERS       override for tests: comma list of daily,weekly,monthly (default: by date)
 #
 # Every run writes to daily/; Sundays also to weekly/; the 1st of the month also to monthly/. How long each
-# folder is kept is an R2 lifecycle rule per prefix (docs/ultraplan/R2_SETUP.md), not code. Each upload is
+# folder is kept is an R2 lifecycle rule per prefix (ops/backup/docs/R2_SETUP.md), not code. Each upload is
 # verified by asking the bucket for the object's size. Writes <out>/published (folder/name lines).
 # shellcheck source=ops/backup/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"

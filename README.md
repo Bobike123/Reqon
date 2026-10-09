@@ -1,12 +1,91 @@
 # Reqon
 
-Internal web app for the SDU Motorbike Club's MotoStudent entry. It tracks
-compliance against the 1,146-clause regulations book, the team's tasks, weekly
-meeting decisions, and the bike's measured dimensions.
+Reqon is a web app for running a student engineering team, club or small organisation: **tasks and a Gantt chart,
+proposals and weekly meetings, departments with Heads, a role hierarchy (President, Vice President, Developer, Treasurer,
+Documentation), a roster, seasons, an activity log, task attachments (photos, documents, video) and automatic encrypted
+backups with a safe restore.** It also ships a regulations module — originally built for the SDU Motorbike Club's
+MotoStudent entry — that tracks compliance against a 1,146-clause rulebook and the bike's measured dimensions.
 
-It is a static single-page app. There is no server of ours: the browser talks
-straight to Supabase (Postgres), and **the security lives in the database**, not
-in this code.
+It is a static single-page app (React + TypeScript + Vite). **The security lives in the database**, not in this code:
+the browser talks straight to Supabase (Postgres, Auth, Row Level Security), and every rule is a database policy.
+A few Edge Functions (Deno) sign file uploads and downloads; GitHub Actions run the backups. Nothing else of ours runs
+anywhere.
+
+## Contents
+
+| Section | What it covers |
+|---|---|
+| [Features](#features) · [Architecture](#architecture) · [Services and accounts](#services-and-accounts-you-need) | what it is, how it fits together, what to sign up for |
+| §1–§2 | install and run it on your computer, run the tests |
+| §3–§5 | environment variables and feature flags, deploying the site, where credentials live |
+| §6–§6b | the Supabase project, migrations, **attachments, backups and restore** |
+| §7–§9 | people and roles, departments, proposals, Gantt, seasons, regulations import |
+| §10–§13 | generated types, rules a maintainer must not break, repository setup, code layout |
+
+## Features
+
+| Area | What you get |
+|---|---|
+| People and roles | a roster of members; roles President, Vice President, Developer, Treasurer, Documentation; every permission is enforced by the database |
+| Departments | departments with a Head each; Head authority is scoped to their own department |
+| Work | proposals reviewed and promoted into board tasks; Board, Gantt, priorities, milestones, meetings with agendas and minutes |
+| Seasons | each season keeps its own tasks and milestones; start a new one in one step; export a season |
+| Regulations module | the rulebook, per-clause status, task-to-clause links, a spec sheet with measurements and automatic pass/fail |
+| Activity | an audit trail of changes, realtime updates, automatic archival of old done tasks |
+| Attachments | photos, documents and videos on tasks, compressed in the browser, stored privately; off until enabled (`VITE_ATTACHMENTS_ENABLED`) |
+| Backups | a daily encrypted backup to three places, a status page in Settings → Backups with a built-in guide; off until enabled (`VITE_BACKUPS_ENABLED`) |
+| Restore | a dry run first, then insert-only merge of missing rows, a one-command undo, and a full rebuild for a lost project |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  U["Browser<br/>(the React app)"] -- "sign in, read, write<br/>(Row Level Security)" --> S[("Supabase<br/>Postgres + Auth")]
+  U -- "ask for a signed link" --> F["Supabase Edge Functions<br/>attachment-*, backup-*"]
+  F -- "signs upload / download links" --> R[("Cloudflare R2<br/>attachments bucket")]
+  U -- "uploads and downloads files<br/>directly (signed link)" --> R
+  V["Vercel<br/>serves the static site"] --> U
+  GA["GitHub Actions<br/>nightly Backup workflow"] -- "read-only login<br/>backup_reader" --> S
+  GA -- "encrypted backup" --> B[("R2 backups bucket<br/>daily / weekly / monthly")]
+  GA -- "weekly" --> G[("Private GitHub repo")]
+  GA -- "weekly + encrypted files" --> D[("Google Drive")]
+  GA -- "records the result" --> F
+```
+
+- The database is the single source of truth. R2, GitHub and Drive only hold files and encrypted copies.
+- The backup file is encrypted with **age** to the public keys in `ops/backup/recipients.txt`. Only the key holders'
+  private keys (on their own computers, never in the app) can open it.
+- Design history and decisions: `docs/ARCHITECTURE.md`; backup and restore documents: `ops/backup/docs/`.
+
+## Services and accounts you need
+
+Everything runs on free tiers to start. Create these once per installation. **Credentials never go in the repository**
+(see §5); the last column says where each one lives.
+
+| # | Service | Used for | Create | Credentials live in |
+|---|---|---|---|---|
+| 1 | **GitHub** | the code, CI, the scheduled backup | the app repository; a second **private** repository for backup copies (e.g. `<name>-backups`) with a **write deploy key** | the deploy key's private half is the Actions secret `BACKUP_GIT_SSH_KEY` |
+| 2 | **Supabase** | database, sign-in, Edge Functions | one project (note its region and project ref) | URL and anon key are public (build variables); the database password stays with the owner; the `service_role` key is never used by the app |
+| 3 | **Vercel** (or Cloudflare Pages / Netlify) | serves the built site | one project connected to the app repository | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` and the two feature flags as project variables |
+| 4 | **Cloudflare R2** | attachment files and the backup bucket | two **private** buckets, e.g. `<name>-attachments` and `<name>-backups`; **four API tokens** (below); CORS on the attachments bucket; lifecycle rules on the backups bucket | Supabase function secrets and GitHub Actions secrets |
+| 5 | **Google account** (club-owned) with a Google Cloud project | the weekly off-site copy on Drive | the Drive API enabled; an OAuth client (type Desktop app, consent screen set to *In production*, scope `drive.file`); an `rclone` remote | Actions secrets `DRIVE_*` |
+| 6 | **age key** for each key holder | opening backups | `age-keygen -o reqon-backup.key` on the holder's own computer | the private file: the holder's password manager **and** a disk that is not their computer; only the `age1…` public line goes into the repository |
+
+Cloudflare R2 tokens (Manage API tokens, no expiry, each limited to one bucket):
+
+| Token | Bucket | Permission | Used by |
+|---|---|---|---|
+| A | attachments | Object Read & Write | Supabase Edge Function secrets `ATTACHMENTS_S3_*` |
+| B | backups | Object Read & Write | Actions secrets `BACKUPS_R2_*` and Supabase secrets `BACKUPS_S3_*` |
+| C | attachments | Object Read only | Actions secrets `ATTACHMENTS_R2_*` (encrypted media copy to Drive) |
+| Drill | backups | Object Read only | Actions environment `restore-drill`: `DRILL_R2_*` |
+
+Tools on the machine that does the setup: Node (see §1), the Supabase CLI, the GitHub CLI (`gh`), `age`, `rclone`, Docker
+(only for the database tests and the local restore drill).
+
+The complete list of secret **names** and where each is set is in `ops/backup/docs/HOSTED_SETUP.md`. A secret that
+GitHub has stored can never be read back: keep every value in the owner's password manager, and test a token before
+storing it.
 
 ---
 
@@ -30,7 +109,7 @@ Running the app itself needs no Docker and no database on your laptop.
 ## 2. Run it locally
 
 ```bash
-git clone <the club's repository URL>
+git clone <your repository URL>
 cd reqon
 npm ci                         # clean install, exactly what package-lock.json pins
 cp .env.example .env.local     # then edit .env.local — see §3
@@ -38,7 +117,7 @@ npm run dev
 ```
 
 Open the URL it prints (usually <http://localhost:5173>) and sign in with your
-club account.
+account.
 
 Other commands:
 
@@ -224,26 +303,33 @@ Push to the main branch. All three hosts rebuild automatically. If you changed
 environment variables, you must **redeploy** — they are baked in at build time,
 so an existing deployment keeps the old values.
 
-Pushing does **not** deploy database migrations. Those go through the Supabase
-CLI, before the matching frontend — see §6a.
+Pushing to the front-end host does **not** deploy database migrations. Those go through the Supabase
+CLI, before the matching frontend — see §6a. **Exception on this project:** the Supabase dashboard has its GitHub
+integration connected (Project Settings → Integrations), and on every push to `main` Supabase itself clones the
+repository, applies any pending migration and redeploys the Edge Functions (seen in the project's logs, source
+`workflow_run_logs`). So `supabase/config.toml` is applied to production too — see the rule in §11.
 
 ---
 
 ## 5. Where the credentials live
 
-**Not here.** The repository and this README contain no passwords.
+**Not here.** The repository and this README contain no passwords, keys or tokens.
 
-Store these in the club's own **Accounts and Logins** document, which the club
-owns — not a student's personal password manager:
+Store these in the organisation's own **Accounts and Logins** document (a shared password manager that the organisation
+owns — not one student's personal one), and keep a second copy of anything that cannot be recreated:
 
-- the Supabase account login (email + password, and 2FA recovery codes)
-- the Supabase **database password** (shown once, at project creation)
-- the Supabase `service_role` key — needed for admin scripts, **never** for this app
-- the hosting account login (Cloudflare / Netlify / Vercel)
-- the Git hosting account login
+- the Supabase account login (email, password, 2FA recovery codes) and the **database password** (shown once)
+- the Supabase `service_role` key — for admin scripts only, **never** for this app
+- the hosting account login (Vercel / Cloudflare / Netlify) and the Git hosting login
+- the Cloudflare account login and the four R2 token pairs (Access Key ID and Secret — the secret is shown once)
+- the Google account login, the OAuth client secret and the `rclone` token line
+- the backup deploy key (private half)
+- the `backup_reader` database password
+- each key holder's **age private key** — **without it no backup can be opened**
 
-The anon key and project URL are not secrets and live in the host's environment
-variables.
+The anon key and project URL are not secrets and live in the host's environment variables.
+Where each secret is *set* (GitHub Actions secrets, Supabase function secrets, the `restore-drill` environment) is listed by
+name in `ops/backup/docs/HOSTED_SETUP.md`.
 
 ---
 
@@ -399,17 +485,57 @@ not run them again.
 ### 6b. Task attachments, encrypted backups and restore
 
 Photos, videos and PDFs on tasks (bytes in a private Cloudflare R2 bucket, compressed in the browser first), a daily
-age-encrypted backup of the database, and a safe way to restore it. All three are **off until the owner enables them**
-(Phase 7 of the working plan): the migrations `20260132000000`, `20260133000000` and `20260134000000` add tables, a read-only
-login role `backup_reader` and a private `restore` schema; the Edge Functions `attachment-*` and `backup-*` need their
-secrets; the workflows `.github/workflows/backup.yml`, `backup-freshness.yml` and `restore-drill.yml` need theirs.
-Everything under `ops/backup/` is shell + Node; `npm run backup:test:local` proves the backup chain and
-`npm run restore:drill:local` restores a backup into a throw-away second local Supabase project.
+age-encrypted backup of the database, and a safe way to restore it. All three are **off until the feature flags are set**
+(§3). They add: migrations `20260132000000` (attachments), `20260133000000` (the read-only login `backup_reader` and the backup
+status table) and `20260134000000` (the private `restore` schema and delete tracking); six Edge Functions
+(`attachment-upload-url`, `-confirm`, `-download-url`, `-purge`, `backup-record`, `backup-download-url`); and three workflows.
 
-The operating documents (what is backed up and how to read Settings → Backups; the restore runbooks A and B; key holders and
-rotation; Cloudflare setup) are kept in `docs/ultraplan/` (`BACKUP.md`, `RUNBOOK_RESTORE.md`, `KEY_MANAGEMENT.md`,
-`R2_SETUP.md`). `docs/` is git-ignored for now: **move those four files to a tracked folder before relying on them**,
-because a restore is needed on the day the laptop that holds them may not be.
+**What runs, and when**
+
+| When | What | Where the result goes |
+|---|---|---|
+| daily 03:17 UTC (`backup.yml`) | dump, check, encrypt | R2 `daily/` (kept 35 days) |
+| Sundays | the same file, plus an encrypted copy of new attachment files | R2 `weekly/` (26 weeks), the private repository (newest 26), Google Drive (newest 8) |
+| the 1st of the month | the same file | R2 `monthly/` (24 months) |
+| every run | records the result; removes attachment files whose 30 days after delete are over | Settings → Backups |
+| daily 09:47 UTC (`backup-freshness.yml`) | fails and emails the owners if the newest backup is older than 48 hours | GitHub notification |
+| Mondays 05:17 UTC (`restore-drill.yml`) | restores the newest backup into a throw-away project and checks it | the workflow result |
+
+The Backups page in Settings turns red after 48 hours without a good backup even when GitHub is silent (GitHub switches off
+scheduled workflows after 60 days without repository activity). It includes a step-by-step guide for the President, Vice
+President and Developers.
+
+**Setting it up on a new installation, in order**
+
+1. Create the accounts and buckets in *Services and accounts you need* above; add each key holder's `age1…` line to
+   `ops/backup/recipients.txt`.
+2. `npx supabase link --project-ref <ref>`, then `npx supabase db push --linked --dry-run`, check the list, then `npx supabase db push --linked`.
+3. Deploy the functions: `npx supabase functions deploy attachment-upload-url attachment-confirm attachment-download-url attachment-purge backup-record backup-download-url`.
+4. Set the Supabase secrets (`npx supabase secrets set …`): `ATTACHMENTS_S3_{ENDPOINT,BUCKET,ACCESS_KEY_ID,SECRET_ACCESS_KEY}`,
+   `BACKUPS_S3_{…}`, `ATTACHMENTS_PURGE_SECRET`, `BACKUP_RECORD_SECRET` (the last two also in GitHub, same values).
+5. Give `backup_reader` a password in the SQL editor (`alter role backup_reader password '…'`) and store the **same** value as the Actions secret
+   `BACKUP_PGPASSWORD`.
+6. Set the Actions secrets (names in `ops/backup/docs/HOSTED_SETUP.md`) and create the `restore-drill` environment (branch `main` only) with `DRILL_AGE_KEY` and the drill token.
+7. Add the CORS policy to the attachments bucket (`ops/backup/docs/R2_SETUP.md` §3) and the lifecycle rules to the backups bucket (§8).
+8. In GitHub → Settings → Actions → General: workflow permissions *read-only*, fork pull requests *require approval for all external contributors*.
+9. Push, then run **Backup** by hand once with *force_weekly* ticked; run **Restore drill** once.
+10. Set `VITE_ATTACHMENTS_ENABLED=true` and `VITE_BACKUPS_ENABLED=true` on the host and redeploy.
+
+**Where the backups are, and how to open one** — in the app: Settings → Backups → *Download latest backup*. Otherwise R2
+(`daily/ weekly/ monthly/`), the private repository, or Drive. Every file is encrypted; on a key holder's own computer:
+
+```bash
+ops/backup/verify.sh reqon-backup-….tar.age ~/reqon-backup.key        # checksum, decrypt, manifest, dumps readable
+ops/backup/restore.sh plan reqon-backup-….tar.age ~/reqon-backup.key  # dry run against the database in the PG* variables
+```
+
+**Test it without touching production** — `npm run backup:test:local` (the whole backup chain on the local stack) and
+`npm run restore:drill:local` (a full rebuild into an isolated second local project).
+
+The operating documents live in `ops/backup/docs/`, tracked in the repository so they are available on the day a restore is
+needed: `BACKUP.md` (what is backed up, how to read Settings → Backups), `RUNBOOK_RESTORE.md` (runbooks A and B, targeted revert),
+`KEY_MANAGEMENT.md` (key holders, rotation), `R2_SETUP.md` (Cloudflare) and `HOSTED_SETUP.md` (what exists in production and where each
+secret is kept — names only, never values). The design history stays in the git-ignored `docs/ultraplan/`.
 
 ---
 
@@ -924,6 +1050,11 @@ These were expensive to get right. Please read before changing them.
   `select restore.install_tombstone_triggers();` to the migration that creates the table.
 - **Never `pg_dump` with both `--schema` and `--table`**: the table option silently drops the schemas (this once produced
   an archive of two tables). `backup.sh` uses two dumps for that reason.
+- **`supabase/config.toml` is applied to production by Supabase's GitHub integration on every push to `main`.** Never
+  declare something there that must exist only locally. The local stand-in buckets `attachments-local` and `backups-local`
+  used to be declared there; the integration tried to create them in production and failed with "Payload too large" (HTTP
+  413, 100 MiB over the hosted limit). They are created by `node scripts/attachments/local-buckets.mjs` instead (also run by
+  `functions-env-local.mjs` and `npm run backup:test:local`). After a push, read the project's logs (`workflow_run_logs`) for errors.
 - **Don't delete people.** Retire them (§7).
 - **Don't invent regulation content.** If a date or a limit is not in the seed
   data, render "TBC" and say where it would come from.
@@ -933,23 +1064,16 @@ These were expensive to get right. Please read before changing them.
 
 ---
 
-## 12. First-time repository setup
+## 12. Repository setup
 
-If you are looking at this as a plain folder rather than a Git checkout, it has
-not been put under version control yet. Do that before anything else — the
-deployment hosts in §4 all deploy from a Git repository:
+The deployment host (§4) deploys from the Git repository's main branch. Check `git status` before the first commit: `.env.local`,
+key files (`*.key`) and `docs/` are git-ignored and must not be listed.
 
-```bash
-git init
-git add .
-git commit -m "Reqon"
-git remote add origin <the club's repository URL>
-git push -u origin main
-```
-
-`.gitignore` already excludes `node_modules`, `dist`, `coverage` and
-`.env.local`. Check `git status` before your first commit and confirm
-`.env.local` is **not** listed.
+Recommended settings on GitHub (Settings → Actions → General): allow the GitHub-made actions the workflows use
+(`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`), workflow permissions *read repository contents*,
+fork pull-request workflows *require approval for all external contributors* (the repository may be public), and leave
+*Require actions to be pinned to a full commit SHA* off unless the workflows are pinned first. Repository secrets and the
+`restore-drill` environment are listed in `ops/backup/docs/HOSTED_SETUP.md`.
 
 ---
 
@@ -972,12 +1096,17 @@ src/
   proposals/ meetings/ finance/ account/ tutorial/
                feature components shared between screens (proposals/ and tutorial/ also hold
                the domain module above — components and pure logic side by side by design)
+  attachments/ photos, documents and video on tasks: rules, upload queue, in-browser compression (worker), UI
+  backups/     Settings → Backups: status, download, and the built-in guide (BackupsGuide)
   ui/          app header, error boundary, dialog, shared loading/error/empty states
   lib/         the single Supabase client + generated types
+ops/backup/    backup, verify, publish, restore and drill scripts (shell + Node), recipients.txt, tests;
+               docs/ = the tracked operating documents (backups, restore runbooks, keys, Cloudflare, hosted setup)
+.github/workflows/  ci.yml, backup.yml, backup-freshness.yml, restore-drill.yml
 docs/          ARCHITECTURE.md (layers, departments, tasks/proposals, specs, Book, scheduler,
                realtime, audit, export, CI); redesign/ (phase-by-phase design record, ADRs)
                now-metrics.sql — the SQL behind every number on the Now screen
-supabase/      migrations/ and tests/ (the SQL authorization and integrity tests);
+supabase/      migrations/, tests/ (the SQL authorization and integrity tests) and functions/ (Edge Functions);
                scheduler/ (pg_cron install/uninstall, deployment-time, not migrations);
                reconciliation/ (the department-manifest test fixture)
 scripts/       verify_db.sh (database tests), gen-types.mjs / gen-types-local.sh,

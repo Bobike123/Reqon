@@ -119,16 +119,10 @@ enabled = true
 # production attachments live in Cloudflare R2, not Supabase Storage.
 file_size_limit = "100MiB"
 
-# Task attachments on the LOCAL stack: the Edge Functions talk to this bucket through the stack's S3
-# endpoint exactly as they talk to R2 in production (docs/ultraplan, requirement ATT-20). Private.
-[storage.buckets.attachments-local]
-public = false
-file_size_limit = "100MiB"
-
-# Encrypted backups on the LOCAL stack (Phase 4): the same S3 code path as the R2 backups bucket.
-[storage.buckets.backups-local]
-public = false
-file_size_limit = "100MiB"
+# The LOCAL stand-in buckets for Cloudflare R2 (`attachments-local`, `backups-local`) are NOT declared here:
+# Supabase's GitHub integration applies this file to the hosted project on every push to main, so a bucket
+# declared here would be created in production (and the 100MiB limit is over the hosted limit: HTTP 413).
+# `node scripts/attachments/local-buckets.mjs` creates them locally (functions-env-local.mjs calls it).
 
 # Uncomment to configure local storage buckets
 # [storage.buckets.images]
