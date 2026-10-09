@@ -4,8 +4,10 @@ import { useAuth } from '../auth/context.ts'
 import { DataError } from '../core/errors.ts'
 import type { Database } from '../lib/database.types.ts'
 import { supabase } from '../lib/supabase.ts'
-import { unwrap } from './errors.ts'
+import { useSeasonId } from '../season/context.ts'
+import { fetchAllRows, unwrap } from './errors.ts'
 import { queryKeys } from './queryKeys.ts'
+import { useSeasonScopedQuery } from './seasonQuery.ts'
 
 // Task attachments (docs/ultraplan Phase 3). Rows come from Postgres under RLS (members see `ready` and
 // `deleted` rows; this list shows `ready` only). File bytes never pass through here: the Edge Functions
@@ -72,6 +74,36 @@ export function useRealtimeTaskAttachments(taskId: string): void {
       void supabase.removeChannel(channel)
     }
   }, [taskId, userId, queryClient])
+}
+
+// ------------------------------------------------------------------------- the Files page
+// Every ready file of the season, newest first, with the title of the task it is attached to. Read under RLS
+// like the per-task list; `tasks!inner` keeps only files whose task belongs to this season.
+export type LibraryFile = Attachment & { task_title: string }
+
+type LibraryRow = Attachment & { tasks: { title: string; season_id: string } | { title: string; season_id: string }[] | null }
+
+export function useSeasonAttachments(): UseQueryResult<LibraryFile[], Error> {
+  const seasonId = useSeasonId()
+  return useSeasonScopedQuery<LibraryFile[]>(queryKeys.seasonAttachments(seasonId), seasonId, async (sid) => {
+    const rows = await fetchAllRows<LibraryRow>(
+      'load the files',
+      (row) => row.id,
+      (from, to) =>
+        supabase
+          .from('task_attachments')
+          .select(`${COLUMNS}, tasks!inner(title, season_id)`)
+          .eq('status', 'ready')
+          .eq('tasks.season_id', sid)
+          .order('created_at', { ascending: false })
+          .order('id')
+          .range(from, to) as unknown as PromiseLike<{ data: LibraryRow[] | null; error: Parameters<typeof unwrap>[1]['error'] }>,
+    )
+    return rows.map(({ tasks, ...file }) => {
+      const task = Array.isArray(tasks) ? tasks[0] : tasks
+      return { ...file, task_title: task?.title ?? 'Unknown task' }
+    })
+  })
 }
 
 // ------------------------------------------------------------------ Edge Function calls
@@ -203,6 +235,7 @@ export function useDeleteAttachment(taskId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.attachmentUsage })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonAttachmentsAll })
     },
   })
 }
@@ -223,6 +256,7 @@ export function useSetAttachmentCaption(taskId: string) {
       ),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.seasonAttachmentsAll })
     },
   })
 }

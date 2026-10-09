@@ -26,6 +26,7 @@ export const uploads = createUploadStore(async () => {
     onUploaded: (taskId: string) => {
       void queryClient?.invalidateQueries({ queryKey: queryKeys.taskAttachments(taskId) })
       void queryClient?.invalidateQueries({ queryKey: queryKeys.attachmentUsage })
+      void queryClient?.invalidateQueries({ queryKey: queryKeys.seasonAttachmentsAll })
     },
     sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
   }

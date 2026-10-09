@@ -1,3 +1,4 @@
+import { attachmentsEnabled } from '../attachments/flag.ts'
 import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/context.ts'
@@ -61,7 +62,7 @@ export function AppHeader() {
   // screens will let you do.
   const roleText = sortRoles(can.roles).map((role) => ROLE_LABELS[role]).join(', ')
   // Screens that would show this person nothing are left out of the menu.
-  const items = NAV_ITEMS.filter((item) => !item.requires || can[item.requires])
+  const items = NAV_ITEMS.filter((item) => !item.requires || (item.requires === 'attachmentsEnabled' ? attachmentsEnabled() : can[item.requires]))
   const signOut = () => void auth.signOut()
   const openTour = () => {
     // From the phone menu: close it and park focus on the Menu button, which

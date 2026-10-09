@@ -93,6 +93,9 @@ export const queryKeys = {
   // Task attachments (docs/ultraplan Phase 3). Keyed by task, not season: a task id is unique across
   // seasons, and the panel that reads them is always about one task.
   taskAttachments: (taskId: string) => ['task_attachments', taskId] as const,
+  // Every file of the season, for the Files page (prefix 'season_attachments' drops them all).
+  seasonAttachments: (seasonId: string | undefined) => ['season_attachments', seasonId ?? 'unknown'] as const,
+  seasonAttachmentsAll: ['season_attachments'] as const,
   // Short-lived signed links, kept apart from the rows so refreshing a link never refetches the list.
   attachmentUrls: (variant: 'thumb' | 'original', ids: readonly string[]) => ['attachment_urls', variant, ids] as const,
   attachmentUsage: ['attachment_usage'] as const,

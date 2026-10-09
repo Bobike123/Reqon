@@ -109,7 +109,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs())
 
 describe('the files panel', () => {
-  it('shows one fixed tile per ready file and asks for thumbnails of photos and videos in one batch', async () => {
+  it('shows one fixed tile per ready file and asks for the thumbnails of every file in one batch (a PDF without a preview is left out of the answer)', async () => {
     render(wrap(<AttachmentsPanel taskId={TASK} perms={MEMBER} />))
     const grid = await screen.findByRole('list', { name: 'Files on this task' })
     expect(within(grid).getAllByRole('button')).toHaveLength(4)
@@ -118,7 +118,7 @@ describe('the files panel', () => {
     expect(screen.getByRole('button', { name: 'Open video, download only: raw.mov' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Open PDF: quote.pdf' })).toHaveTextContent('quote.pdf')
     await waitFor(() =>
-      expect(h.invoke).toHaveBeenCalledWith('attachment-download-url', { body: { attachmentIds: ['photo-1', 'video-1', 'video-2'], variant: 'thumb', download: false } }),
+      expect(h.invoke).toHaveBeenCalledWith('attachment-download-url', { body: { attachmentIds: ['photo-1', 'video-1', 'video-2', 'doc-1'], variant: 'thumb', download: false } }),
     )
     // No <video> element until a tile is opened (ATT-11).
     expect(document.querySelector('video')).toBeNull()

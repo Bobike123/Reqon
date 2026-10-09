@@ -26,6 +26,7 @@ const Gantt = lazy(() => import('./pages/Gantt.tsx'))
 const Board = lazy(() => import('./pages/Board.tsx'))
 const Proposals = lazy(() => import('./pages/Proposals.tsx'))
 const Archive = lazy(() => import('./pages/Archive.tsx'))
+const Files = lazy(() => import('./pages/Files.tsx'))
 const Meetings = lazy(() => import('./pages/Meetings.tsx'))
 const SpecSheet = lazy(() => import('./pages/SpecSheet.tsx'))
 const Finances = lazy(() => import('./pages/Finances.tsx'))
@@ -103,6 +104,7 @@ export default function App() {
                   <Route path="/board" element={<Board />} />
                   <Route path="/proposals" element={<Proposals />} />
                   <Route path="/archive" element={<Archive />} />
+                  <Route path="/files" element={<Files />} />
                   <Route path="/meetings" element={<Meetings />} />
                   <Route path="/specs" element={<SpecSheet />} />
                   <Route path="/finances" element={<Finances />} />

@@ -33,6 +33,7 @@ anywhere.
 | Regulations module | the rulebook, per-clause status, task-to-clause links, a spec sheet with measurements and automatic pass/fail |
 | Activity | an audit trail of changes, realtime updates, automatic archival of old done tasks |
 | Attachments | photos, documents and videos on tasks, compressed in the browser, stored privately; off until enabled (`VITE_ATTACHMENTS_ENABLED`) |
+| Files | one page (**Files** in the menu) listing every attachment of the season: thumbnails (a PDF shows its first page), filters by photo, PDF and video, search by file or task, view or save; a PDF preview needs migration `20260135000000` |
 | Backups | a daily encrypted backup to three places, a status page in Settings → Backups with a built-in guide; off until enabled (`VITE_BACKUPS_ENABLED`) |
 | Restore | a dry run first, then insert-only merge of missing rows, a one-command undo, and a full rebuild for a lost project |
 

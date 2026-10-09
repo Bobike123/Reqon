@@ -24,6 +24,7 @@ export const CHAPTERS = [
   { id: 'board', label: 'Board' },
   { id: 'proposals', label: 'Task proposals' },
   { id: 'archive', label: 'Archive' },
+  { id: 'files', label: 'Files' },
   { id: 'meetings', label: 'Meetings' },
   { id: 'specs', label: 'Spec sheet' },
   { id: 'finances', label: 'Finances' },
@@ -359,6 +360,16 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'board-card',
     title: 'Who can edit a task',
     body: 'Its owner, its department’s Head, the President or the Vice President. Only they reassign it; moving it to another department needs a reason. Nothing is deleted: a Done task archives itself after 24 hours.',
+  },
+
+  // --------------------------------------------------------------------- Files
+  {
+    id: 'files',
+    chapter: 'files',
+    route: '/files',
+    target: 'files-overview',
+    title: 'Files — everything attached to a task',
+    body: 'Every photo, PDF and video attached to a task this season, newest first. Filter by kind, search by file or task name, open one to view or save it. To add or remove a file, open its task on the Board.',
   },
 
   // ------------------------------------------------------------------- Archive

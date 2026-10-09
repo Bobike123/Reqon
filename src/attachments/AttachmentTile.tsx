@@ -25,18 +25,23 @@ export function AttachmentTile({
       className="group relative block aspect-square w-full overflow-hidden rounded border border-slate-200 bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:outline-none"
       data-testid={`attachment-tile-${file.id}`}
     >
-      {file.kind === 'document' ? (
+      {thumbUrl ? (
+        <img src={thumbUrl} alt="" loading="lazy" decoding="async" onError={onThumbError} className="h-full w-full object-cover" />
+      ) : file.kind === 'document' ? (
         <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
           <span aria-hidden="true" className="rounded bg-red-700 px-1.5 py-0.5 text-[11px] font-bold text-white">
             PDF
           </span>
           <span className="line-clamp-3 text-[11px] break-all text-slate-700">{file.original_name}</span>
         </span>
-      ) : thumbUrl ? (
-        <img src={thumbUrl} alt="" loading="lazy" decoding="async" onError={onThumbError} className="h-full w-full object-cover" />
       ) : (
         <span className="flex h-full w-full items-center justify-center text-[11px] text-slate-500">
           {thumbsFailed ? 'Preview unavailable' : ''}
+        </span>
+      )}
+      {file.kind === 'document' && thumbUrl && (
+        <span aria-hidden="true" className="absolute top-1 left-1 rounded bg-red-700 px-1.5 py-0.5 text-[11px] font-bold text-white">
+          PDF
         </span>
       )}
       {file.kind === 'video' && (

@@ -23,7 +23,8 @@ export default function AttachmentsPanel({ taskId, perms }: { taskId: string; pe
 
   const list = useTaskAttachments(taskId)
   const files = useMemo(() => list.data ?? [], [list.data])
-  const ids = useMemo(() => files.filter((f) => f.kind !== 'document').map((f) => f.id), [files])
+  // Documents are asked for too: a PDF with a preview image shows it; one without is simply left out of the answer.
+  const ids = useMemo(() => files.map((f) => f.id), [files])
   const thumbs = useAttachmentThumbUrls(ids)
   const members = useMembers()
   const names = useMemo(() => new Map((members.data ?? []).map((m) => [m.id, m.full_name])), [members.data])

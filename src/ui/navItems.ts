@@ -6,7 +6,7 @@
 // `requires` leaves a screen out of the menu for people who could see nothing
 // on it. It is not security — the database decides what anyone may read — it
 // just avoids a menu item that always leads to "nothing to show you here".
-export type NavItem = { to: string; label: string; end?: boolean; requires?: 'canViewFinances' }
+export type NavItem = { to: string; label: string; end?: boolean; requires?: 'canViewFinances' | 'attachmentsEnabled' }
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Now', end: true },
@@ -18,6 +18,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/board', label: 'Board' },
   { to: '/proposals', label: 'Proposals' },
   { to: '/archive', label: 'Archive' },
+  { to: '/files', label: 'Files', requires: 'attachmentsEnabled' },
   { to: '/meetings', label: 'Meetings' },
   { to: '/specs', label: 'Spec sheet' },
   { to: '/finances', label: 'Finances', requires: 'canViewFinances' },

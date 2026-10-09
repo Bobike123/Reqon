@@ -422,8 +422,8 @@ begin
     pg_temp.try_sql(format('insert into task_attachments (task_id, kind, object_key, thumb_key, original_name, mime_type, size_bytes) values (%L, ''photo'', ''bk/ok.jpg'', ''bk/dup.thumb.webp'', ''ok.jpg'', ''image/jpeg'', 10)', t1)), '23505');
   perform pg_temp.expect('a photo cannot carry an MP4 type',
     pg_temp.try_sql(format('insert into task_attachments (task_id, kind, object_key, thumb_key, original_name, mime_type, size_bytes) values (%L, ''photo'', ''bk/1'', ''bk/1t'', ''a'', ''video/mp4'', 10)', t1)), '23514');
-  perform pg_temp.expect('a document cannot have a thumbnail',
-    pg_temp.try_sql(format('insert into task_attachments (task_id, kind, object_key, thumb_key, original_name, mime_type, size_bytes) values (%L, ''document'', ''bk/2'', ''bk/2t'', ''a'', ''application/pdf'', 10)', t1)), '23514');
+  perform pg_temp.expect('a document may have a preview thumbnail',
+    pg_temp.try_sql(format('insert into task_attachments (task_id, kind, object_key, thumb_key, original_name, mime_type, size_bytes) values (%L, ''document'', ''bk/2'', ''bk/2t'', ''a'', ''application/pdf'', 10)', t1)), 'OK');
   perform pg_temp.expect('a photo must have a thumbnail',
     pg_temp.try_sql(format('insert into task_attachments (task_id, kind, object_key, original_name, mime_type, size_bytes) values (%L, ''photo'', ''bk/3'', ''a'', ''image/jpeg'', 10)', t1)), '23514');
   perform pg_temp.expect('a photo has no duration',
