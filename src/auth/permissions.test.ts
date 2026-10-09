@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   NO_PERMISSIONS,
+  attachmentPermissions,
+  canManageAttachment,
   ROLE_LABELS,
   canArchiveTask,
   canEditTask,
@@ -308,5 +310,43 @@ describe('role names shown to people', () => {
     expect(describePublicAccess(['developer', 'president', 'vicepresident'])).toBe('President and Vice President')
     expect(describePublicAccess(['developer'])).toBe('Maintenance access')
     expect(describePublicAccess([])).toBe('Member (no privileged role)')
+  })
+})
+
+describe('task attachments (docs/ultraplan Phase 3, D-05)', () => {
+  const task = { owner_id: 'owner', subteam_key: 'GEOM', archived_at: null as string | null }
+  const owner: TaskActor = { id: 'owner', status: 'active', isDeveloper: false, headOf: [] }
+  const member: TaskActor = { id: 'm', status: 'active', isDeveloper: false, headOf: [] }
+  const head: TaskActor = { id: 'head', status: 'active', isDeveloper: false, headOf: ['GEOM'] }
+  const otherHead: TaskActor = { id: 'oh', status: 'active', isDeveloper: false, headOf: ['BODY'] }
+  const vp: TaskActor = { id: 'vp', status: 'active', isDeveloper: false, headOf: [], isGovernance: true, governs: ['GEOM', 'BODY'] }
+  const developer: TaskActor = { id: 'dev', status: 'active', isDeveloper: true, headOf: [] }
+  const alumnus: TaskActor = { id: 'owner', status: 'alumni', isDeveloper: false, headOf: [] }
+
+  it('uploading follows can_edit_task: owner and department authority, never on an archived task', () => {
+    expect(attachmentPermissions(owner, task).canUpload).toBe(true)
+    expect(attachmentPermissions(head, task).canUpload).toBe(true)
+    expect(attachmentPermissions(vp, task).canUpload).toBe(true)
+    expect(attachmentPermissions(developer, task).canUpload).toBe(true)
+    expect(attachmentPermissions(member, task).canUpload).toBe(false)
+    expect(attachmentPermissions(otherHead, task).canUpload).toBe(false)
+    expect(attachmentPermissions(owner, { ...task, archived_at: '2026-10-01' }).canUpload).toBe(false)
+  })
+
+  it('the uploader manages their own file; Head and above manage every file of the task', () => {
+    const own = attachmentPermissions(member, task)
+    expect(canManageAttachment(own, 'm')).toBe(true)
+    expect(canManageAttachment(own, 'someone-else')).toBe(false)
+    expect(canManageAttachment(own, null)).toBe(false)
+    for (const actor of [head, vp, developer]) expect(canManageAttachment(attachmentPermissions(actor, task), 'someone-else')).toBe(true)
+    expect(canManageAttachment(attachmentPermissions(otherHead, task), 'someone-else')).toBe(false)
+    // The task owner is not department authority: another member's file is not theirs to delete.
+    expect(canManageAttachment(attachmentPermissions(owner, task), 'm')).toBe(false)
+  })
+
+  it('an alumnus is read-only, even for a file they uploaded', () => {
+    const perms = attachmentPermissions(alumnus, task)
+    expect(perms).toEqual({ canUpload: false, canManageAll: false, actorId: null })
+    expect(canManageAttachment(perms, 'owner')).toBe(false)
   })
 })

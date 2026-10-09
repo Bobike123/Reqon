@@ -89,4 +89,13 @@ export const queryKeys = {
   taskRequirements: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'task_requirements'] as const,
   taskDependencies: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'task_dependencies'] as const,
   progressTasks: (seasonId: string | undefined) => ['season', seasonId ?? 'unknown', 'progress_tasks'] as const,
+
+  // Task attachments (docs/ultraplan Phase 3). Keyed by task, not season: a task id is unique across
+  // seasons, and the panel that reads them is always about one task.
+  taskAttachments: (taskId: string) => ['task_attachments', taskId] as const,
+  // Short-lived signed links, kept apart from the rows so refreshing a link never refetches the list.
+  attachmentUrls: (variant: 'thumb' | 'original', ids: readonly string[]) => ['attachment_urls', variant, ids] as const,
+  attachmentUsage: ['attachment_usage'] as const,
+  // What the backup workflow recorded (docs/ultraplan Phase 4); Board only, not season-scoped.
+  backupRuns: ['backup_runs'] as const,
 } as const

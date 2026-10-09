@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { canArchiveTask, canEditTask, canReassignTaskOwner, taskDepartmentTargets } from '../auth/permissions.ts'
+import { attachmentPermissions, canArchiveTask, canEditTask, canReassignTaskOwner, taskDepartmentTargets } from '../auth/permissions.ts'
 import { useAuth } from '../auth/context.ts'
 import { departmentChoices } from '../departments/filter.ts'
 import { DepartmentNav } from '../departments/DepartmentNav.tsx'
@@ -146,6 +146,7 @@ export default function Board() {
       canReassign: edit && canReassignTaskOwner(actor, task),
       canArchive: canArchiveTask(actor, task) && task.archived_at === null,
       moveTo: taskDepartmentTargets(actor, task, activeDepartments),
+      attachments: attachmentPermissions(actor, task),
     }
   }
   const ownersFor = (task: (typeof allTasks)[number]) =>

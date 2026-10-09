@@ -11,6 +11,11 @@ import { HandoverSettings } from './settings/HandoverSettings.tsx'
 import { BookSettings } from './settings/BookSettings.tsx'
 import { SeasonSettings } from './settings/SeasonSettings.tsx'
 import { SeasonExport } from './settings/SeasonExport.tsx'
+import { attachmentsEnabled } from '../attachments/flag.ts'
+import { StorageUsage } from '../attachments/StorageUsage.tsx'
+import { backupsEnabled } from '../backups/flag.ts'
+import { BackupsGuide } from '../backups/BackupsGuide.tsx'
+import { BackupsPanel } from '../backups/BackupsPanel.tsx'
 
 // The route shell (Phase 6 §6.1): coordinates only what genuinely is shared
 // between sections — the page chrome, and the one capability summary that
@@ -117,6 +122,21 @@ export default function Settings() {
       {canAdminister && (
         <Section title="Requirements Book">
           <BookSettings />
+        </Section>
+      )}
+
+      {canAdminister && attachmentsEnabled() && (
+        <Section title="File storage">
+          <StorageUsage />
+        </Section>
+      )}
+
+      {canAdminister && backupsEnabled() && (
+        <Section title="Backups">
+          <BackupsPanel />
+          <div className="mt-3">
+            <BackupsGuide defaultAudience={myRoles.includes('developer') ? 'developer' : 'leaders'} />
+          </div>
         </Section>
       )}
 

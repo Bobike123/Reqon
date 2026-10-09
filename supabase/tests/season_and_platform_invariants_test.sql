@@ -75,14 +75,15 @@ begin
   -- ============================================================ catalog checks
   -- Run as the owner: these read system catalogs, not application rows.
 
-  -- Realtime publication: exactly the fourteen subscribed tables
-  -- (proposal_comments and task_dependencies added by Phase 3, spec_readiness by Phase 4).
+  -- Realtime publication: exactly the fifteen subscribed tables
+  -- (proposal_comments and task_dependencies added by Phase 3, spec_readiness by Phase 4,
+  -- task_attachments by Ultraplan Phase 1 — its subscription hook arrives with the UI in Ultraplan Phase 3).
   select string_agg(tablename, ',' order by tablename) into txt
     from pg_publication_tables
    where pubname = 'supabase_realtime' and schemaname = 'public';
   select * into lines, failures from pg_temp.note(lines, failures,
-    'realtime publication holds exactly the fourteen subscribed tables',
-    txt = 'clause_status,department_members,milestone_sections,milestones,proposal_comments,proposal_requirements,spec_measurements,spec_readiness,specs,subteams,task_dependencies,task_proposals,task_requirements,tasks',
+    'realtime publication holds exactly the fifteen subscribed tables',
+    txt = 'clause_status,department_members,milestone_sections,milestones,proposal_comments,proposal_requirements,spec_measurements,spec_readiness,specs,subteams,task_attachments,task_dependencies,task_proposals,task_requirements,tasks',
     format('found: %s', coalesce(txt, '(none)')));
 
   -- SECURITY DEFINER without a pinned search_path can be hijacked by a

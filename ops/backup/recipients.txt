@@ -1,0 +1,14 @@
+# Who can read the backups (Ultraplan Phase 4, decision D-03). One age PUBLIC key per line (age1…), with a
+# comment saying whose it is. Public keys are not secret — this file is committed and reviewed like code.
+#
+# Each key holder (President, Vice President, every Developer) runs `age-keygen -o reqon-backup.key` ON THEIR
+# OWN DEVICE, keeps the private file safe (password manager / encrypted disk), and sends only the line that
+# starts with "Public key:" in a pull request. The restore-drill key (D-09) is listed here too.
+#
+# Adding or removing a line changes who can read FUTURE backups; older backups stay readable by whoever was
+# listed when they were made. backup.sh refuses an empty list or any line that is not a valid age key.
+#
+# age1…  # President (name, since 2026-xx)
+
+# Developer (Bogdan)
+age17pee44kqv54xdzvqu2zjdepyw0n8qwqq5sdxens723urpar4mgyswg9ark

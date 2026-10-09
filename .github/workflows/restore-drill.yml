@@ -1,0 +1,88 @@
+# Weekly restore drill (docs/ultraplan Phase 5; RST-13, decision D-09).
+#
+# Downloads the newest daily backup from R2, decrypts it with the drill's own age key (one of the
+# recipients in ops/backup/recipients.txt) and restores it into a brand-new local Supabase project on
+# the runner: exact restore, equality with the manifest, idempotence, then a lost/deleted/changed-rows
+# merge and its undo (ops/backup/drill.sh). A failure emails the repository owners.
+#
+# The data never leaves the runner (an ephemeral VM, removed after the job); the log shows table names
+# and counts only (the repository is public). The drill key is a secret of the `restore-drill`
+# environment; whoever can read it is a repository admin — a Developer, already a key holder (D-09).
+#
+# Secrets (environment `restore-drill`): DRILL_AGE_KEY · BACKUPS_R2_ENDPOINT BACKUPS_R2_BUCKET
+#   DRILL_R2_ACCESS_KEY_ID DRILL_R2_SECRET_ACCESS_KEY (a READ-ONLY token on the backups bucket)
+name: Restore drill
+
+on:
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: restore-drill
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (clean, from the lockfile)
+        run: npm ci
+
+      - name: Install age and rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age rclone
+
+      # A brand-new project with every migration applied — what a replacement project looks like after
+      # `supabase db push` (Runbook B).
+      - name: Start a new, empty Supabase project on the runner
+        run: npx supabase start
+
+      - name: Fetch the newest daily backup
+        env:
+          RCLONE_CONFIG_BKR2_TYPE: s3
+          RCLONE_CONFIG_BKR2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_BKR2_ENDPOINT: ${{ secrets.BACKUPS_R2_ENDPOINT }}
+          RCLONE_CONFIG_BKR2_ACCESS_KEY_ID: ${{ secrets.DRILL_R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_BKR2_SECRET_ACCESS_KEY: ${{ secrets.DRILL_R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_BKR2_REGION: auto
+          BUCKET: ${{ secrets.BACKUPS_R2_BUCKET }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/drill"
+          newest="$(rclone lsf --files-only "bkr2:$BUCKET/daily" | grep -E '^reqon-backup-[0-9]{8}T[0-9]{6}Z\.tar\.age$' | sort | tail -n 1)"
+          [ -n "$newest" ] || { echo "no backup in daily/"; exit 1; }
+          rclone copyto "bkr2:$BUCKET/daily/$newest" "$RUNNER_TEMP/drill/$newest"
+          rclone copyto "bkr2:$BUCKET/daily/${newest%.tar.age}.meta.json" "$RUNNER_TEMP/drill/${newest%.tar.age}.meta.json"
+          echo "drill on $newest"
+
+      - name: Drill (exact restore, equality, idempotence, merge, undo)
+        env:
+          DRILL_AGE_KEY: ${{ secrets.DRILL_AGE_KEY }}
+          PGHOST: 127.0.0.1
+          PGPORT: '54322'
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+          BACKUP_PG_DOCKER_IMAGE: postgres:17
+        run: |
+          key="$RUNNER_TEMP/drill.key"
+          printf '%s\n' "$DRILL_AGE_KEY" > "$key"; chmod 600 "$key"
+          trap 'shred -u "$key" 2>/dev/null || rm -f "$key"' EXIT
+          ops/backup/drill.sh "$RUNNER_TEMP"/drill/reqon-backup-*.tar.age "$key"
+
+      - name: Remove the drill data
+        if: ${{ always() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/drill"
+          npx supabase stop --no-backup || true

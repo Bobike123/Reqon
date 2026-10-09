@@ -11,6 +11,8 @@ import { RequirementPicker } from '../../proposals/RequirementPicker.tsx'
 import { completionLabel } from '../../tasks/lifecycle.ts'
 import { TASK_PRIORITIES, TASK_PRIORITY_LABEL } from '../../tasks/priority.ts'
 import type { TaskPriority } from '../../tasks/types.ts'
+import type { AttachmentPermissions } from '../../auth/permissions.ts'
+import { AttachmentsSection } from '../../attachments/AttachmentsSection.tsx'
 import { buttonDanger, buttonPrimary, buttonSecondary } from '../../ui/buttons.ts'
 import { ActionError } from '../../ui/states.tsx'
 import { DepartmentMove } from './DepartmentMove.tsx'
@@ -22,6 +24,8 @@ export type TaskPermissions = {
   canArchive: boolean
   // Departments this person may move the task to (set_task_department); absent or empty = no control.
   moveTo?: { key: string; name: string }[]
+  // Task attachments (docs/ultraplan Phase 3); absent = view only.
+  attachments?: AttachmentPermissions
 }
 
 const FIELD =
@@ -327,6 +331,8 @@ export function TaskDetails(props: Props) {
           </p>
         )}
       </section>
+
+      <AttachmentsSection taskId={task.id} perms={perms.attachments} />
 
       <section data-testid={`task-links-${task.id}`}>
         <h4 id={fid('h-links')} className={SECTION_HEADING}>

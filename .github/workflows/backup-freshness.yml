@@ -1,0 +1,38 @@
+# Is the newest backup recent? (docs/ultraplan Phase 4; BAK-08)
+#
+# Runs every morning after the backup window and fails — which emails the repository owners — when the
+# newest daily backup in R2 is older than 48 hours. It catches a backup that failed, was skipped, or
+# stopped uploading. It cannot catch GitHub disabling scheduled workflows after 60 days without repository
+# activity (that also silences this check); the independent signal is the app's Settings → Backups panel,
+# which turns red from the same 48-hour rule.
+name: Backup freshness
+
+on:
+  schedule:
+    - cron: '47 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freshness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Install rclone
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+      - name: Is the newest daily backup under 48 hours old?
+        env:
+          BACKUP_R2_REMOTE: bkr2:${{ secrets.BACKUPS_R2_BUCKET }}
+          RCLONE_CONFIG_BKR2_TYPE: s3
+          RCLONE_CONFIG_BKR2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_BKR2_ENDPOINT: ${{ secrets.BACKUPS_R2_ENDPOINT }}
+          RCLONE_CONFIG_BKR2_ACCESS_KEY_ID: ${{ secrets.BACKUPS_R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_BKR2_SECRET_ACCESS_KEY: ${{ secrets.BACKUPS_R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_BKR2_REGION: auto
+        run: ops/backup/freshness.sh

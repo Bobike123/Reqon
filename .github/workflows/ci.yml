@@ -113,6 +113,20 @@ jobs:
       - name: Set up the local Requirements Book
         run: npm run book:sync:local
 
+      # Task attachments (docs/ultraplan Phase 3): the Edge Functions, served against the stack's own S3
+      # endpoint with its fixed local demo keys — tests/e2e/attachments-flow.spec.ts uploads through them.
+      - name: Serve the attachment Edge Functions
+        run: |
+          node scripts/attachments/functions-env-local.mjs
+          nohup npx supabase functions serve --env-file supabase/functions/.env.local > functions-serve.log 2>&1 &
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS http://127.0.0.1:54321/functions/v1/attachment-upload-url || true)
+            if [ "$code" = "200" ]; then exit 0; fi
+            sleep 2
+          done
+          cat functions-serve.log
+          exit 1
+
       - name: Install Playwright's Chromium, with OS dependencies
         run: npx playwright install --with-deps chromium
 
@@ -126,6 +140,13 @@ jobs:
         env:
           PLAYWRIGHT_SUPABASE_URL: http://127.0.0.1:54321
           PLAYWRIGHT_SUPABASE_ANON_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
+
+      # Phase 4: dump → encrypt → verify → R2/GitHub/Drive stand-ins → status record → purge, against this same
+      # local stack with throw-away keys (ops/backup/test/local-cycle.sh; nothing real is touched).
+      - name: Backup chain (local stack, throw-away keys)
+        run: |
+          sudo apt-get install -y -qq age rclone
+          npm run backup:test:local
 
       - name: Upload the Playwright report on failure
         if: failure()

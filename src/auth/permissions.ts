@@ -264,3 +264,33 @@ export function reviewsAnyProposal(actor: TaskActor): boolean {
 export function canSubmitProposal(actor: Pick<TaskActor, 'status'>): boolean {
   return actor.status === 'active'
 }
+
+// Task attachments (20260132000000_task_attachments.sql, docs/ultraplan Phase 3):
+//   upload             request_attachment_upload(): can_edit_task(task) — owner or department authority,
+//                      task not archived;
+//   delete / caption   delete_attachment(), set_attachment_caption(): the active uploader, or department
+//                      authority over the task's department (Head, parent Head, President, VP, Developer).
+// Viewing is every member (is_member()), so it needs no flag here.
+export type AttachmentPermissions = {
+  canUpload: boolean
+  // Department authority: may delete or caption ANY file of this task.
+  canManageAll: boolean
+  // The active actor's id, to recognise their own uploads; null for an alumnus (read-only).
+  actorId: string | null
+}
+
+export function attachmentPermissions(
+  actor: TaskActor,
+  task: Pick<Task, 'owner_id' | 'subteam_key' | 'archived_at'>,
+): AttachmentPermissions {
+  const active = actor.status === 'active'
+  return {
+    canUpload: canEditTask(actor, task),
+    canManageAll: hasDepartmentAuthority(actor, task.subteam_key),
+    actorId: active ? actor.id : null,
+  }
+}
+
+export function canManageAttachment(perms: AttachmentPermissions, uploadedBy: string | null): boolean {
+  return perms.canManageAll || (perms.actorId !== null && uploadedBy === perms.actorId)
+}

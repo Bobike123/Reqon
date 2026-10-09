@@ -111,6 +111,10 @@ export function presentActivity(row: ActivityRow, names: ReadonlyMap<string, str
       return { ...base, icon: '⇢', summary: `Now waits for “${text(d.depends_on_title) ?? 'another task'}”` }
     case 'dependency_removed':
       return { ...base, icon: '⇢', summary: `No longer waits for “${text(d.depends_on_title) ?? 'another task'}”` }
+    case 'attachment_added':
+      return { ...base, icon: '+', summary: `File added: “${text(d.name) ?? 'a file'}”` }
+    case 'attachment_deleted':
+      return { ...base, icon: '−', summary: `File deleted: “${text(d.name) ?? 'a file'}”` }
     case 'legacy_repaired':
       return { ...base, icon: '✓', summary: 'Older proposal completed with required details' }
     default:

@@ -10,6 +10,9 @@ import { defineConfig, devices } from '@playwright/test'
 // globalTeardown, using the service_role key read live from
 // `npx supabase status -o env` — never hardcoded, and never usable from the
 // browser context the tests drive.
+// E2E_PORT: another local Vite app may already hold 5173, and `reuseExistingServer` would then test THAT app.
+const PORT = Number(process.env.E2E_PORT ?? 5173)
+
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false, // fixtures are shared, real database rows — no isolated parallel workers
@@ -20,7 +23,7 @@ export default defineConfig({
   globalTeardown: './tests/e2e/setup/global-teardown.ts',
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:5173',
+    baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
@@ -32,10 +35,13 @@ export default defineConfig({
     // Bound to 127.0.0.1 explicitly: on CI runners `localhost` can resolve to ::1, so Vite would listen on IPv6
     // only while Playwright polls 127.0.0.1 and times out (every CI run since 2026-09-29). Its output is piped
     // so a failure to start shows the predev / Vite log instead of a bare timeout.
-    command: 'npm run dev -- --host 127.0.0.1 --port 5173 --strictPort',
+    command: `npm run dev -- --host 127.0.0.1 --port ${PORT} --strictPort`,
+    // Task attachments and Settings → Backups are tested (tests/e2e/attachments-flow.spec.ts, backups-flow.spec.ts);
+    // both flags are off in normal builds.
+    env: { VITE_ATTACHMENTS_ENABLED: 'true', VITE_BACKUPS_ENABLED: 'true' },
     stdout: 'pipe',
     stderr: 'pipe',
-    url: 'http://127.0.0.1:5173',
+    url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: true,
     timeout: 60_000,
   },

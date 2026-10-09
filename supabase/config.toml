@@ -115,7 +115,20 @@ port = 54324
 [storage]
 enabled = true
 # The maximum file size allowed (e.g. "5MB", "500KB").
-file_size_limit = "50MiB"
+# 100MiB: the largest attachment (a download-only video, Ultraplan Phase 1 limit). Local only —
+# production attachments live in Cloudflare R2, not Supabase Storage.
+file_size_limit = "100MiB"
+
+# Task attachments on the LOCAL stack: the Edge Functions talk to this bucket through the stack's S3
+# endpoint exactly as they talk to R2 in production (docs/ultraplan, requirement ATT-20). Private.
+[storage.buckets.attachments-local]
+public = false
+file_size_limit = "100MiB"
+
+# Encrypted backups on the LOCAL stack (Phase 4): the same S3 code path as the R2 backups bucket.
+[storage.buckets.backups-local]
+public = false
+file_size_limit = "100MiB"
 
 # Uncomment to configure local storage buckets
 # [storage.buckets.images]
@@ -389,6 +402,33 @@ deno_version = 2
 # gateway refuses any request without a valid user JWT; the function then
 # re-checks can_add_members() as the caller (supabase/functions/create-member).
 [functions.create-member]
+verify_jwt = true
+
+# Task attachments (docs/ultraplan, Phase 2). The gateway refuses requests without a valid user JWT;
+# each function then re-checks the token with Auth and lets the database decide as the caller.
+[functions.attachment-upload-url]
+verify_jwt = true
+
+[functions.attachment-confirm]
+verify_jwt = true
+
+[functions.attachment-download-url]
+verify_jwt = true
+
+# Called by the scheduled workflow, not by members: no user JWT exists there. The function's only
+# accepted credential is the shared secret ATTACHMENTS_PURGE_SECRET (x-purge-secret header), and it
+# can only delete objects the database already queued as due.
+[functions.attachment-purge]
+verify_jwt = false
+
+# Automated backups (docs/ultraplan, Phase 4). backup-record is called by the scheduled workflow, not by
+# members: no user JWT exists there, and its only accepted credential is the shared secret
+# BACKUP_RECORD_SECRET (x-backup-secret header). backup-download-url re-checks the member with Auth and lets
+# the database (is_admin(), via RLS on backup_runs) decide as the caller.
+[functions.backup-record]
+verify_jwt = false
+
+[functions.backup-download-url]
 verify_jwt = true
 
 [analytics]

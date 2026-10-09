@@ -71,6 +71,108 @@ export type Database = {
           },
         ]
       }
+      attachment_purge_queue: {
+        Row: {
+          attachment_id: string | null
+          id: number
+          kind: string
+          object_keys: string[]
+          purge_after: string
+          purged_at: string | null
+          queued_at: string
+          reason: string
+          size_bytes: number
+          task_id: string | null
+        }
+        Insert: {
+          attachment_id?: string | null
+          id?: never
+          kind: string
+          object_keys: string[]
+          purge_after: string
+          purged_at?: string | null
+          queued_at?: string
+          reason: string
+          size_bytes: number
+          task_id?: string | null
+        }
+        Update: {
+          attachment_id?: string | null
+          id?: never
+          kind?: string
+          object_keys?: string[]
+          purge_after?: string
+          purged_at?: string | null
+          queued_at?: string
+          reason?: string
+          size_bytes?: number
+          task_id?: string | null
+        }
+        Relationships: []
+      }
+      attachment_quotas: {
+        Row: {
+          quota_bytes: number
+          quota_group: string
+        }
+        Insert: {
+          quota_bytes: number
+          quota_group: string
+        }
+        Update: {
+          quota_bytes?: number
+          quota_group?: string
+        }
+        Relationships: []
+      }
+      backup_runs: {
+        Row: {
+          db_size_bytes: number | null
+          destination: string
+          detail: string | null
+          id: number
+          migration_version: string | null
+          object_key: string | null
+          ok: boolean
+          recipients: string[]
+          recorded_at: string
+          row_count: number | null
+          sha256: string | null
+          size_bytes: number | null
+          taken_at: string
+        }
+        Insert: {
+          db_size_bytes?: number | null
+          destination: string
+          detail?: string | null
+          id?: never
+          migration_version?: string | null
+          object_key?: string | null
+          ok: boolean
+          recipients?: string[]
+          recorded_at?: string
+          row_count?: number | null
+          sha256?: string | null
+          size_bytes?: number | null
+          taken_at: string
+        }
+        Update: {
+          db_size_bytes?: number | null
+          destination?: string
+          detail?: string | null
+          id?: never
+          migration_version?: string | null
+          object_key?: string | null
+          ok?: boolean
+          recipients?: string[]
+          recorded_at?: string
+          row_count?: number | null
+          sha256?: string | null
+          size_bytes?: number | null
+          taken_at?: string
+        }
+        Relationships: []
+      }
       book_chapters: {
         Row: {
           category: string | null
@@ -1601,6 +1703,87 @@ export type Database = {
           },
         ]
       }
+      task_attachments: {
+        Row: {
+          caption: string | null
+          created_at: string
+          deleted_at: string | null
+          duration_ms: number | null
+          failure_reason: string | null
+          height: number | null
+          id: string
+          kind: string
+          mime_type: string
+          object_key: string
+          original_name: string
+          playable: boolean
+          size_bytes: number
+          status: string
+          task_id: string
+          thumb_key: string | null
+          updated_at: string
+          uploaded_by: string | null
+          width: number | null
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          duration_ms?: number | null
+          failure_reason?: string | null
+          height?: number | null
+          id?: string
+          kind: string
+          mime_type: string
+          object_key: string
+          original_name: string
+          playable?: boolean
+          size_bytes: number
+          status?: string
+          task_id: string
+          thumb_key?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+          width?: number | null
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          duration_ms?: number | null
+          failure_reason?: string | null
+          height?: number | null
+          id?: string
+          kind?: string
+          mime_type?: string
+          object_key?: string
+          original_name?: string
+          playable?: boolean
+          size_bytes?: number
+          status?: string
+          task_id?: string
+          thumb_key?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_attachments_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_attachments_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_dependencies: {
         Row: {
           created_at: string
@@ -2558,6 +2741,21 @@ export type Database = {
         }
       }
       assert_task_links: { Args: { p_task_id: string }; Returns: undefined }
+      attachment_mime_extension: {
+        Args: { p_kind: string; p_mime: string }
+        Returns: string
+      }
+      attachment_quota_group: { Args: { p_kind: string }; Returns: string }
+      attachment_size_limit: { Args: { p_kind: string }; Returns: number }
+      attachment_usage: {
+        Args: never
+        Returns: {
+          quota_bytes: number
+          quota_group: string
+          used_bytes: number
+        }[]
+      }
+      attachment_used_bytes: { Args: { p_group: string }; Returns: number }
       attention: {
         Args: { p_season: string; p_today: string }
         Returns: {
@@ -2601,6 +2799,16 @@ export type Database = {
       can_view_finances: { Args: never; Returns: boolean }
       change_reason_detail: { Args: never; Returns: Json }
       clean_text: { Args: { p_text: string }; Returns: string }
+      confirm_attachment: {
+        Args: {
+          p_actual_mime: string
+          p_actual_size: number
+          p_attachment_id: string
+          p_thumb_present: boolean
+          p_uploader: string
+        }
+        Returns: string
+      }
       confirm_spec_readiness: {
         Args: { p_measurement_id: string; p_note: string; p_spec_id: string }
         Returns: {
@@ -2659,7 +2867,20 @@ export type Database = {
         }
       }
       dearmor: { Args: { "": string }; Returns: string }
+      delete_attachment: { Args: { p_attachment_id: string }; Returns: boolean }
       department_authority: { Args: { p_key: string }; Returns: string }
+      enqueue_attachment_purge: {
+        Args: {
+          p_after: string
+          p_reason: string
+          p_row: Database["public"]["Tables"]["task_attachments"]["Row"]
+        }
+        Returns: undefined
+      }
+      fail_stale_attachment_uploads: {
+        Args: { p_now?: string }
+        Returns: number
+      }
       gen_random_uuid: { Args: never; Returns: string }
       gen_salt: { Args: { "": string }; Returns: string }
       has_department_authority: { Args: { p_key: string }; Returns: boolean }
@@ -2709,6 +2930,14 @@ export type Database = {
         Args: { p_clause_key: string; p_task_id: string }
         Returns: boolean
       }
+      list_due_attachment_purges: {
+        Args: { p_limit?: number; p_now?: string }
+        Returns: {
+          id: number
+          object_keys: string[]
+          size_bytes: number
+        }[]
+      }
       lock_proposal_for_command: {
         Args: { p_proposal_id: string }
         Returns: {
@@ -2748,6 +2977,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      mark_attachment_purged: { Args: { p_ids: number[] }; Returns: number }
       pgp_armor_headers: {
         Args: { "": string }
         Returns: Record<string, unknown>[]
@@ -2785,6 +3015,22 @@ export type Database = {
           problem: string
           unresolved_proposals: number
         }[]
+      }
+      record_backup_run: {
+        Args: {
+          p_db_size_bytes?: number
+          p_destination: string
+          p_detail?: string
+          p_migration_version?: string
+          p_object_key?: string
+          p_ok: boolean
+          p_recipients?: string[]
+          p_row_count?: number
+          p_sha256?: string
+          p_size_bytes?: number
+          p_taken_at: string
+        }
+        Returns: number
       }
       record_spec_measurement: {
         Args: {
@@ -2841,6 +3087,24 @@ export type Database = {
       reorder_departments: {
         Args: { p_ordered_keys: string[] }
         Returns: undefined
+      }
+      request_attachment_upload: {
+        Args: {
+          p_duration_ms?: number
+          p_height?: number
+          p_kind: string
+          p_mime_type: string
+          p_original_name: string
+          p_playable?: boolean
+          p_size_bytes: number
+          p_task_id: string
+          p_width?: number
+        }
+        Returns: {
+          attachment_id: string
+          object_key: string
+          thumb_key: string
+        }[]
       }
       request_proposal_changes: {
         Args: {
@@ -3055,6 +3319,10 @@ export type Database = {
       }
       revoke_spec_readiness: {
         Args: { p_reason: string; p_spec_id: string }
+        Returns: boolean
+      }
+      set_attachment_caption: {
+        Args: { p_attachment_id: string; p_caption: string }
         Returns: boolean
       }
       set_current_season: { Args: { p_season_id: string }; Returns: undefined }

@@ -46,6 +46,8 @@ accounts.md
 
 record-demo.cjs
 *.webm 
+# ...except the tiny E2E video fixture (tests/e2e/attachments-flow.spec.ts, docs/ultraplan Phase 3)
+!tests/e2e/fixtures/*.webm
 
 .agents
 
@@ -66,9 +68,12 @@ Reqon_Phase_Prompts
 
 /docs/
 *.md
+# Ultraplan (attachments, backups, restore) — local working plan, never committed
+/docs/ultraplan/
 
 .claude
 demo
 supabase/changes
 # Local pre-change data exports of the hosted project — never commit
 supabase/.backups/
+*.key

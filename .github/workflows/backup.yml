@@ -1,0 +1,176 @@
+# Daily encrypted backup (docs/ultraplan Phase 4; requirements BAK-01…12).
+#
+# dump (backup_reader, read-only) → manifest → age-encrypt to every key in ops/backup/recipients.txt →
+#   R2 daily/ (+ weekly/ on Sundays, monthly/ on the 1st) → weekly: private GitHub repo + Google Drive copy
+#   + encrypted media mirror → attachment purge → status record for Settings → Backups.
+#
+# The repository is public, so logs are public: every script prints counts and sizes only, nothing runs with
+# `set -x`, and the plaintext dump exists only inside the runner's temporary directory (wiped on exit).
+# A failed run fails the job; GitHub emails the repository owners.
+#
+# Secrets (Settings → Secrets and variables → Actions; set by the owner in Phase 7, never in the repo):
+#   BACKUP_PGHOST BACKUP_PGPORT BACKUP_PGUSER BACKUP_PGPASSWORD BACKUP_PGDATABASE   backup_reader via the session pooler
+#   BACKUPS_R2_ENDPOINT BACKUPS_R2_BUCKET BACKUPS_R2_ACCESS_KEY_ID BACKUPS_R2_SECRET_ACCESS_KEY
+#   ATTACHMENTS_R2_BUCKET ATTACHMENTS_R2_ACCESS_KEY_ID ATTACHMENTS_R2_SECRET_ACCESS_KEY   read-only token, for the media mirror
+#   BACKUP_GIT_URL BACKUP_GIT_SSH_KEY                                               private repo + its deploy key
+#   DRIVE_CLIENT_ID DRIVE_CLIENT_SECRET DRIVE_TOKEN DRIVE_FOLDER                    rclone drive remote, scope drive.file
+#   SUPABASE_URL BACKUP_RECORD_SECRET ATTACHMENTS_PURGE_SECRET                      Edge Function access
+name: Backup
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force_weekly:
+        description: 'Also run the weekly steps (GitHub repo, Drive, media mirror)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install age, rclone and the PostgreSQL 17 client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age rclone
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+          sudo apt-get install -y -qq postgresql-client-17
+
+      - name: When are we?
+        id: when
+        run: |
+          weekly=false
+          if [ "$(date -u +%u)" = "7" ] || [ "${{ github.event.inputs.force_weekly }}" = "true" ]; then weekly=true; fi
+          echo "weekly=$weekly" >> "$GITHUB_OUTPUT"
+
+      - name: Dump, check and encrypt
+        id: backup
+        env:
+          PGHOST: ${{ secrets.BACKUP_PGHOST }}
+          PGPORT: ${{ secrets.BACKUP_PGPORT }}
+          PGUSER: ${{ secrets.BACKUP_PGUSER }}
+          PGPASSWORD: ${{ secrets.BACKUP_PGPASSWORD }}
+          PGDATABASE: ${{ secrets.BACKUP_PGDATABASE }}
+          PGSSLMODE: require
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+        run: ops/backup/backup.sh
+
+      - name: Upload to R2 (daily, weekly, monthly)
+        id: publish
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          BACKUP_R2_REMOTE: bkr2:${{ secrets.BACKUPS_R2_BUCKET }}
+          RCLONE_CONFIG_BKR2_TYPE: s3
+          RCLONE_CONFIG_BKR2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_BKR2_ENDPOINT: ${{ secrets.BACKUPS_R2_ENDPOINT }}
+          RCLONE_CONFIG_BKR2_ACCESS_KEY_ID: ${{ secrets.BACKUPS_R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_BKR2_SECRET_ACCESS_KEY: ${{ secrets.BACKUPS_R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_BKR2_REGION: auto
+        run: ops/backup/publish.sh
+
+      - name: Record the R2 result
+        if: ${{ always() && steps.backup.conclusion != 'skipped' }}
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          BACKUP_RECORD_SECRET: ${{ secrets.BACKUP_RECORD_SECRET }}
+          OUTCOME: ${{ steps.publish.outcome }}
+        run: ops/backup/record.sh r2 "$([ "$OUTCOME" = success ] && echo ok || echo fail)"
+
+      - name: Push to the private GitHub repository (weekly)
+        id: github
+        if: ${{ steps.when.outputs.weekly == 'true' && steps.publish.outcome == 'success' }}
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          BACKUP_GIT_URL: ${{ secrets.BACKUP_GIT_URL }}
+          DEPLOY_KEY: ${{ secrets.BACKUP_GIT_SSH_KEY }}
+        run: |
+          key="$RUNNER_TEMP/backup-deploy-key"; hosts="$RUNNER_TEMP/backup-known-hosts"
+          printf '%s\n' "$DEPLOY_KEY" > "$key"; chmod 600 "$key"
+          # GitHub's published SSH host keys, fetched over TLS: no blind trust on first use.
+          curl -fsS https://api.github.com/meta | node -e 'for (const k of JSON.parse(require("fs").readFileSync(0,"utf8")).ssh_keys) console.log("github.com " + k)' > "$hosts"
+          trap 'rm -f "$key"' EXIT
+          BACKUP_GIT_SSH_KEY="$key" BACKUP_GIT_KNOWN_HOSTS="$hosts" ops/backup/push-github.sh
+
+      - name: Record the GitHub result
+        if: ${{ always() && steps.github.conclusion != 'skipped' && steps.github.conclusion != '' }}
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          BACKUP_RECORD_SECRET: ${{ secrets.BACKUP_RECORD_SECRET }}
+          OUTCOME: ${{ steps.github.outcome }}
+        run: ops/backup/record.sh github "$([ "$OUTCOME" = success ] && echo ok || echo fail)" "$([ "$OUTCOME" = success ] || echo push_failed)"
+
+      - name: Copy to Google Drive (weekly)
+        id: drive
+        if: ${{ steps.when.outputs.weekly == 'true' && steps.publish.outcome == 'success' }}
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          BACKUP_DRIVE_REMOTE: bkdrive:${{ secrets.DRIVE_FOLDER }}
+          RCLONE_CONFIG_BKDRIVE_TYPE: drive
+          RCLONE_CONFIG_BKDRIVE_SCOPE: drive.file
+          RCLONE_CONFIG_BKDRIVE_CLIENT_ID: ${{ secrets.DRIVE_CLIENT_ID }}
+          RCLONE_CONFIG_BKDRIVE_CLIENT_SECRET: ${{ secrets.DRIVE_CLIENT_SECRET }}
+          RCLONE_CONFIG_BKDRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
+        run: ops/backup/push-drive.sh
+
+      - name: Mirror new media to Google Drive, encrypted (weekly)
+        id: media
+        if: ${{ steps.when.outputs.weekly == 'true' && steps.drive.outcome == 'success' }}
+        env:
+          BACKUP_MEDIA_SRC: bkatt:${{ secrets.ATTACHMENTS_R2_BUCKET }}
+          BACKUP_MEDIA_DEST: bkdrive:${{ secrets.DRIVE_FOLDER }}/media
+          RCLONE_CONFIG_BKATT_TYPE: s3
+          RCLONE_CONFIG_BKATT_PROVIDER: Cloudflare
+          RCLONE_CONFIG_BKATT_ENDPOINT: ${{ secrets.BACKUPS_R2_ENDPOINT }}
+          RCLONE_CONFIG_BKATT_ACCESS_KEY_ID: ${{ secrets.ATTACHMENTS_R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_BKATT_SECRET_ACCESS_KEY: ${{ secrets.ATTACHMENTS_R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_BKATT_REGION: auto
+          RCLONE_CONFIG_BKDRIVE_TYPE: drive
+          RCLONE_CONFIG_BKDRIVE_SCOPE: drive.file
+          RCLONE_CONFIG_BKDRIVE_CLIENT_ID: ${{ secrets.DRIVE_CLIENT_ID }}
+          RCLONE_CONFIG_BKDRIVE_CLIENT_SECRET: ${{ secrets.DRIVE_CLIENT_SECRET }}
+          RCLONE_CONFIG_BKDRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
+        run: ops/backup/media-mirror.sh
+
+      - name: Record the Drive result
+        if: ${{ always() && steps.drive.conclusion != 'skipped' && steps.drive.conclusion != '' }}
+        env:
+          BACKUP_OUT_DIR: ${{ runner.temp }}/backup-out
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          BACKUP_RECORD_SECRET: ${{ secrets.BACKUP_RECORD_SECRET }}
+          OUTCOME: ${{ steps.drive.outcome }}
+          MEDIA: ${{ steps.media.outcome }}
+        run: |
+          if [ "$OUTCOME" = success ] && [ "$MEDIA" != failure ]; then ops/backup/record.sh drive ok
+          elif [ "$OUTCOME" = success ]; then ops/backup/record.sh drive fail media_mirror_failed
+          else ops/backup/record.sh drive fail upload_failed; fi
+
+      - name: Delete attachment files whose 30 days are over
+        if: ${{ always() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          ATTACHMENTS_PURGE_SECRET: ${{ secrets.ATTACHMENTS_PURGE_SECRET }}
+        run: ops/backup/purge.sh
+
+      - name: Make sure no plaintext survives
+        if: ${{ always() }}
+        run: |
+          rm -rf "$RUNNER_TEMP/backup-out" "$RUNNER_TEMP"/backup-deploy-key "$RUNNER_TEMP"/backup-known-hosts
+          find "$RUNNER_TEMP" /tmp -maxdepth 2 \( -name '*.dump' -o -name 'bundle.tar' -o -name 'manifest.json' \) -print -delete 2>/dev/null | wc -l

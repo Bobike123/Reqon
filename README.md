@@ -156,6 +156,13 @@ Get them from the Supabase dashboard: **Project Settings → API**.
   Anyone can read it. That is fine for these two, because Row Level Security
   decides what the anon key is allowed to see.
 
+Two optional feature flags (both **off** unless set to `true`; they are baked into the build too):
+
+| Variable | Shows |
+|---|---|
+| `VITE_ATTACHMENTS_ENABLED` | the Files section on tasks and Settings → File storage |
+| `VITE_BACKUPS_ENABLED` | Settings → Backups (the President, Vice President and Developers only) |
+
 > **Never put the `service_role` key or the database password in `.env.local`,
 > in the hosting dashboard, or anywhere else in this repository.** The
 > `service_role` key bypasses Row Level Security completely — with it, anyone
@@ -388,6 +395,21 @@ migration was applied to production before the repair, stop: the expected hashes
 in the verify file no longer apply, and that file's version must be checked
 before it is added to step 2. Keep these commands as the record of what was run; do
 not run them again.
+
+### 6b. Task attachments, encrypted backups and restore
+
+Photos, videos and PDFs on tasks (bytes in a private Cloudflare R2 bucket, compressed in the browser first), a daily
+age-encrypted backup of the database, and a safe way to restore it. All three are **off until the owner enables them**
+(Phase 7 of the working plan): the migrations `20260132000000`, `20260133000000` and `20260134000000` add tables, a read-only
+login role `backup_reader` and a private `restore` schema; the Edge Functions `attachment-*` and `backup-*` need their
+secrets; the workflows `.github/workflows/backup.yml`, `backup-freshness.yml` and `restore-drill.yml` need theirs.
+Everything under `ops/backup/` is shell + Node; `npm run backup:test:local` proves the backup chain and
+`npm run restore:drill:local` restores a backup into a throw-away second local Supabase project.
+
+The operating documents (what is backed up and how to read Settings → Backups; the restore runbooks A and B; key holders and
+rotation; Cloudflare setup) are kept in `docs/ultraplan/` (`BACKUP.md`, `RUNBOOK_RESTORE.md`, `KEY_MANAGEMENT.md`,
+`R2_SETUP.md`). `docs/` is git-ignored for now: **move those four files to a tracked folder before relying on them**,
+because a restore is needed on the day the laptop that holds them may not be.
 
 ---
 
@@ -894,6 +916,14 @@ These were expensive to get right. Please read before changing them.
 - **Read more than 1,000 rows by paging.** Supabase silently truncates a response
   at `max_rows` with no error. There are 1,146 clauses — a plain `.select()`
   loses 146 of them. See `fetchAllRows` in `src/data/errors.ts`.
+- **Backups must stay readable and secret.** Never add a key to `ops/backup/recipients.txt` that is not a person's own
+  public key (review it like code), never log rows or secrets in `ops/backup/*` (the repository is public; no `set -x`),
+  and never grant `backup_reader` anything beyond read. `backup_runs` is written only by the `backup-record` function.
+- **Every public table keeps its tombstone trigger** (`zz_record_tombstone`): without it a restore cannot tell a row
+  deleted on purpose from a lost one. `restore_support_test.sql` fails for a new table that lacks it — add
+  `select restore.install_tombstone_triggers();` to the migration that creates the table.
+- **Never `pg_dump` with both `--schema` and `--table`**: the table option silently drops the schemas (this once produced
+  an archive of two tables). `backup.sh` uses two dumps for that reason.
 - **Don't delete people.** Retire them (§7).
 - **Don't invent regulation content.** If a date or a limit is not in the seed
   data, render "TBC" and say where it would come from.
