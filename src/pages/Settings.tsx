@@ -129,7 +129,7 @@ export default function Settings() {
       )}
 
       {canAdminister && backupsEnabled() && (
-        <Section title="Backups">
+        <Section title="Backups" tutorialId="settings-backups">
           <BackupsPanel />
           <div className="mt-3">
             <BackupsGuide defaultAudience={myRoles.includes('developer') ? 'developer' : 'leaders'} />

@@ -53,20 +53,18 @@ function FilesLibrary() {
     void thumbs.refetch()
   }
 
-  // The updater form reads the address as it is NOW, so two quick changes (a filter, then a typed word) never
-  // overwrite each other with a stale copy.
+  // Two quick changes (a filter, then a typed word) must not overwrite each other: the router hands every update the
+  // address of the LAST RENDER, so the newest address is kept here and used for the next change.
+  const latest = useRef(params)
+  latest.current = params
   const set = (next: { kind?: string; q?: string }) => {
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev)
-        for (const [key, value] of Object.entries(next)) {
-          if (value && value !== 'all') p.set(key, value)
-          else p.delete(key)
-        }
-        return p
-      },
-      { replace: true },
-    )
+    const p = new URLSearchParams(latest.current)
+    for (const [key, value] of Object.entries(next)) {
+      if (value && value !== 'all') p.set(key, value)
+      else p.delete(key)
+    }
+    latest.current = p
+    setParams(p, { replace: true })
   }
 
   return (

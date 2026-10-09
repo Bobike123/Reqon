@@ -63,15 +63,19 @@ export function TutorialProvider({
 
   const end = useCallback(
     (outcome: TutorialRecord) => {
+      // Finishing or leaving the Developer guide says nothing about the tour: the first-visit offer stays as it was.
+      const wasGuide = tour?.[0]?.guide !== undefined
       setTour(null)
-      writeTutorialRecord(outcome)
-      setRecord(outcome)
+      if (!wasGuide) {
+        writeTutorialRecord(outcome)
+        setRecord(outcome)
+      }
       requestAnimationFrame(() => {
         if (returnFocusTo?.isConnected) returnFocusTo.focus()
         else document.getElementById('main-content')?.focus()
       })
     },
-    [returnFocusTo],
+    [returnFocusTo, tour],
   )
 
   const openChooser = useCallback(() => {

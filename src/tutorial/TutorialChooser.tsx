@@ -66,6 +66,32 @@ export function TutorialChooser() {
         ))}
       </ul>
 
+      {menu.developerGuide && (
+        <section aria-labelledby={`${titleId}-dev`} className="mt-5 border-t border-slate-200 pt-4" data-testid="developer-guide">
+          <h3 id={`${titleId}-dev`} className="text-sm font-semibold text-slate-900">
+            Developer guide
+          </h3>
+          <p className="mt-0.5 text-sm text-pretty text-slate-600">
+            Separate from the tour: how the backups work, which keys a data transfer needs, and which scripts load a backup. Only
+            Developers see it.
+          </p>
+          <button type="button" className={`${optionSecondary} mt-2`} onClick={() => tutorial.start({ kind: 'guide' })}>
+            <span className="font-semibold">Backups, keys and loading a backup</span>
+            <span className="text-sm text-slate-600">The whole guide · {stepCount(menu.developerGuide.count)}</span>
+          </button>
+          <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
+            {menu.developerGuide.parts.map((part) => (
+              <li key={part.id}>
+                <button type="button" className={chapterButton} onClick={() => tutorial.start({ kind: 'guide', part: part.id })}>
+                  <span>{part.label}</span>
+                  <span className="shrink-0 text-xs font-normal text-slate-600 tabular-nums">{stepCount(part.count)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="mt-5 flex justify-end">
         <button type="button" className={buttonSecondary} onClick={tutorial.closeChooser}>
           Close

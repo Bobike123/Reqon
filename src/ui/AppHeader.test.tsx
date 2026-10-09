@@ -41,13 +41,21 @@ beforeEach(() => {
 const desktopNav = () => screen.getAllByRole('navigation', { name: 'Main' })[0]
 
 describe('main navigation', () => {
-  it('lists every screen, in the order the build brief gives them', () => {
+  it('lists every screen, grouped by how people use it', () => {
     renderHeader()
     const labels = within(desktopNav()).getAllByRole('link').map((a) => a.textContent)
-    // Proposals and Meetings are two screens: the old "Meetings" was neither.
+    // Now · daily work · planning · competition rules · records · admin. (Files shows only with attachments on,
+    // Finances only for people who may see money.) Proposals and Meetings are two screens.
     expect(labels).toEqual([
-      'Now', 'Priorities', 'Register', 'Book', 'Milestones', 'Gantt', 'Board', 'Proposals', 'Archive', 'Meetings', 'Spec sheet', 'Settings',
+      'Now', 'Board', 'Priorities', 'Proposals', 'Meetings', 'Milestones', 'Gantt', 'Register', 'Book', 'Spec sheet', 'Archive', 'Settings',
     ])
+  })
+
+  it('draws a thin divider where one group ends and the next begins, and nowhere else', () => {
+    renderHeader()
+    const nav = within(desktopNav())
+    const divided = nav.getAllByRole('link').filter((a) => a.closest('li')?.className.includes('border-l')).map((a) => a.textContent)
+    expect(divided).toEqual(['Board', 'Milestones', 'Register', 'Archive', 'Settings'])
   })
 
   it('makes Settings reachable — before this it had no link from anywhere', () => {

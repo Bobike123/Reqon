@@ -479,7 +479,8 @@ describe('the real tour', () => {
 
   it('keeps every step short enough to read in a small card', () => {
     expect(new Set(TUTORIAL_STEPS.map((s) => s.id)).size).toBe(TUTORIAL_STEPS.length)
-    for (const step of TUTORIAL_STEPS) {
+    // The Developer guide is a separate walk-through with commands in it; its own limit is in developerGuide.test.tsx.
+    for (const step of TUTORIAL_STEPS.filter((s) => !s.guide)) {
       expect(step.title.length).toBeGreaterThan(0)
       expect(step.body.length, `step ${step.id} is too long to read in a small card`).toBeLessThan(240)
     }
@@ -494,8 +495,9 @@ describe('the real tour', () => {
   it('does not advertise the Developer exception in tour copy', () => {
     const copy = [
       ...Object.values(AUDIENCES).map((audience) => audience.label),
-      ...TUTORIAL_STEPS.flatMap((step) => [step.title, step.body]),
+      ...TUTORIAL_STEPS.filter((step) => !step.guide).flatMap((step) => [step.title, step.body]),
     ].join('\n')
+    // (the separate Developer guide is for Developers and says so; it is not part of any tour)
     expect(copy).not.toMatch(/developer/i)
     expect(tourMenu(TUTORIAL_STEPS, viewerFor(['developer'])).role?.label).toBe('Maintenance access')
   })

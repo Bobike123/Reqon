@@ -53,17 +53,17 @@ export function BackupsPanel({ now = new Date() }: { now?: Date }) {
 
   return (
     <div className="space-y-3" data-testid="backups-panel">
-      <p role={overall.tone === 'ok' ? 'status' : 'alert'} className={`rounded border p-3 text-sm ${TONE[overall.tone]}`} data-testid="backups-overall">
+      <p role={overall.tone === 'ok' ? 'status' : 'alert'} className={`rounded border p-3 text-sm ${TONE[overall.tone]}`} data-testid="backups-overall" data-tutorial="backups-status">
         {overall.text}
       </p>
 
-      <ul className="space-y-2">
+      <ul className="space-y-2" data-tutorial="backups-copies">
         {health.map((h) => (
           <DestinationCard key={h.destination} health={h} />
         ))}
       </ul>
 
-      <div className="rounded border border-slate-200 bg-white p-3">
+      <div className="rounded border border-slate-200 bg-white p-3" data-tutorial="backups-download">
         <h3 className="text-sm font-medium text-slate-900">Download the newest backup</h3>
         <p className="mt-1 text-xs text-slate-600">
           The file is encrypted. Only the key holders (President, Vice President, Developers) can open it, with the private

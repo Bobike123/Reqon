@@ -15,7 +15,7 @@ export function BackupsGuide({ defaultAudience = 'leaders' }: { defaultAudience?
   const [audience, setAudience] = useState<Audience>(defaultAudience)
 
   return (
-    <details className="rounded border border-slate-200 bg-white" data-testid="backups-guide">
+    <details className="rounded border border-slate-200 bg-white" data-testid="backups-guide" data-tutorial="backups-guide">
       <summary className="cursor-pointer p-3 text-sm font-medium text-slate-900">How backups work — step by step</summary>
       <div className="space-y-4 border-t border-slate-200 p-3">
         <Overview />

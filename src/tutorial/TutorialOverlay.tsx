@@ -29,6 +29,20 @@ function findTarget(id: string): HTMLElement | null {
 
 type Lookup = { stepId: string; el: HTMLElement | null }
 
+// A step's text, line by line: a line starting with "$ " is a command (monospace, wraps anywhere so a long
+// path never widens the card); every other line is a sentence. A one-line body stays one paragraph.
+function bodyLines(body: string) {
+  return body.split('\n').map((line, i) =>
+    line.startsWith('$ ') ? (
+      <code key={i} className="block rounded bg-slate-100 px-2 py-1 font-mono text-xs break-all whitespace-pre-wrap text-slate-900">
+        {line}
+      </code>
+    ) : (
+      <p key={i}>{line}</p>
+    ),
+  )
+}
+
 // Draws one step over the real app: a dimmed page, a spotlight around the real
 // control, and a small card explaining it.
 //
@@ -251,6 +265,9 @@ export function TutorialOverlay({
         </div>
         {/* Role steps say so, so nobody wonders why a colleague's tour
             showed them a button they do not have. */}
+        {step.guide && (
+          <p className="mt-2 inline-block rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-semibold text-white">Developer guide</p>
+        )}
         {step.audience && (
           <p className="mt-2 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-900">
             Only for: {AUDIENCES[step.audience].label}
@@ -259,9 +276,9 @@ export function TutorialOverlay({
         <h2 id={titleId} className="mt-1.5 text-base font-semibold text-slate-900">
           {step.title}
         </h2>
-        <p id={bodyId} className="mt-1 text-sm leading-relaxed text-slate-700">
-          {step.body}
-        </p>
+        <div id={bodyId} className="mt-1 space-y-1.5 text-sm leading-relaxed text-slate-700">
+          {bodyLines(step.body)}
+        </div>
         {status === 'missing' && (
           <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
             This part of the screen isn’t showing right now — it may still be loading, or be

@@ -127,8 +127,8 @@ export function AppHeader() {
 
       <nav aria-label="Main" className={`${SHELL} hidden pb-2 sm:block`} data-tutorial="main-nav">
         <ul className="flex flex-wrap gap-1">
-          {items.map((item) => (
-            <li key={item.to}>
+          {items.map((item, i) => (
+            <li key={item.to} className={i > 0 && items[i - 1].group !== item.group ? 'ml-1.5 border-l border-slate-200 pl-1.5' : undefined}>
               <NavLink to={item.to} end={item.end} className={desktopLink}>
                 {item.label}
               </NavLink>

@@ -11,22 +11,22 @@ export type TourViewer = Permissions & { isHeadOfDepartment: boolean }
 
 export type Side = 'bottom' | 'top' | 'right' | 'left'
 
-// The parts of the tour, in the order they run: one per screen, so someone who
+// The parts of the tour, in the order they run (the same order as the menu): one per screen, so someone who
 // only wants to learn the Board can take just that part from the chooser.
 export const CHAPTERS = [
   { id: 'start', label: 'Getting started' },
   { id: 'now', label: 'Now' },
+  { id: 'board', label: 'Board' },
   { id: 'priorities', label: 'Priorities' },
-  { id: 'register', label: 'Register' },
-  { id: 'book', label: 'Requirements Book' },
+  { id: 'proposals', label: 'Task proposals' },
+  { id: 'meetings', label: 'Meetings' },
   { id: 'milestones', label: 'Milestones' },
   { id: 'gantt', label: 'Gantt' },
-  { id: 'board', label: 'Board' },
-  { id: 'proposals', label: 'Task proposals' },
-  { id: 'archive', label: 'Archive' },
-  { id: 'files', label: 'Files' },
-  { id: 'meetings', label: 'Meetings' },
+  { id: 'register', label: 'Register' },
+  { id: 'book', label: 'Requirements Book' },
   { id: 'specs', label: 'Spec sheet' },
+  { id: 'files', label: 'Files' },
+  { id: 'archive', label: 'Archive' },
   { id: 'finances', label: 'Finances' },
   { id: 'settings', label: 'Settings and your account' },
   // The closing step. Ends the full tour and the role tour; never offered alone.
@@ -34,6 +34,17 @@ export const CHAPTERS = [
 ] as const
 
 export type ChapterId = (typeof CHAPTERS)[number]['id']
+
+// The Developer guide: a second, separate guided walk-through (backups, keys, loading a backup). It is never
+// part of the full tour, the role tour or a screen's part; only a Developer is offered it, from the chooser.
+export const GUIDE_PARTS = [
+  { id: 'dev-how', label: 'How the backups work' },
+  { id: 'dev-keys', label: 'Keys and accounts' },
+  { id: 'dev-load', label: 'Loading a backup' },
+  { id: 'dev-practice', label: 'Practice and documents' },
+] as const
+
+export type GuidePartId = (typeof GUIDE_PARTS)[number]['id']
 
 // Who a step is for, decided from the same permissions the screens use to
 // decide what to show — so the tour never explains a control the person
@@ -73,7 +84,10 @@ export type Audience = keyof typeof AUDIENCES
 
 export type TutorialStep = {
   id: string
-  chapter: ChapterId
+  chapter: ChapterId | GuidePartId
+  // Set on the Developer guide's steps. They are left out of every other tour. Their text may run to several
+  // lines; a line starting with "$ " is shown as a command.
+  guide?: 'developer'
   // Screen to open for this step. Omit to stay on whatever is showing.
   route?: string
   // The value of a data-tutorial="…" attribute on the REAL element to
@@ -630,5 +644,141 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'help-button',
     title: 'That’s the tour',
     body: 'Start it again, or just one screen of it, from Tutorial — here, or under Menu on a phone. Everything you saw was real data, and nothing was changed.',
+  },
+  // ------------------------------------------------- Developer guide (separate)
+  // Shown only through the chooser's "Developer guide", only to a Developer, and never in any other tour.
+  {
+    id: 'dev-start',
+    guide: 'developer',
+    chapter: 'dev-how',
+    route: '/settings',
+    target: 'settings-backups',
+    title: 'Developer guide: backups and data transfer',
+    body: 'This guide explains how the backups work, which keys a data transfer needs, and which scripts load a backup. It never changes data. The full documents are in ops/backup/docs/ in the repository.',
+  },
+  {
+    id: 'dev-pipeline',
+    guide: 'developer',
+    chapter: 'dev-how',
+    route: '/settings',
+    target: 'backups-status',
+    title: 'What runs every night',
+    body: 'The Backup workflow, daily at 03:17 UTC (Actions → Backup; tick force_weekly to run the Sunday steps now):\n1. log in as the read-only backup_reader\n2. dump public and auth, check before equals after\n3. encrypt with age to ops/backup/recipients.txt\n4. upload to R2 daily/ (weekly/ on Sundays, monthly/ on the 1st)\n5. Sundays: private repository, Drive, encrypted attachment files\n6. record the result, purge expired files',
+  },
+  {
+    id: 'dev-where',
+    guide: 'developer',
+    chapter: 'dev-how',
+    route: '/settings',
+    target: 'backups-copies',
+    title: 'Where the copies are',
+    body: 'R2 reqon-backups: daily/ 35 days, weekly/ 26 weeks, monthly/ 24 months. Private GitHub repository: the newest 26 weekly files. Google Drive: the newest 8 weekly files and an encrypted copy of the attachment files. Each backup is reqon-backup-<UTC time>.tar.age with a .meta.json (size, sha256, key fingerprints).',
+  },
+  {
+    id: 'dev-status',
+    guide: 'developer',
+    chapter: 'dev-how',
+    route: '/settings',
+    target: 'backups-status',
+    title: 'When this page is not green',
+    body: 'Red means no good backup for 48 hours or the last try failed; the page names the cause.\nLogin refused: BACKUP_PG* secrets or the backup_reader password (database and GitHub must hold the same one).\nData kept changing: run again.\nUpload or push failed: a token expired.\nThe Actions logs show counts only. Backup freshness checks daily at 09:47 UTC; the restore drill runs Mondays at 05:17 UTC.',
+  },
+  {
+    id: 'dev-age',
+    guide: 'developer',
+    chapter: 'dev-keys',
+    route: '/settings',
+    target: 'backups-guide',
+    title: 'Key 1: your age key',
+    body: 'Each key holder makes their own, on their own computer:\n$ age-keygen -o ~/reqon-backup.key\nSend only the age1… line to be added to ops/backup/recipients.txt. The private file opens every backup made for you and cannot be recovered: keep it in a password manager and on a disk that is not this computer.',
+  },
+  {
+    id: 'dev-r2',
+    guide: 'developer',
+    chapter: 'dev-keys',
+    route: '/settings',
+    title: 'Key 2: the R2 tokens',
+    body: 'Cloudflare → R2 → Manage API tokens, no expiry, each limited to one bucket. The secret is shown once: store it, then test it before setting it.\nattachments, Read & Write → Supabase ATTACHMENTS_S3_*\nbackups, Read & Write → GitHub BACKUPS_R2_* and Supabase BACKUPS_S3_*\nattachments, Read only → GitHub ATTACHMENTS_R2_*\nbackups, Read only → restore-drill DRILL_R2_*',
+  },
+  {
+    id: 'dev-db',
+    guide: 'developer',
+    chapter: 'dev-keys',
+    route: '/settings',
+    title: 'Key 3: database logins',
+    body: 'backup_reader is read-only; its password lives in the database and in the GitHub secret BACKUP_PGPASSWORD, and they must match.\nA restore uses the TARGET database’s owner login, not backup_reader. Set it in your shell only:\n$ export PGHOST=… PGPORT=5432 PGUSER=postgres.<ref> PGPASSWORD=…\n$ export RESTORE_CONFIRM_HOST=$PGHOST',
+  },
+  {
+    id: 'dev-accounts',
+    guide: 'developer',
+    chapter: 'dev-keys',
+    route: '/settings',
+    title: 'Other accounts for a transfer',
+    body: 'GitHub: a private backup repository with a write deploy key (BACKUP_GIT_SSH_KEY). Google: an OAuth client and an rclone token for Drive (DRIVE_*). Supabase: the new project and your CLI login. Vercel: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY. Every secret name and where it is set: ops/backup/docs/HOSTED_SETUP.md. GitHub never shows a stored secret back, so keep each value in your password manager.',
+  },
+  {
+    id: 'dev-fetch',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    target: 'backups-download',
+    title: 'Get a backup and check it',
+    body: 'Download the newest here, or take one from R2, the private repository or Drive. Compare the sha256 shown above, then on your own computer:\n$ ops/backup/verify.sh reqon-backup-….tar.age ~/reqon-backup.key\nIt checks the checksum, decrypts, reads the manifest and both dumps.',
+  },
+  {
+    id: 'dev-plan',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    title: 'Dry run first',
+    body: '$ ops/backup/restore.sh plan <backup> <key>\nNothing is written to public. Per table it lists staged, live, deleted since, to insert and rejected rows (with the reason: missing login, conflict, broken rule, missing parent). The merge inserts only missing rows, never overwrites live ones, and never brings back a row deleted on purpose.',
+  },
+  {
+    id: 'dev-apply',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    title: 'Apply the restore',
+    body: '$ ops/backup/restore.sh apply <backup> <key>\nType restore to confirm. Options: --exclude schema.table and --skip-rejected. It first copies every public table to maintenance_backup, then inserts in one transaction (all or nothing) and prints a run id. Run it when nobody is editing.',
+  },
+  {
+    id: 'dev-undo',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    title: 'Take it back',
+    body: '$ ops/backup/restore.sh undo <run id>\nIt deletes exactly what that run inserted, and refuses if a restored row was edited since (--force overrides). For a few rows edited badly:\n$ ops/backup/restore.sh stage <backup> <key>\nthen restore.revert_rows for the listed primary keys.',
+  },
+  {
+    id: 'dev-lost',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    title: 'The project is lost: rebuild',
+    body: '1. new Supabase project, same region, then\n$ npx supabase link --project-ref <new>\n2. $ npx supabase db push --linked\n3. $ ops/backup/restore.sh apply <backup> <key> --exact\n4. $ npx supabase functions deploy\n5. set the Supabase and GitHub secrets and a new backup_reader password\n6. Vercel variables, R2 CORS, sign in, run Backup once',
+  },
+  {
+    id: 'dev-transfer',
+    guide: 'developer',
+    chapter: 'dev-load',
+    route: '/settings',
+    title: 'Moving data to another database',
+    body: 'It is the same as a rebuild, with the target’s owner login in PG*. Use --exact only on a new, empty project; it refuses one that already has other logins. Add the new owners’ age keys to recipients.txt first, so they can open the backup. Logins and password hashes come across; Edge Function secrets do not.',
+  },
+  {
+    id: 'dev-practice',
+    guide: 'developer',
+    chapter: 'dev-practice',
+    route: '/settings',
+    title: 'Practice without risk',
+    body: '$ npm run backup:test:local\nruns the whole backup chain on the local stack.\n$ npm run restore:drill:local\nrebuilds a backup into a second, throw-away local project. On GitHub, Restore drill (Mondays, or by hand) restores the newest real backup into a fresh project and checks it.',
+  },
+  {
+    id: 'dev-docs',
+    guide: 'developer',
+    chapter: 'dev-practice',
+    route: '/settings',
+    title: 'Where to read more',
+    body: 'ops/backup/docs/: BACKUP.md (what is backed up, reading the status), RUNBOOK_RESTORE.md (runbooks A and B), KEY_MANAGEMENT.md (holders, rotation), R2_SETUP.md (Cloudflare), HOSTED_SETUP.md (what exists, secret names). A restore brings back the state at 03:17 UTC; attachment files are not in the database backup.',
   },
 ]
