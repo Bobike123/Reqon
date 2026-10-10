@@ -164,9 +164,10 @@ function ClauseRowInner({
       </div>
 
       {/* On a wide screen the controls get a column of their own: the rule
-          reads on the left, what the team did about it lines up on the right. */}
+          reads on the left, what the team did about it lines up on the right.
+          On a phone, status, owner and star share one line; evidence goes under. */}
       <div
-        className="mt-2 flex flex-wrap items-center gap-2 xl:mt-0"
+        className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] items-center gap-2 sm:flex sm:flex-wrap xl:mt-0"
         data-tutorial={tutorialId ? 'register-row-controls' : undefined}
       >
         <label className="sr-only" htmlFor={`state-${clause.clause_key}`}>
@@ -176,7 +177,7 @@ function ClauseRowInner({
           id={`state-${clause.clause_key}`}
           value={row.state}
           onChange={(e) => onSetState(clause.clause_key, e.target.value as ClauseState)}
-          className="min-h-11 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0"
+          className="min-h-11 w-full min-w-0 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 sm:w-auto"
         >
           {STATES.map((s) => (
             <option key={s.value} value={s.value}>
@@ -216,7 +217,7 @@ function ClauseRowInner({
               onSetEvidence(clause.clause_key, evidence)
             }
           }}
-          className="min-h-11 w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 sm:min-h-0 sm:w-auto sm:flex-1 xl:order-last xl:basis-full"
+          className="min-h-11 w-full min-w-0 rounded border border-slate-300 px-2 py-1 text-sm text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 col-span-full order-last sm:order-none sm:min-h-0 sm:w-auto sm:flex-1 xl:order-last xl:basis-full"
         />
 
         <button

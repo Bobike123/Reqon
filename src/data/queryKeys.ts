@@ -32,6 +32,8 @@ export const queryKeys = {
   subteams: ['subteams'] as const,
   // The club's default meeting agenda. One row, not season-scoped.
   meetingTemplate: ['meeting_template'] as const,
+  // The contacts directory, categories and contacts together. Not season-scoped.
+  contacts: ['contacts'] as const,
 
   // The season prefix itself. Rarely used directly — see rule 2 above — but
   // kept so a whole-season invalidation stays exactly this one call.

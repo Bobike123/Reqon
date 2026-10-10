@@ -179,6 +179,13 @@ export type TaskActor = {
   governs?: readonly string[]
 }
 
+// can_edit_contacts() (20260136000000): the Head of any active department,
+// the President, the Vice President or a Developer.
+export function canEditContacts(actor: TaskActor | null): boolean {
+  if (!actor || actor.status !== 'active') return false
+  return actor.isDeveloper || actor.isGovernance === true || actor.headOf.length > 0
+}
+
 // department_authority(key) is not null (20260130000000): the Head (directly
 // or through the parent), a Developer, or the President / Vice President for
 // every active department and for unassigned work (key null).

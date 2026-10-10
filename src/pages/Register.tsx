@@ -89,8 +89,14 @@ export default function Register() {
   // printed reference, which two different rules can share).
   const readingKey = searchParams.get('rule')
   const [pageTurn, setPageTurn] = useState<{ rule: string; page: number } | null>(null)
+  // Opening the reader is its own history step, so Back (the phone's back
+  // gesture, where the reader covers the screen) closes it instead of leaving
+  // the Register. Moving an already-open reader to another rule replaces it.
   const openBook = useCallback(
-    (clauseKey: string) => setSearchParams((current) => mergeSearchParams(current, { rule: clauseKey }), { replace: true }),
+    (clauseKey: string) =>
+      setSearchParams((current) => mergeSearchParams(current, { rule: clauseKey }), {
+        replace: new URLSearchParams(window.location.search).has('rule'),
+      }),
     [setSearchParams],
   )
   const closeBook = () => {
@@ -282,8 +288,8 @@ export default function Register() {
         </div>
       </fieldset>
 
-      <div role="search" aria-label="Find rules" className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-tutorial="register-filters">
-        <div>
+      <div role="search" aria-label="Find rules" className="mb-4 grid grid-cols-2 gap-2 xl:grid-cols-4" data-tutorial="register-filters">
+        <div className="col-span-2 sm:col-span-1">
           <label htmlFor="search" className="block text-xs font-medium text-slate-600">
             Search
           </label>
@@ -336,7 +342,7 @@ export default function Register() {
           </select>
         </div>
 
-        <div className="flex items-end gap-4 pb-1">
+        <div className="col-span-2 flex flex-wrap items-end gap-x-4 gap-y-2 pb-1 sm:col-span-1">
           {/* Visible, not hidden: this default is why the screen is usable. */}
           <label className="flex items-center gap-2 text-sm text-slate-800">
             <input
@@ -448,9 +454,10 @@ export default function Register() {
           onKeyDown={(e) => {
             if (e.key === 'Escape') closeBook()
           }}
-          className="fixed inset-0 z-40 overflow-auto bg-white p-3 lg:sticky lg:top-2 lg:z-auto lg:max-h-[calc(100dvh-1rem)] lg:rounded-lg lg:border lg:border-slate-300 lg:shadow-sm"
+          className="register-reader fixed inset-0 z-50 overflow-auto overscroll-contain bg-white px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:sticky lg:top-2 lg:z-auto lg:max-h-[calc(100dvh-1rem)] lg:rounded-lg lg:border lg:border-slate-300 lg:pt-3 lg:shadow-sm"
         >
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          {/* Stays on screen while the page is scrolled, so Close is always in reach. */}
+          <div className="sticky top-0 z-10 -mx-3 mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-2 lg:static lg:mx-0 lg:border-0 lg:p-0">
             <h2 id="register-reader-heading" ref={readerHeading} tabIndex={-1} className="text-base font-semibold text-slate-900 focus:outline-none">
               Requirements Book · <span className="font-mono">{reading.clause.printed_ref}</span>
             </h2>

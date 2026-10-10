@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/book', label: 'Book', group: 'rules' },
   { to: '/specs', label: 'Spec sheet', group: 'rules' },
   { to: '/files', label: 'Files', group: 'records', requires: 'attachmentsEnabled' },
+  { to: '/contacts', label: 'Contacts', group: 'records' },
   { to: '/archive', label: 'Archive', group: 'records' },
   { to: '/finances', label: 'Finances', group: 'admin', requires: 'canViewFinances' },
   { to: '/settings', label: 'Settings', group: 'admin' },

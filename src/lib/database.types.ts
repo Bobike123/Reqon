@@ -426,6 +426,98 @@ export type Database = {
           },
         ]
       }
+      contact_categories: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_categories_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          category_id: string
+          created_at: string
+          created_by: string | null
+          email: string | null
+          help: string
+          id: string
+          name: string
+          phone: string | null
+          title: string | null
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          help: string
+          id?: string
+          name: string
+          phone?: string | null
+          title?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          help?: string
+          id?: string
+          name?: string
+          phone?: string | null
+          title?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "contact_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       department_members: {
         Row: {
           added_at: string
@@ -2775,6 +2867,7 @@ export type Database = {
       }
       can_add_members: { Args: never; Returns: boolean }
       can_delete_records: { Args: never; Returns: boolean }
+      can_edit_contacts: { Args: never; Returns: boolean }
       can_edit_meetings: { Args: never; Returns: boolean }
       can_edit_spec_targets: { Args: never; Returns: boolean }
       can_edit_task: { Args: { p_task_id: string }; Returns: boolean }

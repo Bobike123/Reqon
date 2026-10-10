@@ -54,6 +54,14 @@ html:has(dialog[open]) {
   overflow: hidden;
 }
 
+/* Same for the Register's book reader, below the width where it becomes a
+   side pane and covers the whole screen instead. */
+@media (width < 64rem) {
+  html:has(.register-reader) {
+    overflow: hidden;
+  }
+}
+
 /* Short entrances, used sparingly: the tutorial card, the phone menu, the
    first-run tour offer, and messages that appear after an action. Never on
    every row of a list. */

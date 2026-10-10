@@ -26,6 +26,7 @@ export const CHAPTERS = [
   { id: 'book', label: 'Requirements Book' },
   { id: 'specs', label: 'Spec sheet' },
   { id: 'files', label: 'Files' },
+  { id: 'contacts', label: 'Contacts' },
   { id: 'archive', label: 'Archive' },
   { id: 'finances', label: 'Finances' },
   { id: 'settings', label: 'Settings and your account' },
@@ -384,6 +385,16 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     target: 'files-overview',
     title: 'Files — everything attached to a task',
     body: 'Every photo, PDF and video attached to a task this season, newest first. Filter by kind, search by file or task name, open one to view or save it. To add or remove a file, open its task on the Board.',
+  },
+
+  // ------------------------------------------------------------------ Contacts
+  {
+    id: 'contacts',
+    chapter: 'contacts',
+    route: '/contacts',
+    target: 'contacts-overview',
+    title: 'Contacts — who can help',
+    body: 'People who can help, by area: what each knows and how to reach them. Pick a category or search for a skill. Department Heads, the President and the Vice President keep it up to date.',
   },
 
   // ------------------------------------------------------------------- Archive

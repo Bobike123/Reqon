@@ -47,7 +47,7 @@ describe('main navigation', () => {
     // Now · daily work · planning · competition rules · records · admin. (Files shows only with attachments on,
     // Finances only for people who may see money.) Proposals and Meetings are two screens.
     expect(labels).toEqual([
-      'Now', 'Board', 'Priorities', 'Proposals', 'Meetings', 'Milestones', 'Gantt', 'Register', 'Book', 'Spec sheet', 'Archive', 'Settings',
+      'Now', 'Board', 'Priorities', 'Proposals', 'Meetings', 'Milestones', 'Gantt', 'Register', 'Book', 'Spec sheet', 'Contacts', 'Archive', 'Settings',
     ])
   })
 
@@ -55,7 +55,7 @@ describe('main navigation', () => {
     renderHeader()
     const nav = within(desktopNav())
     const divided = nav.getAllByRole('link').filter((a) => a.closest('li')?.className.includes('border-l')).map((a) => a.textContent)
-    expect(divided).toEqual(['Board', 'Milestones', 'Register', 'Archive', 'Settings'])
+    expect(divided).toEqual(['Board', 'Milestones', 'Register', 'Contacts', 'Settings'])
   })
 
   it('makes Settings reachable — before this it had no link from anywhere', () => {

@@ -294,11 +294,13 @@ export default function Board() {
 
       {/* Lanes render immediately and fill in; they are not swapped for a
           spinner, so an open select is never yanked away mid-change. */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 min-[75rem]:grid-cols-5" data-tutorial="board-lanes">
+      {/* On a phone the lanes sit side by side and swipe, the next one peeking
+          in, so "In progress" is not buried under every To do card. */}
+      <div className="-mx-3 flex snap-x snap-mandatory scroll-px-3 gap-3 overflow-x-auto overscroll-x-contain px-3 pb-2 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-3 min-[75rem]:grid-cols-5" data-tutorial="board-lanes">
         {LANES.map((lane) => {
           const laneTasks = visible.filter((t) => t.state === lane.state)
           return (
-            <section key={lane.state} className={`rounded-lg border p-2 ${lane.boardTone}`} aria-labelledby={`lane-${lane.state}`} data-testid={`lane-${lane.state}`}>
+            <section key={lane.state} className={`w-[85%] flex-none snap-start self-start rounded-lg border p-2 sm:w-auto sm:self-auto ${lane.boardTone}`} aria-labelledby={`lane-${lane.state}`} data-testid={`lane-${lane.state}`}>
               <h2 id={`lane-${lane.state}`} className="mb-2 text-xs font-semibold tracking-wide text-slate-700 uppercase">
                 {lane.label} <span className="font-normal text-slate-700">({laneTasks.length})</span>
               </h2>

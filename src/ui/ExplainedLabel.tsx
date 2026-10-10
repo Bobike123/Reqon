@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { LabelInfo } from '../clauses/labels.ts'
 
 // A small label whose meaning is one tap, click, Enter or focus away — never
@@ -19,6 +19,17 @@ export function ExplainedLabel({
   const [pinned, setPinned] = useState(false)
   const [transient, setTransient] = useState(false)
   const open = pinned || transient
+  const popover = useRef<HTMLSpanElement>(null)
+
+  // Keep the explanation on screen: a label near the right edge of a phone
+  // would otherwise push it past the edge and make the whole page scroll sideways.
+  useLayoutEffect(() => {
+    const el = popover.current
+    if (!el) return
+    el.style.transform = ''
+    const overflow = el.getBoundingClientRect().right - (document.documentElement.clientWidth - 8)
+    if (overflow > 0) el.style.transform = `translateX(-${overflow}px)`
+  }, [open])
 
   return (
     <span className="relative inline-block">
@@ -27,7 +38,12 @@ export function ExplainedLabel({
         aria-expanded={pinned}
         aria-describedby={descriptionId}
         data-testid={testId}
-        onClick={() => setPinned((value) => !value)}
+        // A tap also focuses (and, on touch, "hovers") the button, which would
+        // keep it open after a second tap meant to close it. The click decides.
+        onClick={() => {
+          setPinned((value) => !value)
+          setTransient(false)
+        }}
         onMouseEnter={() => setTransient(true)}
         onMouseLeave={() => setTransient(false)}
         onFocus={() => setTransient(true)}
@@ -50,6 +66,7 @@ export function ExplainedLabel({
       </span>
       {open && (
         <span
+          ref={popover}
           aria-hidden="true"
           data-testid={testId ? `${testId}-explanation` : undefined}
           className="absolute left-0 top-full z-20 mt-1 block w-64 max-w-[min(16rem,80vw)] rounded border border-slate-300 bg-white p-2 text-xs font-normal normal-case tracking-normal text-slate-800 shadow-md"
