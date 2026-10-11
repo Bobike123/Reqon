@@ -306,7 +306,7 @@ function DefaultAgenda({ canEdit, onSaved }: { canEdit: boolean; onSaved: (messa
         </p>
       )}
       <details className="mt-2">
-        <summary className="cursor-pointer text-xs font-medium text-slate-700 underline-offset-2 hover:underline">Show the default agenda</summary>
+        <summary className="cursor-pointer py-3 text-xs sm:py-0 font-medium text-slate-700 underline-offset-2 hover:underline">Show the default agenda</summary>
         <div className="mt-2 rounded border border-slate-100 bg-slate-50 p-2">
           {template.error ? (
             <ActionError error={template.error} />

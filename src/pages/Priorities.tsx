@@ -211,7 +211,7 @@ export default function Priorities() {
               ) : (
                 <Link
                   to={`/board?task=${encodeURIComponent(row.ref ?? '')}`}
-                  className="rounded text-xs font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                  className="inline-flex min-h-11 items-center rounded text-xs font-medium text-slate-700 underline underline-offset-2 sm:min-h-0 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
                 >
                   Open on Board
                 </Link>

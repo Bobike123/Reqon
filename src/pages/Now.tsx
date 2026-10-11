@@ -218,7 +218,7 @@ function BookUnitRow({
             aria-expanded={toggle.expanded}
             aria-controls={toggle.controls}
             aria-label={`${toggle.expanded ? 'Hide' : 'Show'} the parts of ${unit.label}`}
-            className="mt-0.5 shrink-0 rounded px-0.5 text-slate-500 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+            className="-mt-2.5 -ml-3 min-h-11 min-w-11 shrink-0 rounded px-0.5 text-slate-500 hover:text-slate-900 sm:mt-0.5 sm:ml-0 sm:min-h-0 sm:min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
           >
             <span aria-hidden="true" className={`inline-block transition-transform ${toggle.expanded ? 'rotate-90' : ''}`}>
               ▸

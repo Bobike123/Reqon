@@ -122,7 +122,7 @@ function FilesLibrary() {
                     {file.original_name}
                   </p>
                   <p className="truncate text-xs text-slate-600">
-                    <Link to={`/board?task=${file.task_id}`} className="underline underline-offset-2 hover:text-slate-900">
+                    <Link to={`/board?task=${file.task_id}`} className="inline-block py-1.5 underline underline-offset-2 hover:text-slate-900 sm:py-0">
                       {file.task_title}
                     </Link>
                   </p>

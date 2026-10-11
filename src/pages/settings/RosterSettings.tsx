@@ -401,7 +401,7 @@ export function RosterSettings() {
           {/* The older path, kept for a login that already exists — made in the
               Supabase dashboard, or left over from before this form. */}
           <details className="mt-2 border-t border-slate-200 pt-2">
-            <summary className="cursor-pointer text-xs font-medium text-slate-700">
+            <summary className="cursor-pointer py-3 text-xs font-medium text-slate-700 sm:py-0">
               Their login already exists? Link it by UUID
             </summary>
             <form onSubmit={submitMember} className="mt-2">

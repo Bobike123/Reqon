@@ -289,7 +289,7 @@ export function SpecHistory({
       ) : (
         <>
           <TrendChart spec={spec} rows={rows} />
-          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <div className="relative overflow-x-auto rounded-md border border-slate-200 bg-white">
             <table className="min-w-[48rem] w-full border-collapse text-left text-xs" data-testid={`history-table-${spec.id}`}>
               <caption className="sr-only">
                 Text alternative for {spec.parameter} progression. Project goal {projectGoalText(spec) ?? 'not set'};

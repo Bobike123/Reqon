@@ -180,7 +180,7 @@ export function SpecRow({
               <SpecThresholds spec={spec} />
             </div>
 
-            <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(28rem,1.2fr)] xl:items-start">
+            <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-3 xl:grid-cols-[minmax(18rem,0.8fr)_minmax(28rem,1.2fr)] xl:items-start">
               <div className="space-y-3">
                 {canMeasure ? (
                   <MeasurementEditor spec={spec} onRecord={onRecord} />
