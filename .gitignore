@@ -83,3 +83,4 @@ supabase/.backups/
 !ops/backup/docs/*.md
 
 ops
+.vercel

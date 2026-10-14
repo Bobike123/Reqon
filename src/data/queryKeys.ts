@@ -101,4 +101,6 @@ export const queryKeys = {
   attachmentUsage: ['attachment_usage'] as const,
   // What the backup workflow recorded (docs/ultraplan Phase 4); Board only, not season-scoped.
   backupRuns: ['backup_runs'] as const,
+  // The club's service logins (migration 20260136000000): labels and logins only, never a password. President / Developer.
+  clubCredentials: ['club_credentials'] as const,
 } as const

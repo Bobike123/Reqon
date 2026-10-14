@@ -426,6 +426,45 @@ export type Database = {
           },
         ]
       }
+      club_credentials: {
+        Row: {
+          has_secret: boolean | null
+          id: string
+          last_revealed_at: string | null
+          last_revealed_by: string | null
+          login: string
+          secret_id: string | null
+          service: string
+          sort_order: number
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          has_secret?: boolean | null
+          id?: string
+          last_revealed_at?: string | null
+          last_revealed_by?: string | null
+          login?: string
+          secret_id?: string | null
+          service: string
+          sort_order?: number
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          has_secret?: boolean | null
+          id?: string
+          last_revealed_at?: string | null
+          last_revealed_by?: string | null
+          login?: string
+          secret_id?: string | null
+          service?: string
+          sort_order?: number
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       department_members: {
         Row: {
           added_at: string
@@ -2796,6 +2835,7 @@ export type Database = {
         Returns: boolean
       }
       can_review_proposal: { Args: { p_proposal_id: string }; Returns: boolean }
+      can_view_club_credentials: { Args: never; Returns: boolean }
       can_view_finances: { Args: never; Returns: boolean }
       change_reason_detail: { Args: never; Returns: Json }
       clean_text: { Args: { p_text: string }; Returns: string }
@@ -3185,6 +3225,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      reveal_club_credential: { Args: { p_id: string }; Returns: string }
       review_proposal: {
         Args: {
           p_action: string
@@ -3320,6 +3361,10 @@ export type Database = {
       revoke_spec_readiness: {
         Args: { p_reason: string; p_spec_id: string }
         Returns: boolean
+      }
+      save_club_credential: {
+        Args: { p_id: string; p_login: string; p_secret?: string }
+        Returns: undefined
       }
       set_attachment_caption: {
         Args: { p_attachment_id: string; p_caption: string }

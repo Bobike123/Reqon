@@ -67,3 +67,41 @@ grant select on auth.users to authenticated, service_role;
 -- Realtime publication: schema.sql adds tables to it inside an exception
 -- handler, so creating it here means that code path is actually exercised.
 do $$ begin create publication supabase_realtime; exception when duplicate_object then null; end $$;
+
+-- Supabase Vault stand-in. A real project encrypts vault.secrets with a key outside the
+-- database; this stub keeps the text in the clear because it only ever lives in a disposable
+-- test container. It mirrors just the surface migration 20260136000000 (club accounts) uses:
+-- create_secret, update_secret and the decrypted_secrets view. Skipped when the real extension
+-- is present.
+do $vault$
+begin
+  if exists (select 1 from pg_extension where extname = 'supabase_vault') then
+    return;
+  end if;
+  create schema if not exists vault;
+  create table if not exists vault.secrets (
+    id          uuid primary key default gen_random_uuid(),
+    name        text unique,
+    description text not null default '',
+    secret      text not null,
+    created_at  timestamptz not null default now(),
+    updated_at  timestamptz not null default now()
+  );
+  create or replace view vault.decrypted_secrets as
+    select id, name, description, secret, secret as decrypted_secret, created_at, updated_at from vault.secrets;
+  create or replace function vault.create_secret(new_secret text, new_name text default null,
+    new_description text default '', new_key_id uuid default null) returns uuid
+  language sql as $fn$
+    insert into vault.secrets (secret, name, description) values (new_secret, new_name, coalesce(new_description, ''))
+    returning id;
+  $fn$;
+  create or replace function vault.update_secret(secret_id uuid, new_secret text default null,
+    new_name text default null, new_description text default null, new_key_id uuid default null) returns void
+  language sql as $fn$
+    update vault.secrets
+       set secret = coalesce(new_secret, secret), name = coalesce(new_name, name),
+           description = coalesce(new_description, description), updated_at = now()
+     where id = secret_id;
+  $fn$;
+end
+$vault$;

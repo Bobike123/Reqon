@@ -68,6 +68,16 @@ describe('the permission matrix', () => {
     expect(NO_PERMISSIONS.canAddMembers).toBe(false)
   })
 
+  // can_view_club_credentials() (20260136000000): the club's service passwords. Deliberately narrower than
+  // is_admin(): the Vice President is not included.
+  it('only the President and the Developer open the club accounts', () => {
+    const viewers = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
+      .filter((r) => permissionsFor([r]).canViewClubCredentials)
+    expect(viewers).toEqual(['developer', 'president'])
+    expect(permissionsFor([]).canViewClubCredentials).toBe(false)
+    expect(NO_PERMISSIONS.canViewClubCredentials).toBe(false)
+  })
+
   it('the President, the Vice President and the Developer open role management', () => {
     const managers = (['developer', 'treasurer', 'president', 'vicepresident', 'documentation'] as PrivilegedRole[])
       .filter((r) => permissionsFor([r]).canManageRoles)

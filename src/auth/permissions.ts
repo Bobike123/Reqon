@@ -85,6 +85,9 @@ export type Permissions = {
   canManageRoles: boolean
   // can_manage_seasons(): create, edit and switch seasons (President, Developer)
   canManageSeasons: boolean
+  // can_view_club_credentials() (20260136000000): open Settings → Club accounts, copy the club's service
+  // passwords and change them (President, Developer). Deliberately not the Vice President.
+  canViewClubCredentials: boolean
   // can_manage_milestone_structure(): create, rename and delete milestone
   // sections (President, Vice President, Developer, Documentation)
   canManageMilestoneStructure: boolean
@@ -132,6 +135,7 @@ export function permissionsFor(roles: readonly PrivilegedRole[]): Permissions {
     canAddMembers: hasRole('president') || hasRole('vicepresident') || hasRole('developer'),
     canManageRoles: admin,
     canManageSeasons: mayDelete,
+    canViewClubCredentials: hasRole('president') || hasRole('developer'),
     canManageMilestoneStructure: editsMeetings,
     canViewFinances: hasRole('president') || hasRole('vicepresident') || hasRole('treasurer') || hasRole('developer'),
     canManageFinances: hasRole('treasurer') || hasRole('developer'),

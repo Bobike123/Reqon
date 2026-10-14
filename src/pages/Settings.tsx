@@ -15,6 +15,7 @@ import { StorageUsage } from '../attachments/StorageUsage.tsx'
 import { backupsEnabled } from '../backups/flag.ts'
 import { BackupsGuide } from '../backups/BackupsGuide.tsx'
 import { BackupsPanel } from '../backups/BackupsPanel.tsx'
+import { ClubAccountsPanel } from '../credentials/ClubAccounts.tsx'
 
 // The route shell (Phase 6 §6.1): coordinates only what genuinely is shared
 // between sections — the page chrome, and the one capability summary that
@@ -75,7 +76,7 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 export default function Settings() {
-  const { canAdminister, canManageRoles, canManageDepartments, canManageSeasons, roles: myRoles } = usePermissions()
+  const { canAdminister, canManageRoles, canManageDepartments, canManageSeasons, canViewClubCredentials, roles: myRoles } = usePermissions()
   const restriction = canManageRoles && canManageSeasons
     ? null
     : canManageRoles
@@ -134,6 +135,12 @@ export default function Settings() {
           <div className="mt-3">
             <BackupsGuide defaultAudience={myRoles.includes('developer') ? 'developer' : 'leaders'} />
           </div>
+        </Section>
+      )}
+
+      {canViewClubCredentials && (
+        <Section title="Club accounts">
+          <ClubAccountsPanel />
         </Section>
       )}
 
