@@ -81,7 +81,11 @@ beforeEach(() => {
     row({ id: 'c3', service: 'Vercel', login: '', has_secret: false, sort_order: 30 }),
   ]
   h.rpc.mockReset()
-  h.rpc.mockImplementation(async (name: string) => (name === 'reveal_club_credential' ? { data: SECRET, error: null } : { data: null, error: null }))
+  h.rpc.mockImplementation(async (name: string) => {
+    if (name === 'reveal_club_credential') return { data: SECRET, error: null }
+    if (name === 'add_club_credential') return { data: 'new-id', error: null }
+    return { data: null, error: null }
+  })
   h.copy.mockReset()
   h.copy.mockImplementation(async (text: unknown) => {
     h.copied = await (text as string | Promise<string>)
@@ -218,6 +222,60 @@ describe('Settings → Club accounts', () => {
     await user.click(within(cloudflare).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByTestId('edit-cloudflare')).not.toBeInTheDocument()
     expect(h.rpc).not.toHaveBeenCalled()
+  })
+
+  it('adds an account with a login and password, then confirms', async () => {
+    const user = await open()
+    await user.click(screen.getByTestId('add-account-open'))
+    const form = screen.getByTestId('add-account-form')
+    const submit = within(form).getByRole('button', { name: 'Add account' })
+    expect(submit).toBeDisabled()
+
+    await user.type(within(form).getByLabelText('Account name'), '  GitHub ')
+    expect(submit).toBeEnabled()
+    await user.type(within(form).getByLabelText(/Login/), ' gh@example.test ')
+    await user.type(within(form).getByLabelText(/Password/), 'Fixture-Gh-1')
+    expect(within(form).getByLabelText(/Password/)).toHaveAttribute('type', 'password')
+    await user.click(submit)
+
+    await waitFor(() =>
+      expect(h.rpc).toHaveBeenCalledWith('add_club_credential', { p_service: 'GitHub', p_login: 'gh@example.test', p_secret: 'Fixture-Gh-1' }),
+    )
+    expect(await screen.findByTestId('added-note')).toHaveTextContent('Added GitHub.')
+    expect(screen.queryByTestId('add-account-form')).not.toBeInTheDocument()
+    expect(document.body.innerHTML).not.toContain('Fixture-Gh-1')
+  })
+
+  it('adds an account without a password (none is sent)', async () => {
+    const user = await open()
+    await user.click(screen.getByTestId('add-account-open'))
+    const form = screen.getByTestId('add-account-form')
+    await user.type(within(form).getByLabelText('Account name'), 'Google Drive')
+    await user.click(within(form).getByRole('button', { name: 'Add account' }))
+    await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('add_club_credential', { p_service: 'Google Drive', p_login: '' }))
+  })
+
+  it('shows the database’s reason when the name already exists, and keeps what was typed', async () => {
+    h.rpc.mockResolvedValue({ data: null, error: { code: '23505', message: 'There is already an account called Vercel.' } })
+    const user = await open()
+    await user.click(screen.getByTestId('add-account-open'))
+    const form = screen.getByTestId('add-account-form')
+    await user.type(within(form).getByLabelText('Account name'), 'Vercel')
+    await user.click(within(form).getByRole('button', { name: 'Add account' }))
+    expect(await within(form).findByRole('alert')).toHaveTextContent('There is already an account called Vercel.')
+    expect(within(form).getByLabelText('Account name')).toHaveValue('Vercel')
+    expect(screen.queryByTestId('added-note')).not.toBeInTheDocument()
+  })
+
+  it('cancels adding without calling the database and starts blank next time', async () => {
+    const user = await open()
+    await user.click(screen.getByTestId('add-account-open'))
+    await user.type(within(screen.getByTestId('add-account-form')).getByLabelText('Account name'), 'Never saved')
+    await user.click(within(screen.getByTestId('add-account-form')).getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('add-account-form')).not.toBeInTheDocument()
+    expect(h.rpc).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('add-account-open'))
+    expect(within(screen.getByTestId('add-account-form')).getByLabelText('Account name')).toHaveValue('')
   })
 
   it('reports a list that could not be loaded', async () => {

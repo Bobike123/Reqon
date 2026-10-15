@@ -2582,6 +2582,10 @@ export type Database = {
       }
     }
     Functions: {
+      add_club_credential: {
+        Args: { p_login?: string; p_secret?: string; p_service: string }
+        Returns: string
+      }
       add_department_member: {
         Args: {
           p_member_id: string

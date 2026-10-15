@@ -1,5 +1,11 @@
 import { useId, useState, type FormEvent } from 'react'
-import { revealClubCredential, useClubCredentials, useSaveClubCredential, type ClubCredential } from '../data/useClubCredentials.ts'
+import {
+  revealClubCredential,
+  useAddClubCredential,
+  useClubCredentials,
+  useSaveClubCredential,
+  type ClubCredential,
+} from '../data/useClubCredentials.ts'
 import { useMembers } from '../data/useMembers.ts'
 import { formatInstant } from '../lib/dates.ts'
 import { buttonPrimary, buttonSecondary } from '../ui/buttons.ts'
@@ -72,12 +78,130 @@ function AccountsContent({ onClose }: { onClose: () => void }) {
         </ul>
       )}
 
+      {accounts.data && <AddAccount />}
+
       <div className="flex justify-end">
         <button type="button" className={buttonPrimary} onClick={onClose} data-testid="club-accounts-close">
           Close
         </button>
       </div>
     </div>
+  )
+}
+
+// "Add an account": a service that is not on the list yet (GitHub, Google Drive, a domain registrar, ...).
+// Name and login are plain text; the password is optional and can be added later with "Change login or password".
+function AddAccount() {
+  const ids = useId()
+  const add = useAddClubCredential()
+  const [open, setOpen] = useState(false)
+  const [service, setService] = useState('')
+  const [login, setLogin] = useState('')
+  const [secret, setSecret] = useState('')
+  const [added, setAdded] = useState<string | null>(null)
+
+  const reset = () => {
+    setOpen(false)
+    setService('')
+    setLogin('')
+    setSecret('')
+    add.reset()
+  }
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    const name = service.trim()
+    if (add.isPending || name === '') return
+    add.mutate(
+      { service: name, login: login.trim(), secret },
+      {
+        onSuccess: () => {
+          setAdded(name)
+          reset()
+        },
+      },
+    )
+  }
+
+  if (!open) {
+    return (
+      <div className="space-y-2">
+        {added && (
+          <p role="status" className="text-xs text-green-800" data-testid="added-note">
+            Added {added}.
+          </p>
+        )}
+        <button
+          type="button"
+          className={buttonSecondary}
+          onClick={() => {
+            setAdded(null)
+            setOpen(true)
+          }}
+          data-testid="add-account-open"
+        >
+          Add an account
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded border border-slate-200 bg-slate-50 p-3" data-testid="add-account-form">
+      <h3 className="text-sm font-medium text-slate-900">Add an account</h3>
+      <div>
+        <label htmlFor={`${ids}-service`} className="text-xs font-medium text-slate-700">
+          Account name
+        </label>
+        <input
+          id={`${ids}-service`}
+          className={input}
+          value={service}
+          onChange={(e) => setService(e.target.value)}
+          maxLength={60}
+          placeholder="For example GitHub"
+          autoComplete="off"
+        />
+      </div>
+      <div>
+        <label htmlFor={`${ids}-login`} className="text-xs font-medium text-slate-700">
+          Login (e-mail or username)
+        </label>
+        <input
+          id={`${ids}-login`}
+          className={input}
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
+          maxLength={200}
+          autoComplete="off"
+          spellCheck={false}
+        />
+      </div>
+      <div>
+        <label htmlFor={`${ids}-secret`} className="text-xs font-medium text-slate-700">
+          Password (optional)
+        </label>
+        <input
+          id={`${ids}-secret`}
+          type="password"
+          className={input}
+          value={secret}
+          onChange={(e) => setSecret(e.target.value)}
+          maxLength={500}
+          autoComplete="new-password"
+        />
+        <p className="mt-1 text-xs text-slate-600">It is stored encrypted and can only be copied afterwards, not read.</p>
+      </div>
+      <ActionError error={add.error} />
+      <div className="flex flex-wrap gap-2">
+        <button type="submit" className={buttonPrimary} disabled={add.isPending || service.trim() === ''}>
+          {add.isPending ? 'Adding…' : 'Add account'}
+        </button>
+        <button type="button" className={buttonSecondary} onClick={reset} disabled={add.isPending}>
+          Cancel
+        </button>
+      </div>
+    </form>
   )
 }
 

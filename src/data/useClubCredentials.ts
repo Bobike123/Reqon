@@ -41,6 +41,24 @@ export async function revealClubCredential(id: string): Promise<string> {
   return data
 }
 
+// Add a service to the list. The password may be left empty and added later.
+export function useAddClubCredential() {
+  const queryClient = useQueryClient()
+  return useMutation<string, Error, { service: string; login: string; secret: string }>({
+    mutationFn: async ({ service, login, secret }) => {
+      const { data, error } = await supabase.rpc('add_club_credential', {
+        p_service: service,
+        p_login: login,
+        ...(secret === '' ? {} : { p_secret: secret }),
+      })
+      if (error) throw new DataError('add an account', error)
+      if (typeof data !== 'string') throw new DataError('add an account: the server sent no answer', null)
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.clubCredentials }),
+  })
+}
+
 // Change the login and/or the password. An empty password keeps the saved one.
 export function useSaveClubCredential() {
   const queryClient = useQueryClient()

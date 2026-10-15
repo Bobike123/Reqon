@@ -71,6 +71,14 @@ create or replace function pg_temp.save(who uuid, cid uuid, lg text, sec text) r
     format('select ''saved'' from (select save_club_credential(%L, %L, %L)) t', cid, lg, sec));
 $fn$;
 
+create or replace function pg_temp.add(who uuid, nm text, lg text, sec text) returns text language sql as $fn$
+  select pg_temp.scalar_as('authenticated', who, format('select add_club_credential(%L, %L, %L)::text', nm, lg, sec));
+$fn$;
+
+create or replace function pg_temp.is_uuid(x text) returns text language sql as $fn$
+  select (x ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')::text;
+$fn$;
+
 create temp table results (n serial, label text, got text, expected text);
 create or replace function pg_temp.expect(label text, got text, expected text) returns void
 language sql as $fn$ insert into pg_temp.results (label, got, expected) values (label, got, expected); $fn$;
@@ -81,6 +89,8 @@ declare
   tre uuid := gen_random_uuid(); mem uuid := gen_random_uuid(); alum_dev uuid := gen_random_uuid();
   outs uuid := gen_random_uuid();
   one uuid; empty uuid;
+  added uuid; added2 uuid; added3 uuid;
+  vault_before bigint; rows_before bigint;
   who uuid;
   r text; rows_total text;
   total int; bad int; report text;
@@ -185,6 +195,65 @@ begin
   perform pg_temp.expect('a login of exactly 200 is fine', pg_temp.save(pre, one, repeat('a', 200), null), 'saved');
   perform pg_temp.expect('a password of exactly 500 is fine', pg_temp.save(pre, one, 'x', repeat('p', 500)), 'saved');
   perform pg_temp.expect('and comes back whole', pg_temp.reveal(pre, one), repeat('p', 500));
+
+  -- ===================================================================== adding accounts
+  select count(*) into rows_before from club_credentials;
+  foreach who in array array[vp, tre, mem, alum_dev, outs] loop
+    perform pg_temp.expect('add is refused without the gate (' || who || ')', pg_temp.add(who, 'Sneaky ' || who, 'x@y.test', 'Hacked-2'), 'DENIED');
+  end loop;
+  perform pg_temp.expect('anon cannot add', pg_temp.scalar_as('anon', null, 'select add_club_credential(''Anon'')::text'), 'DENIED');
+  perform pg_temp.expect('nobody writes a row by insert either', pg_temp.attempt(pre, 'insert into club_credentials (service) values (''Direct'')'), 'DENIED');
+  perform pg_temp.expect('refused adds created no rows', (select count(*)::text from club_credentials), rows_before::text);
+
+  r := pg_temp.add(pre, '  GitHub  ', '  gh@example.test ', 'Fixture-Gh-1');
+  perform pg_temp.expect('the President adds an account with a password', pg_temp.is_uuid(r), 'true');
+  added := r::uuid;
+  select (service = 'GitHub' and login = 'gh@example.test' and has_secret and updated_by = pre and updated_at is not null
+          and sort_order > (select max(sort_order) from club_credentials where id <> added))::text into r
+    from club_credentials where id = added;
+  perform pg_temp.expect('the row has a trimmed name and login, a password, who added it, and goes last', r, 'true');
+  perform pg_temp.expect('its password comes out through reveal', pg_temp.reveal(dev, added), 'Fixture-Gh-1');
+  select (to_jsonb(c)::text like '%Fixture-Gh-1%')::text into r from club_credentials c where id = added;
+  perform pg_temp.expect('and is not in the row itself', r, 'false');
+  perform pg_temp.expect('browsers see the new row', pg_temp.scalar_as('authenticated', dev, format('select service from club_credentials where id = %L', added)), 'GitHub');
+
+  r := pg_temp.add(dev, 'Google Drive', '', null);
+  perform pg_temp.expect('a Developer adds an account with no password', pg_temp.is_uuid(r), 'true');
+  added2 := r::uuid;
+  select (not has_secret and login = '')::text into r from club_credentials where id = added2;
+  perform pg_temp.expect('it starts empty', r, 'true');
+  select count(*)::text into r from vault.secrets where name = 'club_credential:' || added2::text;
+  perform pg_temp.expect('and nothing was stored in Vault for it', r, '0');
+  perform pg_temp.expect('revealing it says there is no password yet', pg_temp.reveal(pre, added2), 'ERROR P0002%');
+
+  r := pg_temp.add(pre, 'Domain registrar', 'who@example.test', '');
+  perform pg_temp.expect('a blank password is the same as none', pg_temp.is_uuid(r), 'true');
+  added3 := r::uuid;
+  select (not has_secret)::text into r from club_credentials where id = added3;
+  perform pg_temp.expect('...no Vault entry', r, 'true');
+  perform pg_temp.expect('a password can be added to it later', pg_temp.save(pre, added3, 'who@example.test', 'Fixture-Dr-1'), 'saved');
+  perform pg_temp.expect('and then it reveals', pg_temp.reveal(pre, added3), 'Fixture-Dr-1');
+
+  -- ---- refusals: every one of them must leave Vault and the table exactly as they were
+  select count(*) into vault_before from vault.secrets;
+  select count(*) into rows_before from club_credentials;
+  perform pg_temp.expect('a name that exists is refused, whatever its capitals', pg_temp.add(pre, 'github', 'x', 'Orphan-1'), 'ERROR 23505%');
+  perform pg_temp.expect('a seeded name is refused too', pg_temp.add(pre, 'CLOUDFLARE', 'x', 'Orphan-2'), 'ERROR 23505%');
+  perform pg_temp.expect('a blank name is refused', pg_temp.add(pre, '   ', 'x', 'Orphan-3'), 'ERROR 22023%');
+  perform pg_temp.expect('a missing name is refused', pg_temp.add(pre, null, 'x', 'Orphan-4'), 'ERROR 22023%');
+  perform pg_temp.expect('a name over 60 characters is refused', pg_temp.add(pre, repeat('n', 61), 'x', 'Orphan-5'), 'ERROR 22023%');
+  perform pg_temp.expect('a login over 200 characters is refused', pg_temp.add(pre, 'Long login', repeat('a', 201), 'Orphan-6'), 'ERROR 22023%');
+  perform pg_temp.expect('a password over 500 characters is refused', pg_temp.add(pre, 'Long password', 'x', repeat('p', 501)), 'ERROR 22023%');
+  perform pg_temp.expect('refused adds left no row', (select count(*)::text from club_credentials), rows_before::text);
+  perform pg_temp.expect('refused adds left nothing in Vault', (select count(*)::text from vault.secrets), vault_before::text);
+  perform pg_temp.expect('a name of exactly 60 characters is fine', pg_temp.is_uuid(pg_temp.add(pre, repeat('n', 60), '', null)), 'true');
+
+  -- ---- the cap of 30
+  insert into club_credentials (service)
+    select 'Filler ' || g from generate_series(1, greatest(30 - (select count(*)::int from club_credentials), 0)) g;
+  select count(*) into vault_before from vault.secrets;
+  perform pg_temp.expect('a full list refuses another account', pg_temp.add(pre, 'One too many', 'x', 'Orphan-7'), 'ERROR 54000%');
+  perform pg_temp.expect('...without storing its password', (select count(*)::text from vault.secrets), vault_before::text);
 
   -- ================================================================================ verdict
   select count(*), count(*) filter (where not (got like expected)),
